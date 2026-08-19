@@ -11,6 +11,14 @@ export default async function LoginPage({
   searchParams: Promise<{ next?: string; reset?: string; error?: string }>;
 }) {
   const { next, reset, error } = await searchParams;
+  // Convidado sem conta ainda: "Fazer login" no aceite de convite manda pra cá
+  // com next=/team/accept-invite/<token>. Sem repassar o token pro /signup, a
+  // confirmação de e-mail provisiona uma organização NOVA em vez de entrar na
+  // do convite (ver comentário em app/actions/auth/signUp.ts).
+  const inviteTokenFromNext = next?.match(/^\/team\/accept-invite\/([^/?]+)$/)?.[1];
+  const signupHref = inviteTokenFromNext
+    ? `/signup?invite=${encodeURIComponent(inviteTokenFromNext)}`
+    : "/signup";
   return (
     <div className="space-y-6">
       <div className="space-y-1.5 text-center">
@@ -56,7 +64,7 @@ export default async function LoginPage({
         <p className="text-muted-foreground">
           Não tem conta?{" "}
           <Link
-            href="/signup"
+            href={signupHref}
             className="font-medium text-foreground underline underline-offset-4"
           >
             Criar conta

@@ -3,6 +3,7 @@ import type { EmailOtpType } from "@supabase/supabase-js";
 
 import { createClient } from "@/lib/supabase/server";
 import { ensureTenantForUser } from "@/lib/auth/provision";
+import { verifyInviteToken } from "@/lib/auth/invite-token";
 import { audit } from "@/lib/audit";
 import { env } from "@/lib/env";
 
@@ -65,6 +66,28 @@ export async function GET(request: NextRequest) {
 
   if (type === "recovery") {
     return redirectTo("/login/reset");
+  }
+
+  // Confirmação veio de /signup?invite=<token> (link "Fazer login" → "Criar
+  // conta" do aceite de convite — ver app/actions/auth/signUp.ts): o
+  // convidado está entrando numa organização que JÁ EXISTE, então NÃO
+  // provisiona uma organização nova para ele. Só desvia quando o token é
+  // válido E o e-mail bate com quem acabou de confirmar — qualquer outro
+  // caso (token ausente, expirado, e-mail diferente) segue o fluxo normal
+  // de sempre, sem risco de regressão pro signup self-service comum.
+  const inviteToken = url.searchParams.get("invite");
+  if (inviteToken) {
+    const invite = verifyInviteToken(inviteToken);
+    const confirmedEmail = (data.user.email ?? "").trim().toLowerCase();
+    if (invite && invite.email.trim().toLowerCase() === confirmedEmail) {
+      void audit({
+        action: "auth.signup_confirmed",
+        actorUserId: data.user.id,
+        metadata: { via_invite: true, invite_id: invite.invite_id },
+        requestId,
+      });
+      return redirectTo(`/team/accept-invite/${inviteToken}`);
+    }
   }
 
   try {

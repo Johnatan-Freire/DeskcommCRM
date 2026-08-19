@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { signUp } from "@/app/actions/auth/signUp";
 
-export function SignupForm() {
+export function SignupForm({ inviteToken }: { inviteToken?: string }) {
   const [isPending, startTransition] = useTransition();
   const [serverError, setServerError] = useState<string | null>(null);
   const [sentTo, setSentTo] = useState<string | null>(null);
@@ -27,7 +27,7 @@ export function SignupForm() {
   const onSubmit = (values: SignupInput) => {
     setServerError(null);
     startTransition(async () => {
-      const res = await signUp(values);
+      const res = await signUp(values, inviteToken);
       if (res.ok) {
         setSentTo(values.email);
         return;

@@ -5,7 +5,12 @@ import { branding } from "@/lib/branding";
 
 export const metadata = { title: "Criar conta" };
 
-export default function SignupPage() {
+export default async function SignupPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ invite?: string }>;
+}) {
+  const { invite } = await searchParams;
   return (
     <div className="space-y-6">
       <div className="space-y-1.5 text-center">
@@ -14,7 +19,7 @@ export default function SignupPage() {
           Comece a usar o {branding().name} em minutos
         </p>
       </div>
-      <SignupForm />
+      <SignupForm inviteToken={invite} />
       <p className="text-center text-sm text-muted-foreground">
         Já tem conta?{" "}
         <Link href="/login" className="font-medium text-foreground underline underline-offset-4">

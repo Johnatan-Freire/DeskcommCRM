@@ -21,11 +21,20 @@ export type SignUpResult =
  * confirmação. O tenant só é provisionado quando o link é confirmado em
  * /auth/confirm (evita orgs órfãs de cadastros nunca confirmados).
  *
+ * `inviteToken`, quando presente (usuário veio de /team/accept-invite via
+ * /signup?invite=...), viaja dentro de `emailRedirectTo` até o e-mail de
+ * confirmação (o template usa `.RedirectTo` como base — ver
+ * supabase/templates/confirmation.html) e chega de volta em /auth/confirm.
+ * Sem isso, QUALQUER confirmação de e-mail provisiona uma organização nova
+ * (ensureTenantForUser) — inclusive pra quem só estava aceitando convite pra
+ * uma organização que já existe (issue real: convidado virou admin de uma
+ * org própria vazia em vez de entrar na organização do convite).
+ *
  * Anti-enumeração: e-mail já cadastrado recebe a MESMA resposta de sucesso —
  * o GoTrue devolve um usuário ofuscado (identities vazio) sem erro, e nós não
  * diferenciamos. Rate limit de envio de e-mail é do próprio GoTrue.
  */
-export async function signUp(input: SignupInput): Promise<SignUpResult> {
+export async function signUp(input: SignupInput, inviteToken?: string): Promise<SignUpResult> {
   const parsed = signupSchema.safeParse(input);
   if (!parsed.success) {
     return {
@@ -47,6 +56,10 @@ export async function signUp(input: SignupInput): Promise<SignUpResult> {
     return { ok: false, error: "rate_limited" };
   }
 
+  // Token cru (não verificado aqui de propósito — só precisa sobreviver à
+  // viagem pelo e-mail; /auth/confirm é quem verifica antes de confiar nele).
+  const inviteParam = inviteToken ? `&invite=${encodeURIComponent(inviteToken)}` : "";
+
   const supabase = await createClient();
   const { data, error } = await supabase.auth.signUp({
     email: parsed.data.email,
@@ -55,7 +68,7 @@ export async function signUp(input: SignupInput): Promise<SignUpResult> {
       // Ver comentário equivalente em requestPasswordReset.ts: ?type=signup
       // sobrevive ao redirect do GoTrue e é o que distingue este fluxo do de
       // recovery quando a verificação chega via `code` (PKCE), não `token_hash`.
-      emailRedirectTo: `${origin}/auth/confirm?type=signup`,
+      emailRedirectTo: `${origin}/auth/confirm?type=signup${inviteParam}`,
       data: { org_name: parsed.data.org_name },
     },
   });
