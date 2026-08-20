@@ -11,6 +11,7 @@ import { useClaimConversation } from "@/hooks/inbox/useClaimConversation";
 import { useReleaseConversation } from "@/hooks/inbox/useReleaseConversation";
 import { useCloseConversation } from "@/hooks/inbox/useCloseConversation";
 import { useResumeAiAttendance } from "@/hooks/inbox/useResumeAiAttendance";
+import { usePauseAiAttendance } from "@/hooks/inbox/usePauseAiAttendance";
 import { ReassignDialog } from "@/components/inbox/ReassignDialog";
 import { SnoozeButton } from "@/components/inbox/SnoozeButton";
 import type { ConversationWithContact } from "@/hooks/inbox/useConversationsRealtime";
@@ -41,6 +42,7 @@ export function ConversationHeader({ conversation }: Props) {
   const release = useReleaseConversation();
   const close = useCloseConversation();
   const retomar = useResumeAiAttendance();
+  const pausar = usePauseAiAttendance();
   const [reassignOpen, setReassignOpen] = useState(false);
 
   const c = conversation.contacts ?? null;
@@ -131,6 +133,20 @@ export function ConversationHeader({ conversation }: Props) {
             onClick={() => release.mutate({ conversation_id: conversation.id })}
           >
             {t("Liberar")}
+          </Button>
+        )}
+        {/* O oposto de "Devolver ao automático" — pausar na hora, sem precisar
+            digitar mensagem (que só silencia 5min) nem esperar a IA decidir
+            fazer handoff sozinha. Mutuamente exclusivo com o botão de volta. */}
+        {!emAtendimentoHumano && status !== "closed" && status !== "archived" && (
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={pausar.isPending}
+            data-testid="pausar-automatico"
+            onClick={() => pausar.mutate({ conversation_id: conversation.id })}
+          >
+            {pausar.isPending ? "Pausando..." : t("Pausar automático")}
           </Button>
         )}
         {/* A volta. Fica ANTES de transferir/fechar porque é a ação que a pessoa

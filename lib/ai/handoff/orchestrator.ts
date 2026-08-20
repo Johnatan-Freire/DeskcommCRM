@@ -30,7 +30,9 @@ export type HandoffReason =
   | "low_confidence"
   | "critical_stage"
   | "legal_mention"
-  | "refund_mention";
+  | "refund_mention"
+  /** Um atendente pausou a conversa pelo botão da tela — nenhum gatilho automático. */
+  | "manual_pause";
 
 export interface TriggerHandoffInput {
   conversationId: string;
