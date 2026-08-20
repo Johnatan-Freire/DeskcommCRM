@@ -36,6 +36,17 @@ export interface LeadContextKnobs {
 /** Uma mensagem do histórico, já curada. */
 export interface LeadContextMessage {
   direction: 'inbound' | 'outbound';
+  /**
+   * QUEM mandou o lado outbound — `undefined` em inbound (não se aplica).
+   * Sem isto, uma mensagem que um atendente digitou manualmente do celular
+   * chega ao modelo indistinguível de algo que ELE MESMO teria dito antes:
+   * caso real desta VPS, o dono respondeu pessoalmente "Te amo" numa
+   * conversa de teste, e o agente — lendo isso como fala própria — decidiu
+   * sozinho passar o atendimento pra um humano, turno após turno, porque
+   * "eu já disse algo estranho aqui" é sinal forte demais pra qualquer
+   * instrução de prompt sobrepor.
+   */
+  sender_kind?: 'ai' | 'human_agent';
   /** Corpo textual; mídia usa o derivado (transcrição/visão/pdf) ou marcador [tipo]. */
   body: string;
   sent_at: string;
@@ -151,6 +162,7 @@ interface HistoryRow {
   media_mime: string | null;
   media_derived_text: string | null;
   sent_at: string;
+  sent_via: string | null;
 }
 
 export async function getLeadContext(
@@ -208,7 +220,7 @@ export async function getLeadContext(
     ? (
         await db.query<HistoryRow>(
           `select direction, type, body, media_url, media_storage_path, media_mime,
-                  media_derived_text, sent_at::text as sent_at
+                  media_derived_text, sent_at::text as sent_at, sent_via
            from messages
            where organization_id = $1 and conversation_id = $2
              and direction in ('inbound', 'outbound')
@@ -272,6 +284,10 @@ function fitToBudget(
       : (m.body ?? (hasMedia ? `[${m.type}]` : ''));
     return {
       direction: m.direction,
+      // inbound não tem sender_kind (é sempre o lead); outbound é 'ai' só
+      // quando o próprio agente mandou — qualquer outro valor de sent_via
+      // (external_device, crm, etc.) foi um humano digitando, não o modelo.
+      ...(m.direction === 'outbound' ? { sender_kind: m.sent_via === 'ai' ? ('ai' as const) : ('human_agent' as const) } : {}),
       body,
       sent_at: m.sent_at,
       ...(hasMedia ? { type: m.type, media_storage_path: m.media_storage_path, media_mime: m.media_mime } : {}),

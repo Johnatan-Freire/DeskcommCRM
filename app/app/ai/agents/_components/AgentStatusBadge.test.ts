@@ -28,14 +28,21 @@ describe("deriveAgentStatus", () => {
     expect(deriveAgentStatus({ ...base, published_version_id: "v1", is_active: false } as AgentRow)).toBe("paused");
   });
 
-  it("mcp_agent publicado é PUBLICADO mesmo com is_active false", () => {
-    // `is_active` é semântica do rag_bot legado. Para mcp_agent os dois runtimes
-    // (lib/ai/dispatcher e lib/agent-engine/agent/agent-config) resolvem o agente
-    // só por published_version_id + archived_at — nenhum dos dois lê is_active.
-    // Lendo a coluna aqui, o badge dizia "Pausado" para um agente que está no ar,
-    // e o menu não oferecia saída: "Despausar" fica disabled para mcp_agent e
-    // unpauseAgentAction recusa com publish_required. Republicar também não
-    // liberava, porque fn_publish_ai_agent_version não toca is_active.
+  it("mcp_agent publicado e inativo é PAUSADO — igual ao rag_bot agora", () => {
+    // is_active passou a valer pros dois kinds (antes só o rag_bot lia essa
+    // coluna, e os dois runtimes de dispatch — lib/ai/dispatcher e
+    // lib/agent-engine/agent/agent-config — ignoravam is_active pra
+    // mcp_agent). O design antigo evitava mostrar "Pausado" sem saída pela UI
+    // (Despausar ficava disabled, unpauseAgentAction recusava com
+    // publish_required) — mas o preço foi pior: "Pausar" continuava
+    // funcionando pra mcp_agent, só que DESPUBLICANDO de verdade
+    // (published_version_id = null), e a volta exigia reverter para uma
+    // versão anterior, que por sua vez exige o canal WhatsApp online. Caso
+    // real: dois agentes de produção ficaram fora do ar até o número
+    // reconectar, só porque alguém clicou "Pausar" pra testar o botão. Agora
+    // pausar é só is_active=false (published_version_id intacto), e os dois
+    // runtimes de dispatch respeitam a coluna — pausa e retomada instantâneas,
+    // sem tocar em versão nem depender de canal online.
     expect(
       deriveAgentStatus({
         ...base,
@@ -43,7 +50,7 @@ describe("deriveAgentStatus", () => {
         published_version_id: "v1",
         is_active: false,
       } as AgentRow),
-    ).toBe("published");
+    ).toBe("paused");
   });
 
   it("arquivado vence tudo", () => {
