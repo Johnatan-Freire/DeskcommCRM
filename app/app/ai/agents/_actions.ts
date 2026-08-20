@@ -60,6 +60,36 @@ export async function pauseAgentAction(id: string): Promise<ActionResult> {
   const requestId = randomUUID();
   const previousVersionId = (existing as { published_version_id: string | null }).published_version_id;
 
+  // mcp_agent: pausa é SÓ is_active=false, sem tocar em published_version_id.
+  // loadPublishedAgentConfig/loadPublishedAgentConfigById (agent-config.ts)
+  // agora filtram por is_active pros dois kinds — o agente some do ar na hora
+  // e volta na hora com unpauseAgentAction, sem exigir republish nem canal
+  // online (o design anterior despublicava e a volta batia em
+  // channel_session_offline se o WhatsApp estivesse fora do ar — incidente
+  // real desta VPS, dois agentes ficaram fora do ar até o número reconectar).
+  if (existing.kind === "mcp_agent") {
+    const { error } = await admin
+      .from("ai_agents")
+      .update({ is_active: false, updated_at: new Date().toISOString() })
+      .eq("id", id)
+      .eq("organization_id", activeOrg.orgId);
+    if (error) return { ok: false, error: "internal_error", message: error.message };
+
+    void audit({
+      action: "ai_agent.paused",
+      actorUserId: authUser.id,
+      organizationId: activeOrg.orgId,
+      resourceType: "ai_agent",
+      resourceId: id,
+      requestId,
+      metadata: { via: "is_active", published_version_id: previousVersionId },
+    });
+
+    revalidatePath("/app/ai/agents");
+    return { ok: true };
+  }
+
+  // rag_bot legado: comportamento de sempre (pausar = despublicar).
   if (previousVersionId) {
     await admin
       .from("ai_agent_versions")
@@ -69,16 +99,9 @@ export async function pauseAgentAction(id: string): Promise<ActionResult> {
       .eq("status", "published");
   }
 
-  const updates: Record<string, unknown> = {
-    updated_at: new Date().toISOString(),
-    published_version_id: null,
-  };
-  // Legacy rag_bot: também flip is_active para refletir no badge.
-  if (existing.kind !== "mcp_agent") updates.is_active = false;
-
   const { error } = await admin
     .from("ai_agents")
-    .update(updates)
+    .update({ updated_at: new Date().toISOString(), published_version_id: null, is_active: false })
     .eq("id", id)
     .eq("organization_id", activeOrg.orgId);
   if (error) return { ok: false, error: "internal_error", message: error.message };
@@ -113,11 +136,6 @@ export async function unpauseAgentAction(id: string): Promise<ActionResult> {
 
   if (!existing) return { ok: false, error: "not_found" };
   if (existing.archived_at) return { ok: false, error: "state_conflict" };
-
-  // mcp_agent não pode ser despausado por aqui — precisa ir em /publish escolhendo versão.
-  if (existing.kind === "mcp_agent") {
-    return { ok: false, error: "publish_required", message: "Publique uma versão para reativar." };
-  }
 
   const { error } = await admin
     .from("ai_agents")

@@ -236,6 +236,7 @@ export function CRMSidePanel({ conversation }: Props) {
    */
   const [erro, setErro] = useState(false);
   const [tentativa, setTentativa] = useState(0);
+  const [atividadesExpandidas, setAtividadesExpandidas] = useState<Set<string>>(new Set());
 
   const [tagEditorOpen, setTagEditorOpen] = useState(false);
   const [leadDialogOpen, setLeadDialogOpen] = useState(false);
@@ -531,31 +532,59 @@ export function CRMSidePanel({ conversation }: Props) {
           <Skeleton className="mt-2 h-14 w-full" />
         ) : activities && activities.length > 0 ? (
           <ul className="mt-2 space-y-1.5">
-            {activities.map((a) => (
-              <li key={a.id} className="rounded-md border border-border p-2 text-xs">
-                {/* Rótulo do vocabulário único (activity-vocabulary), nunca o
-                    tipo cru: a tela e o banco divergiram justamente por manter
-                    duas listas. Marcador por ator, forma e não cor (§5). */}
-                <div className="flex items-center gap-1.5 font-medium">
-                  <span
-                    className={cn(
-                      "h-2 w-2 shrink-0",
-                      actorShape(a.actor_kind) === "filled" && "rounded-full bg-accent",
-                      actorShape(a.actor_kind) === "ring" &&
-                        "rounded-full border border-accent bg-surface",
-                      actorShape(a.actor_kind) === "dashed" &&
-                        "rounded-full border border-dashed border-border-strong",
-                    )}
-                    aria-hidden
-                  />
-                  {activityLabel(a.type)}
-                </div>
-                {a.reason && <div className="mt-0.5 truncate text-muted-foreground">{a.reason}</div>}
-                <div className="text-muted-foreground">
-                  {actorLabel(a.actor_kind)} · {shortDate(a.performed_at)}
-                </div>
-              </li>
-            ))}
+            {activities.map((a) => {
+              const truncavel = a.reason && a.reason.length > 60;
+              const expandida = atividadesExpandidas.has(a.id);
+              return (
+                <li key={a.id} className="rounded-md border border-border p-2 text-xs">
+                  {/* Rótulo do vocabulário único (activity-vocabulary), nunca o
+                      tipo cru: a tela e o banco divergiram justamente por manter
+                      duas listas. Marcador por ator, forma e não cor (§5). */}
+                  <div className="flex items-center gap-1.5 font-medium">
+                    <span
+                      className={cn(
+                        "h-2 w-2 shrink-0",
+                        actorShape(a.actor_kind) === "filled" && "rounded-full bg-accent",
+                        actorShape(a.actor_kind) === "ring" &&
+                          "rounded-full border border-accent bg-surface",
+                        actorShape(a.actor_kind) === "dashed" &&
+                          "rounded-full border border-dashed border-border-strong",
+                      )}
+                      aria-hidden
+                    />
+                    {activityLabel(a.type)}
+                  </div>
+                  {a.reason && (
+                    // `truncate` cortava frases longas ("Nova objeção: O lead
+                    // reclamou que...") sem nenhum jeito de ler o resto —
+                    // clique alterna quebra de linha completa, sem popup.
+                    <button
+                      type="button"
+                      onClick={() =>
+                        truncavel &&
+                        setAtividadesExpandidas((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(a.id)) next.delete(a.id);
+                          else next.add(a.id);
+                          return next;
+                        })
+                      }
+                      className={cn(
+                        "mt-0.5 block w-full text-left text-muted-foreground",
+                        expandida ? "whitespace-normal break-words" : "truncate",
+                        truncavel && "cursor-pointer hover:text-foreground",
+                      )}
+                      aria-expanded={truncavel ? expandida : undefined}
+                    >
+                      {a.reason}
+                    </button>
+                  )}
+                  <div className="text-muted-foreground">
+                    {actorLabel(a.actor_kind)} · {shortDate(a.performed_at)}
+                  </div>
+                </li>
+              );
+            })}
           </ul>
         ) : (
           <SemLista vazio="Sem atividade." erro={erro} onTentarDeNovo={() => setTentativa((n) => n + 1)} />

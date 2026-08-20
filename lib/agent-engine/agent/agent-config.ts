@@ -182,9 +182,11 @@ export async function loadPublishedAgentConfig(
      join ai_agent_versions v on v.id = a.published_version_id
      where a.organization_id = $1
        and a.archived_at is null
-       -- is_active é semântica do rag_bot legado; para mcp_agent "ativo" =
-       -- published_version_id preenchido + não arquivado (mesmo critério do
-       -- dispatcher nativo do CRM — pausar = despublicar).
+       -- is_active agora vale pros DOIS kinds: pause manual (botão "Pausar",
+       -- sem tocar em published_version_id) tem que tirar o agente do ar na
+       -- hora, sem exigir republish nem canal online pra voltar — ver
+       -- pauseAgentAction/unpauseAgentAction em app/app/ai/agents/_actions.ts.
+       and a.is_active
        and v.status = 'published'
        and v.channel_session_id = $2
      order by a.priority desc, a.created_at asc
@@ -213,6 +215,7 @@ export async function loadPublishedAgentConfigById(
      join ai_agent_versions v on v.id = a.published_version_id
      where a.organization_id = $1
        and a.archived_at is null
+       and a.is_active
        and v.status = 'published'
        and a.id = $2`,
     [organizationId, agentId],
