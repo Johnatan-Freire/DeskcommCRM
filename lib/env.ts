@@ -34,6 +34,33 @@ const required = (name: string) =>
 
 const requiredAlways = (name: string) => z.string().min(1, `${name} é obrigatória`);
 
+/**
+ * Knob de retenção em dias: NUNCA derruba o app.
+ *
+ * `z.coerce.number().int().positive()` lança para `=0`, que é justamente o que
+ * o operador da VPS escreve quando quer desligar a poda — e `lib/env.ts` roda
+ * no import do Next, então o throw vira 500 em TODAS as telas, com o contêiner
+ * `healthy` e nada dizendo o porquê. Falha fechada na AÇÃO (o valor inválido
+ * não vale) e aberta na INFORMAÇÃO (o app sobe e diz alto o que ignorou).
+ *
+ * Desligar a poda não é isto: se tiver de existir, é decisão de produto e vem
+ * com nome próprio, não com um zero que o schema recusa.
+ */
+const diasDeRetencao = (nome: string, padrao: number) =>
+  z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(padrao)
+    .catch(({ error }) => {
+      console.warn(
+        `[env] ${nome} inválida (${JSON.stringify(process.env[nome])}) — usando o padrão ${padrao} dias. ` +
+          `Só número inteiro maior que zero vale aqui; "0" não desliga a poda. ` +
+          `(${error.issues[0]?.message ?? "valor recusado"})`,
+      );
+      return padrao;
+    });
+
 const schema = z.object({
   // Node
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
@@ -47,6 +74,24 @@ const schema = z.object({
   INTERNAL_SECRET: required("INTERNAL_SECRET"),
   /** Optional dedicated secret for cron endpoints (S-06.07 onwards). */
   INTERNAL_CRON_SECRET: z.string().optional().default(""),
+
+  /**
+   * Retenção do arquivo do corpo cru dos webhooks (`webhook_events_log`).
+   *
+   * O default de 7 dias não é gosto: numa instalação real esse arquivo era 86%
+   * do banco (468 MB de 545 MB) e crescia ~23 MB/dia, contra os 500 MB do plano
+   * gratuito do Supabase — onde a maioria dos clones vive. Com 7 dias o regime
+   * estável fica em ~160 MB de corpo mais ~11 MB de índice forense; com 14 já
+   * não cabe. Quem tem plano pago sobe o número e fica com mais corpo à mão.
+   */
+  WEBHOOK_LOG_BODY_RETENTION_DAYS: diasDeRetencao("WEBHOOK_LOG_BODY_RETENTION_DAYS", 7),
+  /**
+   * Quando a LINHA some, e não só o corpo. Horizonte longo de propósito: até
+   * aqui a linha custa ~200 B e ainda responde "quantos eventos de que tipo
+   * chegaram, quando, e a assinatura conferia?", que é a pergunta de depois do
+   * incidente.
+   */
+  WEBHOOK_LOG_ROW_RETENTION_DAYS: diasDeRetencao("WEBHOOK_LOG_ROW_RETENTION_DAYS", 90),
 
   // Encryption keys (pgcrypto)
   CPF_ENCRYPTION_KEY: required("CPF_ENCRYPTION_KEY"),
@@ -63,6 +108,17 @@ const schema = z.object({
   // Postgres direto do Supabase (Settings → Database) — só as rotas de skills
   // instaláveis (import/install) usam `pg` cru (mesmo pool do agent-engine).
   SUPABASE_DB_URL: required("SUPABASE_DB_URL"),
+  /**
+   * A conexão de DDL do KIT (install.sh/update.sh/backup.sh), não do app —
+   * declarada aqui só porque o `docker-compose.prod.yml` entrega o `.env`
+   * inteiro ao app e ao worker (`env_file`), e uma chave que chega ao processo
+   * merece estar no contrato em vez de ser um desconhecido tolerado.
+   *
+   * NENHUM código de app pode lê-la: ela é o DONO do banco quando a instalação
+   * é num Supabase próprio, e `SUPABASE_DB_URL` é a role menor de propósito
+   * (issue #192). Vigiado por `tests/unit/env-ddl-fora-do-app.test.ts`.
+   */
+  SUPABASE_DB_ADMIN_URL: z.string().optional().default(""),
 
   // WAHA
   WAHA_API_BASE_URL: required("WAHA_API_BASE_URL"),
@@ -92,6 +148,13 @@ const schema = z.object({
   // por lá. Ver resolveLanguageModel() em lib/ai/gateway.ts.
   OPENROUTER_API_KEY: z.string().optional().default(""),
   OPENROUTER_BASE_URL: z.string().optional().default(""),
+  // Atribuição OPCIONAL da OpenRouter (`HTTP-Referer` / `X-Title`): identifica a
+  // instalação no painel e no ranking público DELES. A doc da OpenRouter chama
+  // os dois de opcionais e a chamada funciona sem — por isso default vazio e
+  // nenhum header enviado quando não preenchidos. Quem lê é
+  // `cabecalhosDeAtribuicaoOpenRouter()`, em edge/llm/providers.ts.
+  OPENROUTER_APP_URL: z.string().optional().default(""),
+  OPENROUTER_APP_TITLE: z.string().optional().default(""),
   VERCEL_AI_GATEWAY_URL: z.string().optional().default(""),
   ANTHROPIC_API_KEY: z.string().optional().default(""),
   OPENAI_API_KEY: z.string().optional().default(""),
@@ -102,6 +165,27 @@ const schema = z.object({
   // consome (deploy sem worker). NUNCA os dois — dois consumidores = turno
   // duplicado ou perdido (bug real da fusão).
   AGENT_DISPATCH_CONSUMER: z.enum(["engine", "native"]).optional().default("engine"),
+
+  /**
+   * Kill switch do teto de gasto de IA — a alavanca que o operador da VPS puxa
+   * às 2h da manhã quando a IA parou e ele não sabe SQL.
+   *
+   * `on` (default) NÃO LIGA NADA: significa "respeite o que cada organização
+   * escolheu na tela". A chave só sabe AFROUXAR — `avisar` rebaixa qualquer
+   * bloqueio a aviso, e `off|false|0|no|nao|não|disabled` cala a proteção
+   * inteira. É essa monotonicidade que a torna um kill switch de verdade.
+   *
+   * ⚠️ `z.string()` E JAMAIS `z.enum`, e o motivo é o modo de falha deste
+   * arquivo: `safeParse` abaixo LANÇA quando o schema recusa, e no Next isso
+   * acontece na primeira requisição — com healthcheck TCP puro, o contêiner
+   * fica `healthy` com 100% das requisições em 500. Um `z.enum` transformaria a
+   * alavanca de EMERGÊNCIA no derrubador do app inteiro no dia em que o
+   * operador escrevesse `false`. A normalização (que aceita as grafias falsas
+   * comuns como desligado, e resolve lixo para o lado seguro) mora em
+   * `normalizarChaveDeOrcamento`, em lib/agent-engine/edge/llm/orcamento.ts.
+   * Mesmo raciocínio de APP_ACCENT_HEX, algumas linhas abaixo.
+   */
+  AI_BUDGET_ENFORCEMENT: z.string().optional().default("on"),
 
   // Workers — opt-in via env so dev doesn't run loops. Production cron sets it.
   EVENT_LOG_WORKER_ENABLED: z
@@ -123,10 +207,53 @@ const schema = z.object({
   // Sentry
   SENTRY_DSN: z.string().optional().default(""),
 
+  /**
+   * Resend — o transporte de TODO e-mail transacional (convite, LGPD, alarme).
+   *
+   * Estavam lidas de `process.env` CRU dentro de `lib/email/resend.ts`, fora do
+   * Zod e fora do `.env.example` (medido: `grep -n RESEND lib/env.ts` → nada;
+   * `grep -c -i resend .env.example` → 0). Duas consequências que só apareciam
+   * na VPS: o `env-example-sync` nunca cobrou a documentação da chave, e o
+   * `install.sh` não a gravava — como o `.env` é escrito com truncamento
+   * (`} > .env`), a chave posta à mão era DESCARTADA na instalação seguinte,
+   * num script que o README vende como idempotente.
+   *
+   * `RESEND_FROM_EMAIL` vazio NÃO cai num domínio nosso: ver `fromAddress()`.
+   */
+  RESEND_API_KEY: z.string().optional().default(""),
+  RESEND_FROM_EMAIL: z.string().optional().default(""),
+
+  /**
+   * E-mail de suporte que a instalação mostra ao CLIENTE FINAL (tela de conta
+   * suspensa, tela de cobrança).
+   *
+   * Vazio = a tela não mostra endereço nenhum. É deliberado: cair no nosso
+   * endereço numa tela de suspensão manda o cliente do revendedor escrever
+   * para quem não suspendeu a conta dele e não tem como resolvê-la.
+   */
+  SUPPORT_EMAIL: z.string().optional().default(""),
+
   // EPIC-11 Impersonate cookie HMAC secret. Optional at boot (route returns
   // 503 at runtime if missing/short); required in prod for the feature to
   // function. Min 32 chars when present is enforced at use site.
   IMPERSONATE_COOKIE_SECRET: z.string().optional().default(""),
+
+  /**
+   * Retenção do histórico que o cron `data-retention` poda (issue #261).
+   *
+   * As DUAS entram como `z.string()` e nunca como `z.coerce.number()`, pelo
+   * mesmo motivo de `AI_BUDGET_ENFORCEMENT` algumas linhas acima: o `safeParse`
+   * deste arquivo LANÇA quando o schema recusa, e no Next isso derruba toda
+   * requisição com 500 num contêiner que segue `healthy` (o healthcheck é probe
+   * TCP). Quem digita `noventa` às 2h da manhã tentando liberar espaço não pode
+   * derrubar o produto. A interpretação — com padrão, piso e AVISO quando o
+   * valor não vale como escrito — mora em `lib/retencao/politica.ts`.
+   *
+   * Ausentes = o comportamento default (90 dias de fila, 5 anos de auditoria).
+   * Nenhuma instalação precisa editar `.env` para a poda funcionar.
+   */
+  JOB_QUEUE_RETENTION_DAYS: z.string().optional().default(""),
+  AUDIT_LOG_RETENTION_DAYS: z.string().optional().default(""),
 
   // LGPD export (S-08.04)
   LGPD_SIGNING_KEY: z.string().optional().default(""),
@@ -160,6 +287,19 @@ const schema = z.object({
   // O <PublicEnvScript/> injeta os valores em runtime.
   APP_NAME: z.string().optional().default(""),
   APP_LOGO_URL: z.string().optional().default(""),
+  /**
+   * Cor da marca — um hex (`#506d48`), do qual `lib/branding/` deriva a rampa
+   * inteira. Vazio = o produto se pinta com a cor dele.
+   *
+   * `optional().default("")` e NUNCA `required()`, e o motivo é o modo de falha,
+   * não a preguiça: `lib/env.ts` lança no import do módulo, que no Next
+   * acontece na PRIMEIRA REQUISIÇÃO, não no boot. E o healthcheck do contêiner é
+   * um probe TCP puro (`docker-compose.prod.yml:44`, deliberadamente — /health
+   * derrubaria o app quando o WAHA cai). Somando os dois: o Docker mostraria
+   * `healthy` com 100% das requisições em 500. Uma var de COR não pode ter esse
+   * poder; a validação do valor é do resolvedor, que degrada e diz o motivo.
+   */
+  APP_ACCENT_HEX: z.string().optional().default(""),
 });
 
 let parsed = schema.safeParse(process.env);

@@ -13,6 +13,8 @@ import { AgentTabs } from "./_components/AgentTabs";
 import type { FunilDaResposta } from "@/hooks/pipelines/usePipelines";
 import { coberturaDoFunil, type EtapaDoMapa } from "@/lib/leads/agent-mapping";
 import type { CoberturaPorFunil } from "./_components/FunisDoAgente";
+import { lerAmbiente } from "@/lib/instalacao/ambiente";
+import { escolherVersoesDaTela } from "@/lib/ai/agents/versoes-da-tela";
 
 export const dynamic = "force-dynamic";
 
@@ -24,6 +26,21 @@ const VERSION_COLUMNS =
 
 const CREDENTIAL_COLUMNS =
   "id, organization_id, provider, label, api_key_last4, validated_at, validation_error, models_available, is_active, created_by, created_at, updated_at";
+
+/**
+ * Os provedores cuja chave veio na INSTALAÇÃO (`.env`), não da tela de
+ * Credenciais.
+ *
+ * Sai de `lerAmbiente`, a mesma leitura que o retrato da instalação usa — uma
+ * segunda lista de nomes de variável divergiria no dia em que um provedor novo
+ * entrasse.
+ */
+function provedoresDaInstalacao(): string[] {
+  const a = lerAmbiente();
+  return Object.entries(a.chavesDeProvedor)
+    .filter(([, tem]) => tem)
+    .map(([id]) => id);
+}
 
 export default async function AgentEditorPage({
   params,
@@ -119,14 +136,12 @@ export default async function AgentEditorPage({
     ? { routerId: routerMemberRow.router_id, routerName: routerMemberRow.ai_routers?.name ?? "roteador" }
     : null;
 
-  const draft =
-    versions
-      .filter((v) => v.status === "draft")
-      .reduce<AgentVersionRow | null>(
-        (a, b) => (a && a.version_number > b.version_number ? a : b),
-        null,
-      );
-  const published = versions.find((v) => v.status === "published") ?? null;
+  // A regra mora em `lib/ai/agents/versoes-da-tela.ts` (pura e testada): rascunho
+  // VIGENTE > publicada > última versão que existiu. Antes, o rascunho vencia
+  // sempre — inclusive quando era mais antigo que a publicada — e um agente
+  // pausado (sem rascunho e sem publicada) abria no texto padrão, que é como o
+  // prompt "sumia".
+  const { draft, published, base, draftObsoleto } = escolherVersoesDaTela(versions, agent.published_version_id ?? null);
 
   return (
     <div className="flex h-full flex-col gap-6 p-6">
@@ -134,8 +149,11 @@ export default async function AgentEditorPage({
         agent={agent}
         draft={draft}
         published={published}
+        base={base}
+        draftObsoleto={draftObsoleto}
         versions={versions}
         credentials={credentials}
+        provedoresDaInstalacao={provedoresDaInstalacao()}
         channelSessions={channelSessions}
         funis={funis}
         cobertura={cobertura}

@@ -23,8 +23,14 @@ interface Props {
   agent: AgentRow;
   draft: AgentVersionRow | null;
   published: AgentVersionRow | null;
+  /** De onde o formulário se hidrata — ver `lib/ai/agents/versoes-da-tela.ts`. */
+  base?: AgentVersionRow | null;
+  /** Rascunho anterior à publicada: existe, mas não abre nem publica. */
+  draftObsoleto?: AgentVersionRow | null;
   versions: AgentVersionRow[];
   credentials: CredentialRow[];
+  /** Provedores cuja chave veio na instalação — ver `AgentForm`. */
+  provedoresDaInstalacao?: string[];
   channelSessions: ChannelSessionLite[];
   routerMembership?: { routerId: string; routerName: string } | null;
   readOnly?: boolean;
@@ -59,7 +65,10 @@ export function AgentTabs(props: Props) {
           agent={props.agent}
           draft={props.draft}
           published={props.published}
+          base={props.base}
+          draftObsoleto={props.draftObsoleto}
           credentials={props.credentials}
+          provedoresDaInstalacao={props.provedoresDaInstalacao}
           channelSessions={props.channelSessions}
           funis={props.funis}
           cobertura={props.cobertura}

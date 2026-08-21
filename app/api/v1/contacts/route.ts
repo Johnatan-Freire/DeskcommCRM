@@ -41,6 +41,8 @@ export async function GET(req: NextRequest): Promise<Response> {
     source: url.searchParams.get("source") ?? undefined,
     cursor: url.searchParams.get("cursor") ?? undefined,
     limit: url.searchParams.get("limit") ?? undefined,
+    order_by: url.searchParams.get("order_by") ?? undefined,
+    order_dir: url.searchParams.get("order_dir") ?? undefined,
   });
   if (!qsParsed.success) {
     return fail("validation_failed", "Query inválida.", 422, {

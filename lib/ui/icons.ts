@@ -32,12 +32,15 @@ export {
   Gauge,
   WifiSlash,
   Clock,
+  // marca da instalação (o revendedor troca nome e cor do produto)
+  Palette,
   // health dashboard
   WifiHigh,
   Brain,
   ArrowsClockwise,
   Dot,
   // actions
+  List,
   Bell,
   PaperPlaneTilt,
   Smiley,

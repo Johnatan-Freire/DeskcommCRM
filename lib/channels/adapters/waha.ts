@@ -5,9 +5,11 @@
  *
  * Nenhuma regra de negócio mora neste arquivo (ver `ChannelAdapter` em ../types).
  */
+import { wahaContactPayload } from "@/lib/waha/contact-card";
 import { fetchWahaMedia } from "@/lib/messaging/media/waha-source";
 import { getWahaClient } from "@/lib/waha/client";
 import { wahaSendPlanFor } from "@/lib/waha/media-send";
+import { resolveWhatsappIdForContactCard } from "@/lib/waha/resolve-contact-whatsapp-id";
 import { bareWaMessageId, parseWahaMessageId } from "@/lib/waha/message-id";
 import { resolveWahaChatId } from "@/lib/waha/send";
 import type { FetchedMedia } from "@/lib/messaging/media/types";
@@ -133,13 +135,28 @@ export const wahaAdapter: ChannelAdapter = {
     // comportamento visível — proibido nas Fases 0–2.
     if (!client) return { externalId: null };
 
-    const res = envelope.media
-      ? await client.sendMedia(
-          envelope.sessionRef,
-          envelope.to,
-          wahaSendPlanFor(envelope.kind, envelope.media),
-        )
-      : await client.sendMessage(envelope.sessionRef, envelope.to, envelope.body ?? "");
+    let res: unknown;
+    if (envelope.kind === "contact" && envelope.contact) {
+      const resolvedId = await resolveWhatsappIdForContactCard(
+        client,
+        envelope.sessionRef,
+        envelope.contact.phoneNumber,
+      );
+      const contact = wahaContactPayload(
+        envelope.contact.fullName,
+        envelope.contact.phoneNumber,
+        resolvedId ?? envelope.contact.whatsappId,
+      );
+      res = await client.sendContactVcard(envelope.sessionRef, envelope.to, [contact]);
+    } else if (envelope.media) {
+      res = await client.sendMedia(
+        envelope.sessionRef,
+        envelope.to,
+        wahaSendPlanFor(envelope.kind, envelope.media),
+      );
+    } else {
+      res = await client.sendMessage(envelope.sessionRef, envelope.to, envelope.body ?? "");
+    }
 
     return { externalId: parseWahaMessageId(res) };
   },

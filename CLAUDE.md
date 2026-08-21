@@ -64,13 +64,32 @@ DeskcommCRM é um sistema operacional de vendas open source com agentes de IA na
 - Sempre `getUser()` (valida JWT no backend). NUNCA `getSession()` (confia no cookie local)
 - 4 roles dentro do tenant: `viewer` (1) < `agent` (2) < `manager` (3) < `admin` (4)
 - Super-admin de plataforma é uma role transversal — `is_platform_admin` (decisão final na Spec 01)
-- MFA TOTP **forçado** pra `admin` e super-admin
+- MFA TOTP é **opcional e ligado por quem administra** — não é mais forçado por papel. Quem exige são duas políticas independentes que SOMAM: `platform_admins.mfa_required` (para o super-admin) e `organizations.settings.security.mfa_required` (para o `admin` do tenant). O padrão de ambas é **não exigir**, e o `bootstrap-owner.ts` grava `false` explícito. Regra pura em `lib/auth/politica-mfa.ts`
+  - **Por que mudou:** o gate era `isPlatformAdmin || role === "admin"`, sem opção, e o `install.sh` cria o dono como platform admin — então TODA instalação self-host recebia um bloqueador de tela cheia logo depois do onboarding, um passo que o wizard nunca anunciou. Decisão do dono do produto; segurança que expulsa o usuário na primeira tela não protege ninguém
+  - **⚠️ CADASTRAR e PROVAR são perguntas diferentes.** A política decide o cadastro. Já `mfaEmDivida()` — o 403 `mfa_required` das rotas — NÃO consulta a política: quem TEM fator prova na sessão, sempre. Ligá-lo à política faria quem ativa a verificação por vontade própria ter o fator ignorado
+  - Ligar/desligar vive em **Configurações › Segurança**; desligar o próprio fator exige sessão `aal2` (senão uma sessão roubada desliga a proteção com um clique)
 - Permissão por pipeline (`user_pipeline_access`) **NÃO** entra no MVP
 
 ### Audit log
 - Toda mutação POST/PATCH/DELETE bem-sucedida → 1 entrada em `api_audit_log` (fire-and-forget, p99 ≤500ms)
-- Audit é append-only. Sem RLS de UPDATE/DELETE. Edição apenas via DBA manual
-- Retenção 5 anos. Hot 90 dias, cold (S3) o resto
+- **Rodada de cron que não fez nada NÃO é mutação e não audita** — e a que fez, audita. `routing-worker` (1×/min) e `attendant-heartbeat` (1×/5min) auditavam incondicionalmente: ~51.840 linhas/mês numa instalação que não atende ninguém, e numa VPS real **95% do audit log** era batida de cron vazia (`docs/testing/user-journey-map.md`, achado 17). A guarda certa é *auditar quando houve efeito*, nunca *parar de auditar* — as duas direções são medidas por `tests/unit/cron-audita-so-quando-ha-efeito.test.ts`, que varre o AST de **toda** rota de `app/api/v1/cron/`
+- Audit é append-only, e isso é do SCHEMA e não da prosa: nenhum papel tem GRANT de UPDATE/DELETE em `api_audit_log` — **nem `service_role`**. Para conferir na fonte em vez de acreditar nesta linha:
+
+  ```bash
+  psql "$SUPABASE_DB_URL" -c "select grantee, privilege_type from information_schema.role_table_grants
+    where table_name='api_audit_log' and privilege_type in ('DELETE','UPDATE','TRUNCATE');"
+  ```
+
+  **`TRUNCATE` entra na consulta de propósito, e o resultado não é vazio.** Ele
+  está concedido a `anon`, `authenticated` e `service_role` — resíduo de o dump
+  enumerar os privilégios desta tabela (as demais recebem `GRANT ALL`, e quem as
+  protege é a RLS). Uma sonda que pergunte só por `DELETE`/`UPDATE` devolve zero
+  linhas e deixa quem leu concluindo que a tabela não pode ser esvaziada, quando
+  o privilégio que a esvazia INTEIRA está lá. Não é alcançável pela REST (o
+  PostgREST não emite `TRUNCATE`), então não é buraco de superfície — mas a
+  frase "append-only é do schema" só é inteira com esta ressalva escrita.
+- **Retenção default de 5 anos, configurável, e agora EXECUTADA.** O expurgo é `public.fn_expurgar_auditoria_vencida` (`security definer`, **piso de 90 dias dentro do corpo**, revogada de anon/authenticated), chamada em lotes pelo cron `app/api/v1/cron/data-retention` (diário). O knob é `AUDIT_LOG_RETENTION_DAYS`. **Não há camada cold/S3** — o "hot 90 dias, cold (S3) o resto" que este arquivo afirmava por meses nunca existiu em código (auditoria de 2026-08-14: zero ocorrência de arquivamento), e um self-host não tem para onde arquivar: o Storage do cliente é a MESMA cota de 1 GB, já dividida com `whatsapp-media`. Para ver o que está em vigor: `grep -n "RETENCAO_AUDITORIA_DIAS" lib/retencao/politica.ts`
+- Por que uma `security definer` de expurgo não é porta de adulteração (o argumento inteiro está no cabeçalho da migration 0167): ela **não tem seletor de linha** — nenhum parâmetro de org, ator, ação ou id, e o único predicado é `created_at < now() - N dias`; o piso mora **no corpo**, não em quem chama; não é alcançável pela REST; não amplia o raio de quem já tem a service key; e **registra a própria erosão** (`retention.sweep_run`, com a contagem, numa linha nova demais para a chamada seguinte alcançar)
 - Falha de write em audit gera alerta Sentry, não bloqueia mutação principal
 
 ### LGPD
@@ -85,12 +104,29 @@ DeskcommCRM é um sistema operacional de vendas open source com agentes de IA na
 - Engine NOWEB default; WEBJS apenas se precisar stickers animados / botões
 - Auth: env do WAHA recebe **hash SHA512 hex** da api key; cliente envia plaintext em `X-Api-Key`
 - Webhooks: HMAC SHA512 com `crypto.timingSafeEqual`
-- Anti-banimento: throttle 1 msg/1.2s + jitter ≤800ms. Campanha 1 msg/5s. Warm-up 7-14d. Spinning de copy. Janela 7h-22h, evitar domingo
-- STOP detection: regex `/STOP|PARAR|SAIR|UNSUBSCRIBE/i` no inbound → `is_blocked=true` automaticamente
+- Anti-banimento: throttle 1 msg/1.2s + jitter ≤800ms. Campanha 1 msg/5s. Warm-up 7-14d. Spinning de copy. Janela 7h-22h (domingo LIBERADO por default desde 2026-08-20; a janela é knob por canal)
+- STOP detection: a regra mora em `lib/opt-out/deteccao.ts` e é a MESMA nos dois lados —
+  a ingestão (que grava `is_blocked=true`) e o runtime do agente. **Não é mais a palavra
+  solta:** só bloqueia palavra ISOLADA (mensagem inteira = a palavra) ou verbo de cessação
+  com OBJETO DE COMUNICAÇÃO ("parar de me mandar", "sair da lista"). Enquanto eram duas
+  regras, a ingestão bloqueava paciente que perguntou "tem como parar a dor?" — medido em
+  clínica, 12 falsos positivos num corpus de 32 frases de nicho.
+  Para ver o vocabulário em vigor sem confiar nesta linha:
+  `grep -n 'PALAVRAS_DE_OPT_OUT' -A20 lib/opt-out/deteccao.ts`, e as frases de controle em
+  `tests/unit/opt-out-deteccao.test.ts`. **Espanhol ainda NÃO é coberto** (`baja`, `salir`,
+  `no quiero recibir`) — ver PR #275.
 - Mídia: subir pro Supabase Storage primeiro, passar URL ao WAHA (não inline base64)
 - Multi-device: assinar `message.any` (não só `message`); tratar `fromMe=true` sem duplicar
 - Grupos: SKIP CRM binding se `chatId.endsWith('@g.us')`. Sender é `p.author`, não `p.from`
 - Cron `recover-stuck-messages` (`app/api/v1/cron/recover-stuck-messages/route.ts`, agendado no `scheduler` do `docker-compose.prod.yml`): marca `status='sending'` há >5min como `failed` **e abre aviso na Central** (`agent_inbox_items` kind `message_send_stuck`). Não toca em `queued`: esse estado tem dono (o agent-engine reagenda por `SEND_QUEUED_RETRY_MS`), e falhá-lo perderia mensagem que ia sair. Não reenvia — envio em dobro é pior que não-envio
+
+### Marca própria (white-label)
+- **Uma imagem Docker serve todas as marcas.** Nada de `NEXT_PUBLIC_*` para marca, nada de `public/favicon.ico`, nada de imagem por revendedor — a imagem é pré-buildada e o `update.sh` regrava `APP_IMAGE` incondicionalmente
+- **O banco está ACIMA do `.env`.** `platform_branding` (instalação) e `organizations.settings.branding` (organização) são a fonte; `APP_NAME`/`APP_LOGO_URL`/`APP_ACCENT_HEX` são **semente e piso de rollback** (o `agent.sh` reverte a imagem, nunca o banco)
+- **Resolvedor NUNCA lança.** `lib/branding/instalacao.ts` e `lib/branding/saida.ts` degradam para o padrão do produto e seguem: `branding()` roda em `app/layout.tsx`, e um throw ali é 500 em todas as telas
+- **Saída sem DOM usa `marcaDaSaida()`** (`lib/branding/saida.ts`) — e-mail, remetente, ícone, `issuer` do MFA. Um hex e uma frente legível, tema **claro** sempre. Nunca passe `MarcaResolvida` a template de e-mail
+- **O PDF de LGPD NUNCA leva marca.** Ele nomeia o **controlador** (`organizations.legal_name`) e o DPO resolvido. Nomear ali o revendedor — que é operador — inverteria papéis num documento que responde a direito legal. Vigiado em `tests/unit/mapas-de-arquitetura.test.ts`
+- Vazamento de marca no código é vigiado por `tests/unit/branding.test.ts` (varre `app|components|lib|workers|hooks`), com allowlist que **só encolhe**. Contexto de venda em [`docs/white-label.md`](docs/white-label.md); mapa em `docs/architecture/marca-propria.architecture.json`
 
 ### Doutrina DIRC (antes de adicionar campo)
 - **D**uplicar — vive aqui mesmo?
@@ -200,11 +236,11 @@ O não-negociável, em quatro linhas:
    instalar, ele **nunca é atualizado**.
 2. **Publicação é ato do CI.** Nunca da sua máquina: build ARM local não roda
    na VPS amd64 do cliente, e a falha só aparece no `up -d` dele. O job
-   `imagens-ok` reprova quando qualquer uma das três imagens não constrói —
-   mas **ainda não é status check obrigatório** (a branch protection tem
-   `verify, build-and-size, invariants, e2e`). Ativá-lo é o passo final do
-   merge desta doutrina: um required check ausente na base dos PRs abertos
-   travaria todos eles. Confira na fonte antes de confiar nesta linha.
+   `imagens-ok` reprova quando qualquer uma das três imagens não constrói, e
+   **é status check obrigatório desde 2026-08-13** — a branch protection tem
+   `verify, build-and-size, invariants, e2e, imagens-ok`. (Este parágrafo dizia
+   "ainda não é obrigatório" até 2026-08-14; a ativação era o passo final do
+   merge da doutrina e aconteceu.) Confira na fonte antes de confiar nesta linha.
 3. **Instalação de cliente aponta para número de versão, nunca para tag móvel.**
    `latest` aqui significa **topo da `main`**, não última release — quem quer a
    última release usa `stable`. `pull_policy` acompanha a mutabilidade da tag:
@@ -250,18 +286,35 @@ Checks **obrigatórios** na branch protection da `main` (verificado na configura
 - **`verify`** (`ci.yml`) — typecheck + lint + test:unit.
 - **`invariants`** (`ci.yml`) — `pnpm test:db`: sobe `pgvector/pgvector:pg17`, aplica `supabase/baseline.sql` em modo install (`ON_ERROR_STOP=1`) e update (idempotência), e roda os testes de invariante, incluindo o de isolamento RLS entre 2 organizações.
 - **`build-and-size`** (`perf.yml`) — `pnpm build` em Node 22.
-- **`e2e`** (`e2e.yml`) — sobe Supabase local, aplica o `baseline.sql` e roda **37 das 39 specs** Playwright (medido em 2026-08-10; **reconte antes de citar**, com `ls tests/e2e/*.spec.ts | wc -l` e `grep -oE '[a-z0-9-]+\.spec\.ts' .github/workflows/e2e.yml | sort -u | wc -l` — este número já apodreceu duas vezes, e uma delas fui eu copiando o `echo` do próprio workflow em vez de contar os arquivos). As duas de fora: `vps-fresh-onboarding` (precisa de WAHA + Redis + Resend + Nuvemshop) e `agente-papeis-operador`. A primeira é a **P0** da doutrina de QA Visual — ou seja, `e2e` verde **não** prova a jornada de instalação fresca, que é o produto que se vende.
+- **`e2e`** (`e2e.yml`) — sobe Supabase local, aplica o `baseline.sql` e roda **48 das 49 specs** Playwright (medido em 2026-08-14 @ `587a494d`; **reconte antes de citar** — este número já apodreceu **quatro** vezes). A **única** de fora é `vps-fresh-onboarding` (precisa de WAHA + Redis + Resend + Nuvemshop) — e ela é a **P0** da doutrina de QA Visual, ou seja, `e2e` verde **não** prova a jornada de instalação fresca, que é o produto que se vende.
 
-Todos os quatro são **obrigatórios** — medido em 2026-08-08 na branch protection:
+  **A receita antiga de recontagem estava errada** e é provavelmente uma das causas do apodrecimento. `grep -oE '[a-z0-9-]+\.spec\.ts' .github/workflows/e2e.yml | sort -u | wc -l` devolve **49**, não 48 — mas *não* pelo motivo que este parágrafo afirmava até 2026-08-14. Ele dizia "conta menções em COMENTÁRIOS do workflow", e isso é falso: medido, o conjunto de specs citadas fora de variável é **vazio**. O excedente é a `FORA_DO_CI`, que é uma **variável YAML** como as outras — o grep não distingue a variável que o CI *invoca* da que ele só *declara*. Medir o arquivo inteiro mede quem é citado, não quem é invocado. O que roda são as `SPECS_PARTE_*`:
+
+  ```bash
+  ls tests/e2e/*.spec.ts | wc -l                    # 49 em disco
+  python3 - <<'PY'                                  # 48 que o CI invoca
+  import re
+  y = open(".github/workflows/e2e.yml", encoding="utf-8").read()
+  print(len({s for _, c in re.findall(r'(SPECS_PARTE_\d+):\s*>-\n((?:[ ]{8,}.*\n)+)', y)
+               for s in re.findall(r'[a-z0-9-]+\.spec\.ts', c)}))
+  PY
+  ```
+
+  **E a recontagem já não é o conserto.** A quarta vez era a condição que o PR #242 pôs para parar de recontar — ela aconteceu. O conserto devido é `tests/unit/e2e-cobertura-completa.test.ts` passar a cobrar também o texto daqui, como já cobra as três listas do workflow (medido em 2026-08-14: ele não cobra — `grep -c 'CLAUDE.md' tests/unit/e2e-cobertura-completa.test.ts` devolve 0). Prosa que nenhum gate lê é prosa que diverge — e uma triagem que a use como régua mede contra o número errado, que é o modo de falha nº 1 do procedimento.
+- **`imagens-ok`** (`publish-image.yml`) — reprova quando qualquer uma das três imagens Docker não constrói. **É obrigatório desde 2026-08-13**; este arquivo dizia o contrário em outro parágrafo (ver a doutrina de packaging acima, já corrigida).
+
+Todos os **cinco** são **obrigatórios** — medido em 2026-08-14 na branch protection:
 
 ```console
 $ gh api repos/melgarafael/DeskcommCRM/branches/main/protection --jq '.required_status_checks.contexts|join(", ")'
-verify, build-and-size, invariants, e2e
+verify, build-and-size, invariants, e2e, imagens-ok
 ```
 
-O `e2e` entrou para a lista depois de este arquivo ter sido escrito. A versão anterior dizia que ele
-"ainda não é obrigatório", e uma triagem que lesse isso mediria contra a régua errada — que é o modo
-de falha nº 1 do procedimento de triagem. Reconfira na fonte antes de confiar em qualquer lista aqui.
+Duas correções que este bloco já pagou: o `e2e` entrou para a lista depois de o arquivo ser escrito, e
+a versão anterior dizia que ele "ainda não é obrigatório"; depois o `imagens-ok` entrou e o arquivo
+seguiu dizendo "quatro". Uma triagem que leia qualquer uma dessas versões mede contra a régua errada —
+que é o modo de falha nº 1 do procedimento de triagem. **Reconfira na fonte antes de confiar em
+qualquer lista aqui**, com o comando acima.
 
 Ao mexer em schema, RLS, RBAC, atribuição, escopo, roteamento, follow-up, webhooks ou automações: rode `pnpm test:db` **localmente** antes de abrir PR. É o único caminho que exercita o `baseline.sql` que o self-hoster realmente aplica.
 
@@ -363,5 +416,12 @@ Antes de declarar uma task pronta:
 13. **Living System Checklist respondido** (lei em `docs/doctrine/sistema-vivo.md`; racional no manual `docs/doctrine/sistema-vivo/`) — a feature não é ilha: tem entrada + saída, emite atividade/log, aparece na tela, tem porta na navegação, tem mecanismo anti-morte, **declara seu laço de retorno** (invariante 7 — o que muda no sistema quando ela erra), e o mapa vivo (`docs/architecture/`) reflete peça nova com ≥2 arestas. Resposta que não **nomeia o artefato concreto** (consumidor real, tela real, log real) não conta
 14. **Tela nova tem porta** — declarada em `lib/navigation/registry.ts` com seu grupo, ou na allowlist de `tests/unit/navegacao-completude.test.ts` **com justificativa escrita**. Ter tela e ser alcançável são coisas diferentes: o CI reprova tela que existe mas em que só se chega digitando a URL
 15. **Se tocou Dockerfile, compose ou setup kit: a mudança chega a quem já instalou** (lei em `docs/doctrine/packaging.md`) — nenhum serviço de produção ficou `build:`-only; variável nova tem default que não quebra `.env` antigo; a atualização não pede edição manual de arquivo; e, se mudou o que a imagem contém, o `update.sh` alcança essa peça. Rode `pnpm test:shell` — é o único gate que exercita o kit
+16. **Se o PR muda comportamento, procure a afirmação de estado sobre esse comportamento.** Só
+    sobre o que você mudou, e só nos documentos de autoridade — não saia caçando pelo repo. A
+    documentação afirma como o mundo *está*, e uma auditoria de 2026-08-14 achou **227
+    afirmações desatualizadas em 393 medidas**
+    ([`docs/audits/2026-08-14-afirmacoes-de-estado.md`](docs/audits/2026-08-14-afirmacoes-de-estado.md)).
+    Onde a afirmação puder virar **comando**, troque em vez de corrigir: um número corrigido
+    envelhece de novo; um `rode isto para saber` não envelhece nunca
 
 Um staff engineer aprovaria? Se não, itera.

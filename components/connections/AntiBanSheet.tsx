@@ -22,6 +22,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { useUpdatePacingKnobs, type PacingKnobsItem } from "@/hooks/channels/usePacingKnobs";
 import { ApiError } from "@/lib/api/types";
+import { nomeDoCanal } from "@/lib/channels/estado";
 
 interface Props {
   item: PacingKnobsItem | null;
@@ -77,8 +78,10 @@ export function AntiBanSheet({ item, canWrite, onClose }: Props) {
 
   const label = useMemo(() => {
     if (!item) return "";
-    const s = item.channel_session;
-    return s.display_name || s.phone_number || s.waha_session_name || "Conexão";
+    // Mesma cadeia que vazava `org_xxxx` no seletor do editor de agente: o
+    // identificador do transporte era o penúltimo degrau, então uma conexão sem
+    // apelido e sem número aparecia com ele no título do painel.
+    return nomeDoCanal(item.channel_session);
   }, [item]);
 
   if (!item || !form) return null;
@@ -203,7 +206,8 @@ export function AntiBanSheet({ item, canWrite, onClose }: Props) {
             <div>
               <Label htmlFor="allow-sunday">Enviar aos domingos</Label>
               <p className="text-xs text-muted-foreground">
-                Desligado por padrão: envio em domingo aumenta o risco de denúncia e bloqueio.
+                Ligado por padrão: quem escreve no domingo espera resposta no domingo. Desligue
+                se você faz prospecção ativa e prefere não incomodar no fim de semana.
               </p>
             </div>
             <Switch

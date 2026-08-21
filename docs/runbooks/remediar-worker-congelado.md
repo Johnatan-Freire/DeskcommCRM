@@ -19,10 +19,17 @@
 > default não resolve. Só a **segunda** execução, já com o kit novo em disco, pinou as
 > três e trocou a imagem. Ver §5.0.
 >
-> **Ainda não coberto:** o app não subiu contra um Supabase real (o ensaio usou um
-> Postgres em contêiner como `SUPABASE_DB_URL`), então auth, storage e PostgREST não
-> foram exercitados; e a sessão do WhatsApp foi representada por um arquivo marcador no
-> volume, não por um número pareado de verdade.
+> **Não coberto PELO ENSAIO** — e o escopo desta frase importa, porque ela já mentiu sem
+> ele: nos **ensaios**, o app não subiu contra um Supabase real (usaram um Postgres em
+> contêiner como `SUPABASE_DB_URL`), então auth, storage e PostgREST não foram exercitados,
+> e a sessão do WhatsApp foi representada por um arquivo marcador no volume.
+>
+> **A execução real cobriu os dois** — está no §P4 deste mesmo documento, 340 linhas abaixo:
+> a remediação rodou na produção do projeto, contra o Supabase de verdade
+> (`/api/v1/health` → `1.3.0, healthy`, `supabase: ok`) e com a sessão pareada de verdade no
+> volume (48.607 arquivos, `waha: ok`). Sem a palavra "ensaio", este aviso — que é a primeira
+> coisa que qualquer leitor vê — declarava não provado exatamente o que o documento prova
+> depois, e teria feito alguém repetir um trabalho já feito.
 
 ---
 
@@ -193,9 +200,38 @@ mesma versão. Medido: `APP_IMAGE`, `WORKER_IMAGE` e `SCHEDULER_IMAGE` em `1.3.0
 1. **Rode `update.sh` duas vezes** numa instalação legada — sempre. Com release publicada, a
    primeira traz o worker e a segunda o pina; sem release, a primeira não traz nada e a
    segunda faz as duas coisas.
-2. **Confira com o `diagnostico.sh` entre uma e outra.** Ele responde a primeira pergunta
+2. **A partir da PRÓXIMA release, o agente completa parte disso sozinho — em até 5 minutos.**
+   O `agent.sh` (cron do host) é o único que roda depois da 1ª execução já com o kit novo em
+   disco, e ele preenche a chave que faltou usando **a versão que o contêiner já está
+   rodando** — congelamento puro, nada muda de comportamento agora.
+
+   > **Não conte com isso hoje, e esta linha já mentiu.** Ela dizia *"desde a 1.3.0"*. O
+   > `completar_pin_ausente` entrou em `81b3bd5d` (2026-08-14), **posterior** à v1.3.0
+   > (2026-08-13), e a v1.3.0 continua sendo a tag mais recente:
+   >
+   > ```console
+   > $ git show v1.3.0:hostgator-setup-kit/_common.sh | grep -c completar_pin_ausente
+   > 0
+   > ```
+   >
+   > Ou seja: **nenhuma instalação existente tem esse comportamento.** Quem atendesse um
+   > cliente lendo a versão anterior desta linha diria "espere cinco minutos que se resolve",
+   > e nada aconteceria — para sempre. O erro é o mesmo que este runbook documenta em outro
+   > lugar: **provei presença na `main` e afirmei comportamento na versão publicada.** O kit
+   > que roda na VPS é o da tag (`update.sh` faz `git checkout "$TARGET_TAG"`), não o da
+   > `main`. Confira antes de prometer: `git show <tag>:hostgator-setup-kit/_common.sh`.
+
+   **O que ele nunca faz:** sobrescrever valor que já existe no `.env`. Chave ausente é
+   omissão do script antigo; chave presente é decisão de quem opera, inclusive a de seguir
+   um canal móvel de propósito. Ensaiado com cron real numa VPS: um `.env` com `:stable`
+   escrito à mão sai intacto do ciclo.
+
+   Isso **não dispensa a segunda execução** — o agente congela o que está rodando; a
+   segunda execução alinha as três imagens na versão da release.
+
+3. **Confira com o `diagnostico.sh` entre uma e outra.** Ele responde a primeira pergunta
    ("o worker é publicado?") e, quando o `.env` não fixa a versão, diz isso na saída.
-3. **A release precisa existir antes de o parque atualizar.** É a diferença entre os dois
+4. **A release precisa existir antes de o parque atualizar.** É a diferença entre os dois
    ensaios acima, e é o motivo de a ordem do [runbook de ativação](ativar-packaging.md)
    ser precondição, não burocracia.
 
@@ -392,9 +428,38 @@ em uso:            devlikeapro/waha          ← sem tag
 agora do lado de quem já instalou. Consequência: a cada `dc pull` a instalação recebe qualquer
 versão que o upstream tiver publicado, sem ninguém ter testado, o que o invariante 4 proíbe.
 
-**Ainda não consertado, de propósito.** Reescrever `WAHA_IMAGE` num `.env` alheio troca a
-versão do WhatsApp de uma instalação em produção, e isso merece decisão e ensaio próprios —
-não um remendo no fim de uma remediação que deu certo.
+**Ainda não consertado — mas a razão que escrevi aqui estava errada, e a medição a derrubou.**
+
+A versão anterior deste parágrafo dizia que reescrever `WAHA_IMAGE` num `.env` alheio *"troca a
+versão do WhatsApp de uma instalação em produção"*. **Não troca.** Medido em 2026-08-14, direto
+no registry:
+
+```
+devlikeapro/waha:latest          → sha256:65e593e30bb702f891550b9da5d65e9e0eff8a926f5451fac6a582db84d3a323
+devlikeapro/waha:latest-2026.7.2 → sha256:65e593e30bb702f891550b9da5d65e9e0eff8a926f5451fac6a582db84d3a323
+```
+
+As duas tags apontam para a **mesma imagem**. Aplicar o pin hoje não muda um byte do que roda —
+e é por isso que o `dc pull` das duas execuções da remediação não trocou nada: o upstream não
+moveu o `latest` desde 2026-07-29. Foi **sorte de calendário, não desenho**. No dia em que o
+devlikeapro publicar, o próximo `update.sh` de qualquer instalação legada troca a versão do
+WhatsApp sem ninguém pedir — porque `dc pull` sem argumento inclui o `waha`.
+
+O custo real de aplicar o pin é outro, e também está medido: mudar a **string** da imagem muda
+o `config-hash` do serviço, então o `up -d` **recria o contêiner** mesmo com digest idêntico.
+
+```console
+$ WAHA_IMAGE=devlikeapro/waha            docker compose -f docker-compose.prod.yml config --hash=waha
+waha dfdaf2554bc01862779862967927d5701fbcdf3642529e9dd46269cd336b1e0d
+$ WAHA_IMAGE=devlikeapro/waha:latest-2026.7.2 docker compose … --hash=waha
+waha d81a5132fc863c838147bbebddc9d7166aac570285ef6197dc35ef8c51cc3349
+```
+
+Um restart do WhatsApp, não uma troca de versão. **NÃO MEDIDO:** se uma sessão pareada volta
+`WORKING` depois desse restart — o volume sobrevive (provado aqui), a sessão não foi exercitada.
+
+Segue não consertado porque a decisão é de quem opera e a janela ainda está aberta; o
+enquadramento e as opções estão na issue do resíduo.
 
 ### O que estes ensaios NÃO cobriram
 

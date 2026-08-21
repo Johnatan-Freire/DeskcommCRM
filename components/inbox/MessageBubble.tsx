@@ -7,6 +7,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import type { Message } from "@/lib/types/messaging";
 import { CitationButton } from "@/components/ai/CitationButton";
 import { MediaRenderer } from "@/components/inbox/media/MediaRenderer";
+import { ContactCard } from "@/components/inbox/media/ContactCard";
 import {
   extractCitations,
   isAiGeneratedMessage,
@@ -35,6 +36,7 @@ export function MessageBubble({ message, debugCitations }: Props) {
   const time = format(new Date(message.sent_at), "HH:mm", { locale: ptBR });
   const isFailed = message.status === "failed";
   const hasMedia = Boolean(message.media_url || message.media_storage_path);
+  const isContact = message.type === "contact";
   // Figurinha sem caption: sem moldura de bolha (padrão WhatsApp).
   const isBareSticker = hasMedia && message.type === "sticker" && !message.body;
   // Apagada pelo autor ("apagar para todos"). A linha continua no histórico —
@@ -93,7 +95,13 @@ export function MessageBubble({ message, debugCitations }: Props) {
               </div>
             )}
 
-            {message.body && (
+            {isContact && !hasMedia && (
+              <div className={cn(message.body && isContact && "mb-1")}>
+                <ContactCard message={message} />
+              </div>
+            )}
+
+            {message.body && !isContact && (
               <p className="whitespace-pre-wrap break-words leading-snug">{message.body}</p>
             )}
           </>
