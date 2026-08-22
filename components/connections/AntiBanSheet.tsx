@@ -198,7 +198,8 @@ export function AntiBanSheet({ item, canWrite, onClose }: Props) {
             </div>
             <p className="text-xs text-muted-foreground">
               O assistente só envia mensagens dentro desta janela. Fora dela, a resposta fica
-              agendada para a próxima abertura — você vê o motivo na conversa.
+              agendada para a próxima abertura — você vê o motivo na conversa. Início maior que
+              fim é uma janela que cruza a meia-noite (ex.: 22h até 7h) — também é válido.
             </p>
           </fieldset>
 

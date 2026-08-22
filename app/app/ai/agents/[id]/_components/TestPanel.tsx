@@ -132,6 +132,17 @@ export function TestPanel({ agent, draft, published, readOnly }: Props) {
   const [contactPhone, setContactPhone] = React.useState("");
   const [pending, setPending] = React.useState(false);
   const [result, setResult] = React.useState<TestResponse["data"] | null>(null);
+  /**
+   * Transcript da sessão de teste. Cada run de teste nasce com
+   * `conversation_id: null` (não é conversa de verdade — nada toca
+   * contacts/conversations), então não há histórico pra carregar do banco:
+   * SOMOS nós que mantemos e reenviamos como `prior_turns` a cada chamada.
+   * Sem isto, mandar "mensagem 2" logo após "mensagem 1" na mesma tela era
+   * tratado como pergunta isolada, sem o agente saber o que veio antes.
+   */
+  const [transcript, setTranscript] = React.useState<
+    { role: "user" | "assistant"; content: string }[]
+  >([]);
 
   if (!target) {
     return (
@@ -154,19 +165,29 @@ export function TestPanel({ agent, draft, published, readOnly }: Props) {
     if (!target) return;
     setPending(true);
     setResult(null);
+    const sentMessage = message.trim();
     try {
-      const body: Record<string, unknown> = { sample_message: message.trim() };
+      const body: Record<string, unknown> = { sample_message: sentMessage };
       if (contactName.trim() || contactPhone.trim()) {
         body.sample_contact = {
           ...(contactName.trim() ? { name: contactName.trim() } : {}),
           ...(contactPhone.trim() ? { phone: contactPhone.trim() } : {}),
         };
       }
+      if (transcript.length > 0) {
+        body.prior_turns = transcript;
+      }
       const res = await apiClient.post<TestResponse>(
         `/api/v1/ai/agents/${agent.id}/versions/${target.id}/test`,
         body,
       );
       setResult(res.data);
+      setTranscript((prev) => [
+        ...prev,
+        { role: "user", content: sentMessage },
+        ...(res.data.final_text ? [{ role: "assistant" as const, content: res.data.final_text }] : []),
+      ]);
+      setMessage("");
       qc.invalidateQueries({ queryKey: agentRunsKey(agent.id) });
       toast.success("Teste executado.");
     } catch (err) {
@@ -239,15 +260,50 @@ export function TestPanel({ agent, draft, published, readOnly }: Props) {
           </div>
         </div>
 
-        <Button onClick={handleRun} disabled={pending || readOnly} className="self-start">
-          {pending ? "Executando…" : "Executar teste"}
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button onClick={handleRun} disabled={pending || readOnly} className="self-start">
+            {pending ? "Executando…" : transcript.length > 0 ? "Continuar conversa" : "Executar teste"}
+          </Button>
+          {transcript.length > 0 ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              disabled={pending}
+              onClick={() => {
+                setTranscript([]);
+                setResult(null);
+              }}
+            >
+              Reiniciar conversa de teste
+            </Button>
+          ) : null}
+        </div>
+        {transcript.length > 0 ? (
+          <p className="text-xs text-muted-foreground" data-testid="teste-continuidade-aviso">
+            Esta mensagem leva os {transcript.length} turno(s) anteriores como contexto.
+          </p>
+        ) : null}
       </div>
 
       <div className="flex flex-col gap-3">
         <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
           Resultado
         </p>
+
+        {transcript.length > 0 ? (
+          <div
+            data-testid="teste-transcript"
+            className="max-h-40 space-y-1.5 overflow-y-auto rounded-md border border-border/60 bg-muted/20 p-2 text-xs"
+          >
+            {transcript.map((turn, i) => (
+              <p key={i}>
+                <span className="font-medium">{turn.role === "user" ? "Cliente: " : "Agente: "}</span>
+                {turn.content}
+              </p>
+            ))}
+          </div>
+        ) : null}
 
         {!result && !pending ? (
           <p className="text-sm text-muted-foreground">

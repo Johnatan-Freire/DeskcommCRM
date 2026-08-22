@@ -193,7 +193,12 @@ export function dayStartInTz(instant: Date, timezone: string): Date {
 
 function insideWindow(wall: Wall, knobs: PacingKnobs): boolean {
   if (!knobs.allowSunday && wall.weekday === 'Sun') return false;
-  return wall.h >= knobs.windowStartHour && wall.h < knobs.windowEndHour;
+  const { windowStartHour: start, windowEndHour: end } = knobs;
+  // start < end: janela comum (ex.: 7h-22h). start > end: cruza a meia-noite
+  // (ex.: 22h-7h) — "dentro" é h >= start OU h < end, não AND. `windowIsValid`
+  // só barra start === end (janela de comprimento zero/ambígua); os outros
+  // dois casos chegam aqui de propósito.
+  return start < end ? wall.h >= start && wall.h < end : wall.h >= start || wall.h < end;
 }
 
 /** Próxima abertura de janela ESTRITAMENTE depois de `now` (pula domingo se evitado). */

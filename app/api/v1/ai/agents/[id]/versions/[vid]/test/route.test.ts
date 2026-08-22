@@ -13,6 +13,7 @@ import { NextRequest } from "next/server";
 import { requireRole } from "@/lib/auth/require-role";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ROLE_RANK, type AuthUser, type Role } from "@/lib/auth/types";
+import { runAgent } from "@/lib/ai/runtime/agent";
 
 vi.mock("@/lib/auth/require-role", () => ({ requireRole: vi.fn() }));
 vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: vi.fn() }));
@@ -102,5 +103,26 @@ describe("POST .../versions/:vid/test — runtime real", () => {
     expect(res.status).toBe(500);
     expect(body.error?.message).toContain("Não consegui executar o agente");
     expect(body.error?.message).toContain("AI_GATEWAY_API_KEY ausente");
+  });
+
+  it("prior_turns do body chega em override.priorTurns do runAgent — é a continuidade do chat de teste", async () => {
+    const { POST } = await import("./route");
+    const priorTurns = [
+      { role: "user", content: "oi, vocês têm o curso de X?" },
+      { role: "assistant", content: "temos sim! quer saber o valor?" },
+    ];
+    const req = new NextRequest("http://localhost/x", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sample_message: "quanto custa", prior_turns: priorTurns }),
+    });
+
+    await POST(req, { params: Promise.resolve({ id: AGENT, vid: VERSION }) });
+
+    expect(vi.mocked(runAgent)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        override: expect.objectContaining({ priorTurns }),
+      }),
+    );
   });
 });

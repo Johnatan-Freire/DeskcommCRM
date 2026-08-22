@@ -60,6 +60,12 @@ export interface RunAgentInput {
   override?: {
     sampleMessage?: string;
     sampleContact?: { name?: string; phone?: string };
+    /**
+     * Turnos anteriores da sessão de teste (cliente mantém o transcript — não
+     * há `conversation_id` real de onde carregar). Ausente/vazio preserva o
+     * comportamento antigo: cada teste isolado, sem continuidade.
+     */
+    priorTurns?: { role: "user" | "assistant"; content: string }[];
   };
 }
 
@@ -446,7 +452,10 @@ export async function runAgent(input: RunAgentInput): Promise<RunAgentResult> {
       handoffSignal,
     });
 
-    // 8) Load history with budget.
+    // 8) Load history with budget. Test runs não têm `conversation_id` (não é
+    // conversa de verdade); a continuidade vem do transcript que o CLIENTE
+    // mantém e reenvia em `override.priorTurns` — sem isso, cada mensagem de
+    // teste é isolada, mesmo que o usuário mande "mensagem 2" logo após "1".
     const history = run.conversation_id
       ? await loadHistoryWithBudget(admin, {
           conversationId: run.conversation_id,
@@ -455,7 +464,7 @@ export async function runAgent(input: RunAgentInput): Promise<RunAgentResult> {
           tokenWindow: version.history_token_window,
           excludeMessageId: run.inbound_message_id ?? undefined,
         })
-      : [];
+      : (input.override?.priorTurns ?? []);
 
     // 9) Build LM directly against the provider (BYOK credential — see buildModel doc).
     const model = buildModel(version.provider, credentialApiKey, version.model);
