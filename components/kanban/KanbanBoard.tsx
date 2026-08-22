@@ -275,6 +275,15 @@ export function KanbanBoard({
   return (
     <DragDropContext onDragEnd={handleDragEnd}>
       <div className="relative h-full min-h-0">
+        {/*
+         * As colunas de estágio (StageColumn) não têm scroll vertical próprio —
+         * crescem com a quantidade de leads, e é a PÁGINA inteira que rola.
+         * Por isso as setas NÃO podem se centralizar em `top-1/2` do container
+         * (que herda essa altura sem limite: com 11 leads numa coluna, o centro
+         * fica ~1200px abaixo da dobra, fora da tela). `top-24` ancora logo
+         * abaixo do cabeçalho das colunas — sempre visível na carga inicial,
+         * que é quando a maioria decide se vai descobrir o scroll.
+         */}
         {canScrollLeft && (
           <Button
             type="button"
@@ -283,7 +292,7 @@ export function KanbanBoard({
             aria-label="Rolar estágios para a esquerda"
             data-testid="kanban-scroll-left"
             onClick={() => scrollBy(-320)}
-            className="absolute left-2 top-1/2 z-10 -translate-y-1/2 rounded-full shadow-md"
+            className="absolute left-2 top-24 z-10 rounded-full shadow-md"
           >
             <CaretLeft size={18} />
           </Button>
@@ -296,7 +305,7 @@ export function KanbanBoard({
             aria-label="Rolar estágios para a direita"
             data-testid="kanban-scroll-right"
             onClick={() => scrollBy(320)}
-            className="absolute right-2 top-1/2 z-10 -translate-y-1/2 rounded-full shadow-md"
+            className="absolute right-2 top-24 z-10 rounded-full shadow-md"
           >
             <CaretRight size={18} />
           </Button>
