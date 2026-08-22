@@ -35,6 +35,8 @@ import {
 } from "@/lib/agent-engine/edge/llm/providers";
 import { CredentialUnavailableError, loadCredential } from "@/lib/ai/credentials";
 import { loadOrgMemoryViaSupabase, renderOrgMemory } from "@/lib/agent-engine/agent/org-memory";
+import { quemPodeAssumirAgoraViaSupabase } from "@/lib/escalacao/disponibilidade";
+import { textoDeConfirmacaoDeHandoff } from "@/lib/escalacao/texto-de-confirmacao";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { audit } from "@/lib/audit";
 import type { McpAuthResult } from "@/lib/mcp/auth";
@@ -386,10 +388,25 @@ export async function runAgent(input: RunAgentInput): Promise<RunAgentResult> {
         latencyMs: Date.now() - startedAt,
         isDryRun: run.is_dry_run,
       });
+      // Zero-custo por desenho (regex, sem LLM) — mesmo motivo pelo qual a
+      // confirmação não pode ser gerada por modelo aqui. Mesmo texto
+      // determinístico do sentinela de produção (inbound-turn.ts), pra quem
+      // testa pelo painel ver a mesma coisa que o lead veria, não um status
+      // técnico sem mensagem nenhuma (achado ao vivo: "handoff"/sem
+      // final_text não dizia nada sobre o que o cliente ia ler).
+      let sentinelText: string | undefined;
+      try {
+        const now = new Date();
+        const quem = await quemPodeAssumirAgoraViaSupabase(admin, run.organization_id, now);
+        sentinelText = textoDeConfirmacaoDeHandoff(quem, now, "America/Sao_Paulo", run.contact_id ?? run.id);
+      } catch {
+        // segue sem final_text — o status "handoff" ainda é visível na tela
+      }
       return {
         run_id: run.id,
         status: "handoff",
         abort_reason: "sentinel:requested_human",
+        ...(sentinelText !== undefined ? { final_text: sentinelText } : {}),
         latency_ms: Date.now() - startedAt,
         tokens_in: 0,
         tokens_out: 0,
