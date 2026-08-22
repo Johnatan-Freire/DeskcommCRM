@@ -34,6 +34,7 @@ import {
   OPENROUTER_ENDPOINT,
 } from "@/lib/agent-engine/edge/llm/providers";
 import { CredentialUnavailableError, loadCredential } from "@/lib/ai/credentials";
+import { loadOrgMemoryViaSupabase, renderOrgMemory } from "@/lib/agent-engine/agent/org-memory";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { audit } from "@/lib/audit";
 import type { McpAuthResult } from "@/lib/mcp/auth";
@@ -501,9 +502,24 @@ export async function runAgent(input: RunAgentInput): Promise<RunAgentResult> {
       { role: "user" as const, content: inboundBody },
     ];
 
+    // Memória Geral da Org (mesmo bloco que o runtime de produção injeta —
+    // lib/agent-engine/agent/org-memory.ts): sem isto, "Testar agente" não via
+    // nada publicado em /app/ai/memory (endereço, políticas, aprendizados) e o
+    // agente escalava pra humano por não ter uma informação que a organização
+    // já tinha dado. Falha de leitura aqui NÃO derruba o teste — só some o
+    // bloco, igual a uma org sem memória nenhuma.
+    let systemPrompt = version.system_prompt;
+    try {
+      const orgMemory = await loadOrgMemoryViaSupabase(admin, version.organization_id);
+      const memoryBlock = renderOrgMemory(orgMemory);
+      if (memoryBlock !== "") systemPrompt = `${version.system_prompt}\n\n${memoryBlock}`;
+    } catch {
+      // segue com o prompt publicado, sem o bloco de memória
+    }
+
     const result = await generateText({
       model,
-      system: version.system_prompt,
+      system: systemPrompt,
       messages,
       tools,
       stopWhen: [stepCountIs(version.max_steps), budgetGuard],

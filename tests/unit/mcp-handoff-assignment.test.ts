@@ -41,6 +41,8 @@ interface StubState {
   rpcCalls: Array<{ fn: string; args: Record<string, unknown> }>;
   updates: Array<{ table: string; values: Record<string, unknown> }>;
   inserts: Array<{ table: string; values: Record<string, unknown> }>;
+  /** roster p/ quemPodeAssumirAgoraViaSupabase (next_action com estimativa de horário). */
+  roster: Array<{ user_id: string; role: string }>;
 }
 
 function makeSupabaseStub(state: StubState) {
@@ -84,7 +86,9 @@ function makeSupabaseStub(state: StubState) {
       then: (resolve: (v: unknown) => unknown) => {
         let result: { data?: unknown; count?: number; error: null } = { data: [], error: null };
         if (table === "attendant_availability") result = { data: state.attendants, error: null };
+        else if (table === "user_organizations") result = { data: state.roster, error: null };
         else if (table === "conversations" && q.count) result = { count: state.queuePositionCount, error: null };
+        else if (table === "conversations") result = { data: [], error: null }; // carga p/ quemPodeAssumirAgoraViaSupabase
         return Promise.resolve(result).then(resolve);
       },
     };
@@ -114,6 +118,7 @@ function makeCtx(state: StubState): McpContext {
 function stubState(over: Partial<StubState> = {}): StubState {
   return {
     attendants: [{ user_id: AGENT_ID, capacity: 5, schedule: {} }],
+    roster: [{ user_id: AGENT_ID, role: "agent" }],
     queuePositionCount: 4,
     rpcCalls: [],
     updates: [],
@@ -204,6 +209,41 @@ describe("crm_request_human_handoff v2 (INB-12 — roteamento G5 unificado)", ()
         changed_by: null,
         reason: "handoff",
       },
+    });
+  });
+
+  describe("next_action com expectativa real (ACH-03 fechado também aqui)", () => {
+    // Achado ao vivo: "Testar agente" (que chama esta tool) devolvia
+    // "avise em tom acolhedor" genérico às 12:43, fora do horário de
+    // expediente — porque esta rota ainda não consultava quemPodeAssumirAgora.
+    // new Date() interno da tool exige fake timer pra fixar o "agora".
+    beforeEach(() => {
+      // Quarta 2026-07-29, 13h em São Paulo (16h UTC) — fora de QUALQUER janela
+      // configurada abaixo (14h-18h), então motivoEHorario fica true.
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-07-29T16:00:00.000Z"));
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("fora do horário declarado: next_action tem a estimativa, não o genérico antigo", async () => {
+      const state = stubState({
+        attendants: [
+          {
+            user_id: AGENT_ID,
+            capacity: 5,
+            schedule: { timezone: "America/Sao_Paulo", windows: [{ dow: 3, start: "14:00", end: "18:00" }] },
+          },
+        ],
+      });
+      const result = (await crmRequestHumanHandoff.handler(baseInput, makeCtx(state))) as {
+        next_action: string;
+      };
+      expect(result.next_action).toMatch(/14:00/);
+      expect(result.next_action).not.toBe(
+        "Avise o cliente em tom acolhedor que um atendente humano vai assumir em instantes.",
+      );
     });
   });
 });

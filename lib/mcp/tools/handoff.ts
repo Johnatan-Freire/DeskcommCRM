@@ -23,6 +23,7 @@ import { triggerHandoff } from "@/lib/ai/handoff/orchestrator";
 import { loadEligibleAttendants } from "@/lib/routing/eligibles";
 import { selectRoundRobin } from "@/lib/routing/decide";
 import { getQueuePosition } from "@/lib/routing/queue";
+import { quemPodeAssumirAgoraViaSupabase, fraseDeExpectativa } from "@/lib/escalacao/disponibilidade";
 import { logger } from "@/lib/logger";
 import type { McpToolDefinition } from "../types";
 
@@ -160,6 +161,22 @@ export const crmRequestHumanHandoff: McpToolDefinition<typeof inputShape> = {
       }
     }
 
+    // ACH-03: "avise em tom acolhedor" sozinho já produziu, medido, um agente
+    // dizendo "vou providenciar que alguém entre em contato" sem prazo nenhum
+    // — capacidade que depende do MODELO lembrar de checar disponibilidade não
+    // existe metade das vezes. A expectativa (com estimativa de horário real
+    // quando o motivo de ninguém estar disponível é a agenda declarada, não
+    // fila cheia) entra JUNTO na instrução, sem o caller ter que pedir.
+    let nextAction = "Avise o cliente em tom acolhedor que um atendente humano vai assumir em instantes.";
+    try {
+      const quem = await quemPodeAssumirAgoraViaSupabase(ctx.supabase, ctx.organizationId, new Date());
+      nextAction = fraseDeExpectativa(quem, new Date());
+    } catch (err) {
+      logger.warn("[mcp.handoff] expectativa de atendimento falhou — next_action genérico", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+
     return {
       handoff_recorded: result.triggered,
       conversation_id: input.conversation_id,
@@ -170,8 +187,7 @@ export const crmRequestHumanHandoff: McpToolDefinition<typeof inputShape> = {
       // Compat com o contrato anterior (callers que liam assigned_to_user_id).
       assigned_to_user_id: assignedUserId,
       idempotent: !result.triggered && result.reason === "idempotent_5s",
-      next_action:
-        "Avise o cliente em tom acolhedor que um atendente humano vai assumir em instantes.",
+      next_action: nextAction,
     };
   },
 };
