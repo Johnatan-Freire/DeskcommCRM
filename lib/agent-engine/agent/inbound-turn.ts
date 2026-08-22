@@ -62,6 +62,7 @@ import {
   buildHandoffSummary,
   detectAmbiguousOptOut,
   detectHumanHandoffRequest,
+  enviarConfirmacaoDeHandoffDeterministico,
   isLeadInHandoff,
   performHumanHandoff,
 } from './human-handoff';
@@ -1179,10 +1180,20 @@ async function executarTurnoDoAgente(
     throw new Error(`abertura do turno falhou em get_lead_context (${openingContext.error.code})`);
   }
 
+  // Seam de canal (F2-25) e relógio, movidos pra ANTES do gatilho determinístico
+  // de handoff logo abaixo: `enviarConfirmacaoDeHandoffDeterministico` precisa
+  // dos dois pra mandar a confirmação ao lead nesse ramo (que retorna antes do
+  // resto do turno montar tools/modelo). Só dependem de `agentConfig`/`deps`,
+  // já resolvidos acima — mover não muda nada do que vem depois.
+  const turnCrmCfg =
+    agentConfig !== null ? { ...deps.crmCfg, agentActorId: agentConfig.agentId } : deps.crmCfg;
+  const channel = (deps.channel ?? ((p: pg.Pool) => new WahaChannelAdapter(p, turnCrmCfg)))(pool);
+  const clock = deps.clock ?? ((): Date => new Date());
+
   // F4-06 (acceptance 1): detecção DETERMINÍSTICA (regex PT-BR, sem LLM) de pedido explícito
   // de atendimento humano na última mensagem do lead. Handoff é cidadão de 1ª classe (exigência
-  // Meta fiscalizada, blueprint 5.5) — dispara ANTES do modelo: o bot silencia sem gastar LLM,
-  // sem enviar. A ação (CRM force_human + cache + cancela crons + inbox) é idempotente.
+  // Meta fiscalizada, blueprint 5.5) — dispara ANTES do modelo: o bot silencia sem gastar LLM.
+  // A ação (CRM force_human + cache + cancela crons + inbox) é idempotente.
   const inboundSignal = latestInboundSignal(openingContext.context.messages);
   if (
     detectHumanHandoffRequest(inboundSignal) ||
@@ -1196,7 +1207,23 @@ async function executarTurnoDoAgente(
     runLog.info('handoff humano acionado por pedido explícito do lead (detecção determinística)', {
       kind: job.kind,
     });
-    return; // bot silencia: sem modelo, sem envio neste turno
+    // Confirmação FIXA (sem modelo) — antes deste turno silenciava sem enviar
+    // nada. Best-effort: nunca lança (ver doc da função); handoff em si já
+    // está aplicado acima.
+    await enviarConfirmacaoDeHandoffDeterministico(
+      pool,
+      { tenantId, leadId, conversationId: input.conversationId },
+      {
+        jobId: job.id,
+        channelSessionId: input.channelSessionId,
+        optedOutThisTurn: openingContext.context.contact.is_blocked,
+        now: clock(),
+        sleep: deps.sleep,
+        channel,
+        log: runLog,
+      },
+    );
+    return; // bot silencia: sem modelo neste turno (a confirmação acima não passa por ele)
   }
 
   // F4-07: STOP AMBÍGUO ("para de me mandar isso", "não quero mais receber", "me tira da
@@ -1296,17 +1323,10 @@ async function executarTurnoDoAgente(
     });
   }
 
-  // Seam de canal (F2-25): o envio vai SÓ pela interface ChannelAdapter — o
-  // default WAHA-via-CRM envolve o sink F2-06. Instanciado por job (o pool é
-  // per-job neste codebase); trocar o adapter não muda nada abaixo.
-  // Fase 2B: o envio carrega o ai_agents.id REAL como ator (audit/metadata do
-  // CRM apontam o agente publicado, não um id genérico).
-  const turnCrmCfg =
-    agentConfig !== null ? { ...deps.crmCfg, agentActorId: agentConfig.agentId } : deps.crmCfg;
-  const channel = (deps.channel ?? ((p: pg.Pool) => new WahaChannelAdapter(p, turnCrmCfg)))(pool);
-  const clock = deps.clock ?? ((): Date => new Date());
   // STOP lido no turno (fonte: CRM via get_lead_context) — combinado com o cache
   // durável leads.is_opted_out no gate 1 da cadeia (F2-13).
+  // (Seam de canal/relógio — turnCrmCfg/channel/clock — foram movidos para ANTES
+  // do gatilho determinístico de handoff, que também precisa deles.)
   const optedOutThisTurn = openingContext.context.contact.is_blocked;
   // LGPD (F4-09): base legal/anonimização do CRM lidas na abertura do turno (fonte confiável,
   // regra dura nº 1) — o gate LGPD da cadeia veta anonimizado (sempre) e 1º toque de prospecção

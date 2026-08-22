@@ -3,8 +3,11 @@
  * clara e imediata é EXIGÊNCIA fiscalizada da Meta, não fallback). Dois gatilhos, uma
  * ação idempotente:
  *   1. DETERMINÍSTICO — regex PT-BR na última mensagem do lead ("falar com atendente",
- *      "quero falar com uma pessoa"…). Roda no runtime ANTES do modelo: o turno vira
- *      NO-OP (o bot silencia, não gasta LLM nem envia).
+ *      "quero falar com uma pessoa"…). Roda no runtime ANTES do modelo: o turno não
+ *      gasta LLM. Depois de `performHumanHandoff`, `enviarConfirmacaoDeHandoffDeterministico`
+ *      manda uma confirmação FIXA (sem modelo) ao lead — com estimativa de horário
+ *      real quando o motivo de não haver ninguém disponível é a agenda declarada dos
+ *      atendentes (ver lib/escalacao/). Antes, este ramo silenciava sem enviar nada.
  *   2. TOOL request_human_handoff — o modelo aciona quando percebe o limite da automação.
  *
  * A ação (performHumanHandoff), idempotente e at-least-once — TUDO no mesmo banco agora
@@ -21,11 +24,14 @@
 import { z } from 'zod';
 import type pg from 'pg';
 
-import { expectativaDeAtendimento } from '@/lib/escalacao/disponibilidade';
+import { expectativaDeAtendimento, quemPodeAssumirAgora } from '@/lib/escalacao/disponibilidade';
+import { textoDeConfirmacaoDeHandoff } from '@/lib/escalacao/texto-de-confirmacao';
 import { ehOptOutProvavel } from '@/lib/opt-out/deteccao';
 import { emitAgentActivityForContact } from '@/lib/leads/agent-activity';
 
 import type { Logger } from '../obs/logger';
+import type { ChannelAdapter } from '../channel-adapter';
+import { runBeforeSend } from '../guardrails/before-send';
 import { cancelPendingCronsForLead } from '../cron/scheduler';
 import { findForbiddenKey, zodIssuesSummary } from './lead-state';
 import { renderDeclaracaoParaHumano, type DeclaracaoDoTurno } from './declaracao';
@@ -198,6 +204,83 @@ export async function performHumanHandoff(
   opts.log.info('handoff humano aplicado (force_human + silêncio + crons cancelados + inbox)', {
     reason: opts.reason,
   });
+}
+
+/**
+ * Confirmação AO LEAD do handoff, para o ramo DETERMINÍSTICO (pedido explícito
+ * de humano, detectado por regex — sem turno de modelo). Antes desta função o
+ * ramo silenciava sem enviar nada; pedido do dono do produto (Capital Code):
+ * se cair fora do horário de atendimento, o cliente ouve uma estimativa real
+ * ("volta às 14h"), não silêncio.
+ *
+ * Sem modelo rodando aqui, o texto é fixo (`textoDeConfirmacaoDeHandoff`) —
+ * mas passa pela MESMA cadeia `runBeforeSend` de qualquer envio (CLAUDE.md
+ * princípio 2: "enviar é sempre pela cadeia, nunca por baixo dela"), o mesmo
+ * padrão que a re-entrada determinística (`followup-turn.ts`) já usa para
+ * mandar texto sem LLM. Best-effort: falha aqui NUNCA desfaz o handoff (já
+ * aplicado antes desta chamada) nem propaga — o cliente já está na fila
+ * humana de qualquer forma, e um erro na CONFIRMAÇÃO não pode parecer erro no
+ * HANDOFF em si.
+ */
+export async function enviarConfirmacaoDeHandoffDeterministico(
+  db: pg.Pool,
+  ids: HandoffIds,
+  opts: {
+    jobId: string;
+    channelSessionId: string;
+    optedOutThisTurn: boolean;
+    now: Date;
+    timezone?: string;
+    sleep?: (ms: number) => Promise<void>;
+    channel: Pick<ChannelAdapter, 'send'>;
+    log: Logger;
+  },
+): Promise<void> {
+  try {
+    const quem = await quemPodeAssumirAgora(db, ids.tenantId, opts.now);
+    const body = textoDeConfirmacaoDeHandoff(quem, opts.now, opts.timezone ?? 'America/Sao_Paulo', ids.leadId);
+
+    const chain = await runBeforeSend({
+      pool: db,
+      log: opts.log,
+      tenantId: ids.tenantId,
+      leadId: ids.leadId,
+      jobId: opts.jobId,
+      channelSessionId: opts.channelSessionId,
+      body,
+      optedOutThisTurn: opts.optedOutThisTurn,
+      // ponytail: mesmo débito dos demais chamadores — daily_message_limit do CRM
+      // ainda não é lido no runtime; null cai nos degraus de warm-up (conservadores).
+      crmDailyLimit: null,
+      now: opts.now,
+      sleep: opts.sleep,
+      send: (finalBody) =>
+        opts.channel.send({
+          tenantId: ids.tenantId,
+          leadId: ids.leadId,
+          jobId: opts.jobId,
+          seq: 1,
+          conversationId: ids.conversationId,
+          body: finalBody,
+        }),
+    });
+
+    if (chain.status === 'vetoed') {
+      // Veto por janela anti-ban aqui NÃO re-agenda (ao contrário da re-entrada):
+      // isto é uma confirmação de handoff, não uma campanha — o lead já está na
+      // fila humana, e reagendar só esta mensagem pra depois seria mais
+      // complexidade por um "nice to have" que pode simplesmente não sair.
+      opts.log.info('confirmação de handoff (ramo determinístico) vetada pela cadeia — segue sem enviar', {
+        code: chain.code,
+      });
+      return;
+    }
+    opts.log.info('confirmação de handoff enviada ao lead (ramo determinístico, sem LLM)', {});
+  } catch (err) {
+    opts.log.warn('confirmação de handoff determinístico falhou — handoff em si já foi aplicado', {
+      error: err instanceof Error ? err.message.slice(0, 200) : 'erro desconhecido',
+    });
+  }
 }
 
 /** Whitelist EXATA do payload da tool (mesmo padrão .strict() da F2-10/F3-02). */
