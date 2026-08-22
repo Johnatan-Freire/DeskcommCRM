@@ -1,8 +1,10 @@
 "use client";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DragDropContext, type DropResult } from "@hello-pangea/dnd";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Button } from "@/components/ui/button";
+import { CaretLeft, CaretRight } from "@/lib/ui/icons";
 import { useBoard } from "@/hooks/kanban/useBoard";
 import { useMoveCard } from "@/hooks/kanban/useMoveCard";
 import { useAssignableMembers } from "@/hooks/inbox/useAssignableMembers";
@@ -13,6 +15,45 @@ import type { Lead } from "@/lib/types/leads";
 import type { Pipeline, Stage } from "@/lib/kanban/types";
 import { StageColumn } from "./StageColumn";
 import { LeadDossier } from "./LeadDossier";
+
+/**
+ * As colunas de estágio rolam na horizontal (`overflow-x-auto`) sem nenhum
+ * indício visual — quem tem mais de ~4 estágios não descobre sozinho que dá
+ * pra arrastar pro lado. As setas só aparecem quando há overflow real
+ * (`canScrollLeft`/`canScrollRight`), então um board com poucos estágios que
+ * cabem na tela nunca as mostra.
+ */
+function useBoardScroll() {
+  const ref = useRef<HTMLDivElement>(null);
+  const [canScrollLeft, setCanScrollLeft] = useState(false);
+  const [canScrollRight, setCanScrollRight] = useState(false);
+
+  const update = useCallback(() => {
+    const el = ref.current;
+    if (!el) return;
+    setCanScrollLeft(el.scrollLeft > 4);
+    setCanScrollRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 4);
+  }, []);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    update();
+    el.addEventListener("scroll", update, { passive: true });
+    const observer = new ResizeObserver(update);
+    observer.observe(el);
+    return () => {
+      el.removeEventListener("scroll", update);
+      observer.disconnect();
+    };
+  }, [update]);
+
+  const scrollBy = useCallback((delta: number) => {
+    ref.current?.scrollBy({ left: delta, behavior: "smooth" });
+  }, []);
+
+  return { ref, canScrollLeft, canScrollRight, scrollBy };
+}
 
 interface KanbanBoardProps {
   pipelineId: string;
@@ -74,6 +115,7 @@ export function KanbanBoard({
   pulses: pulsesProp,
   onSelectionChange,
 }: KanbanBoardProps) {
+  const { ref: scrollRef, canScrollLeft, canScrollRight, scrollBy } = useBoardScroll();
   const useExternal = stagesProp !== undefined && leadsProp !== undefined;
   const queryResult = useBoard(useExternal ? null : pipelineId);
   const moveCard = useMoveCard(pipelineId);
@@ -232,23 +274,51 @@ export function KanbanBoard({
 
   return (
     <DragDropContext onDragEnd={handleDragEnd}>
-      <div className="flex h-full gap-3 overflow-x-auto p-4">
-        {data.stages.map((stage) => (
-          <StageColumn
-            key={stage.id}
-            stage={stage}
-            leads={grouped.get(stage.id) ?? []}
-            pipelineId={pipelineId}
-            ownerNames={ownerNames}
-            coolingIds={coolingIds}
-            reactivations={reactivations}
-            pulses={pulsesProp ?? queryResult.pulses}
-            canonicalTags={canonicalTags}
-            selectedLeadIds={selectedLeadIds}
-            onSelect={handleSelect}
-            onOpen={setDossieId}
-          />
-        ))}
+      <div className="relative h-full min-h-0">
+        {canScrollLeft && (
+          <Button
+            type="button"
+            variant="secondary"
+            size="icon"
+            aria-label="Rolar estágios para a esquerda"
+            data-testid="kanban-scroll-left"
+            onClick={() => scrollBy(-320)}
+            className="absolute left-2 top-1/2 z-10 -translate-y-1/2 rounded-full shadow-md"
+          >
+            <CaretLeft size={18} />
+          </Button>
+        )}
+        {canScrollRight && (
+          <Button
+            type="button"
+            variant="secondary"
+            size="icon"
+            aria-label="Rolar estágios para a direita"
+            data-testid="kanban-scroll-right"
+            onClick={() => scrollBy(320)}
+            className="absolute right-2 top-1/2 z-10 -translate-y-1/2 rounded-full shadow-md"
+          >
+            <CaretRight size={18} />
+          </Button>
+        )}
+        <div ref={scrollRef} className="flex h-full gap-3 overflow-x-auto p-4">
+          {data.stages.map((stage) => (
+            <StageColumn
+              key={stage.id}
+              stage={stage}
+              leads={grouped.get(stage.id) ?? []}
+              pipelineId={pipelineId}
+              ownerNames={ownerNames}
+              coolingIds={coolingIds}
+              reactivations={reactivations}
+              pulses={pulsesProp ?? queryResult.pulses}
+              canonicalTags={canonicalTags}
+              selectedLeadIds={selectedLeadIds}
+              onSelect={handleSelect}
+              onOpen={setDossieId}
+            />
+          ))}
+        </div>
       </div>
       {leadDoDossie && (
         <LeadDossier

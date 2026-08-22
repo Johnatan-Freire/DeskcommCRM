@@ -1,5 +1,6 @@
 "use client";
 import { useCallback, useMemo, useState } from "react";
+import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useBoard } from "@/hooks/kanban/useBoard";
 
@@ -24,7 +25,7 @@ import { FilterBar } from "@/components/kanban/FilterBar";
 import { BulkActionBar } from "@/components/kanban/BulkActionBar";
 import { NewLeadDialog } from "@/components/kanban/NewLeadDialog";
 import { Button } from "@/components/ui/button";
-import { Plus } from "@/lib/ui/icons";
+import { CaretLeft, Plus } from "@/lib/ui/icons";
 import type { LeadFilters } from "@/lib/kanban/filters";
 import { applyFilters, filtersFromParams, filtersToParams } from "@/lib/kanban/filters";
 
@@ -75,9 +76,19 @@ export function PipelinePageClient({
       data-refetch-em={seguranca.ultimaVerificacao ?? ""}
     >
       <header className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold tracking-tight">
-          {data?.pipeline.name ?? initialName}
-        </h1>
+        <div className="flex items-center gap-3">
+          <Link
+            href="/app/kanban"
+            data-testid="pipeline-voltar-funis"
+            className="flex items-center gap-1 text-sm text-text-muted hover:text-accent"
+          >
+            <CaretLeft size={16} /> Funis
+          </Link>
+          <span className="text-border">/</span>
+          <h1 className="text-2xl font-semibold tracking-tight">
+            {data?.pipeline.name ?? initialName}
+          </h1>
+        </div>
         <Button onClick={() => setNewOpen(true)} disabled={!data}>
           <Plus size={16} className="mr-2" /> Novo Lead
         </Button>
