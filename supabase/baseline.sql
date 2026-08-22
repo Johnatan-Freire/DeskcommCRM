@@ -13957,3 +13957,20 @@ create unique index if not exists channel_sessions_zernio_account_id_ativo_uniqu
   where archived_at is null and zernio_account_id is not null;
 
 notify pgrst, 'reload schema';
+
+-- ---- number_activated_at aceita null (migration 0168) ----
+--
+-- A coluna nasceu `not null default now()` (migration 0050), mas a camada de
+-- aplicação sempre tratou `null` como estado válido e DISTINTO de "ativado
+-- agora" — significa "idade desconhecida", e o motor de pacing trata isso
+-- como o degrau MAIS conservador de warm-up permanentemente, não só no
+-- primeiro dia. A UI expõe o campo como opcional; o PUT manda `null`
+-- explícito quando fica em branco, e null explícito ignora o DEFAULT — a
+-- constraint rejeitava (23502) todo salvamento da tela de Proteção de envio
+-- em que esse campo ficasse vazio, mesmo sem tocar nele (o form reenvia o
+-- payload inteiro). `alter ... drop not null` é idempotente por natureza —
+-- reaplicar sobre uma coluna já sem a constraint não gera erro.
+alter table public.channel_knobs
+  alter column number_activated_at drop not null;
+
+notify pgrst, 'reload schema';
