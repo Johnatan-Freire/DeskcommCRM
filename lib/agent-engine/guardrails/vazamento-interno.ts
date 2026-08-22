@@ -309,10 +309,12 @@ const REGRAS: ReadonlyArray<RegraTexto> = [
  *    porque `lib/mcp/tools/catalog` é
  *    client-safe por contrato do próprio módulo — zero zod, zero supabase, zero
  *    next/headers; o grafo de runtime dele é só dado. Importar daqui não arrasta nada.
- * 2. NÃO deriva de `AGENT_TOOL_DEFS` (as 12 nativas), que vive em
+ * 2. NÃO deriva de `AGENT_TOOL_DEFS` (as nativas — conte com
+ *    `Object.keys(AGENT_TOOL_DEFS).length`, não confie num número aqui: já
+ *    apodreceu de 12 pra 14 sem este comentário notar), que vive em
  *    `lib/agent-engine/agent/inbound-turn.ts`. Importá-lo criaria ciclo
  *    (inbound-turn → before-send → este módulo → inbound-turn) E arrastaria o motor
- *    inteiro (AI SDK, pg, canal) para dentro de um detector puro. As 12 são todas
+ *    inteiro (AI SDK, pg, canal) para dentro de um detector puro. São todas
  *    snake_case, então a regra (A) já as pega — e quem PROVA isso é
  *    `tests/unit/vazamento-interno-detector.test.ts`, que importa `AGENT_TOOL_DEFS` (um
  *    teste pode pagar o peso) e exige que cada uma seja detectada. Tool nativa nova que
@@ -333,8 +335,10 @@ const RE_NOMES_DE_TOOL = new RegExp(`\\b(?:${NOMES_DE_TOOL.join('|')})\\b`, 'g')
  * PRESERVADA (as outras rodam sobre o normalizado). É a correção de maior rendimento
  * medido, e não é heurística de gosto — é uma diferença estrutural entre dois mundos:
  *   - identificador técnico desta base é sempre lowercase. VERIFICADO no HEAD, não
- *     deduzido: 31 nomes de tool no `TOOL_CATALOG`, 12 em `AGENT_TOOL_DEFS`, 343 colunas e
- *     59 tabelas em `supabase/baseline.sql` (65 somando `supabase/migrations/`) — ZERO com
+ *     deduzido (mas reconte antes de citar — os números de `TOOL_CATALOG`/`AGENT_TOOL_DEFS`
+ *     já apodreceram uma vez sem este comentário notar): nomes de tool em `TOOL_CATALOG`,
+ *     nomes de tool em `AGENT_TOOL_DEFS`, colunas e
+ *     tabelas em `supabase/baseline.sql` (mais somando `supabase/migrations/`) — ZERO com
  *     maiúscula. Exigir minúsculas não solta nenhuma tool, tabela nem coluna. O que segura
  *     essa premissa contra o futuro é um teste sobre as tools no arquivo de calibração;
  *     tabela/coluna nova em maiúscula quebraria antes o resto do repo.

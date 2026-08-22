@@ -239,6 +239,18 @@ const MARCA_CONGELADA: Record<string, EntradaDeMarca> = {
       "`X-Client-Info` enviado ao Supabase — identifica o cliente nos logs e na telemetria DELES. Não é texto de interface e nunca chega ao usuário",
     marcas: ["deskcomm-crm"],
   },
+  "lib/integracoes/sistema-escolar.ts": {
+    categoria: "PROTOCOLO",
+    motivo:
+      "path /api/deskcomm/* é a rota que o sistema escolar (Laravel externo, repo à parte) já tem registrada e publicada em produção (routes/api.php de lá). Renomear aqui sem renomear e reimplantar o outro lado quebra a integração em silêncio — 404 sem explicação",
+    marcas: ["deskcomm", "deskcomm"],
+  },
+  "lib/integracoes/sistema-escolar.test.ts": {
+    categoria: "PROTOCOLO",
+    motivo:
+      "é a guarda do contrato acima: prova que o client chama exatamente /api/deskcomm/aluno e /api/deskcomm/cursos. Trocar a string aqui para 'limpar a marca' desarmaria a única proteção que o contrato tem",
+    marcas: ["deskcomm", "deskcomm", "deskcomm"],
+  },
   "lib/nuvemshop/config.ts": {
     categoria: "PROTOCOLO",
     motivo:

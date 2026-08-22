@@ -79,6 +79,11 @@ import { DECLARACAO_INSTRUCTION, declaracaoDoTurnoSchema, promessasEmAberto, typ
 import { projetarContexto, projetarRetornoDeTool, turnoProjeta, type ContextoProjetado } from './projecao';
 import { capacidadesEntreguesAoOperador, catalogoEntregueAoOperador } from './entrega-de-capacidade';
 import { composeSystemPrompt, loadOrgMemory, renderOrgMemory } from './org-memory';
+import {
+  carregarConfig as carregarConfigSistemaEscolar,
+  buscarAlunoPorTelefone,
+  buscarCatalogoCursos,
+} from '@/lib/integracoes/sistema-escolar';
 import { matchesHandoffKeyword } from './agent-config';
 import { resolveTurnAgent } from './resolve-turn-agent';
 import {
@@ -276,6 +281,25 @@ export const AGENT_TOOL_DEFS = {
         .record(z.string(), z.string())
         .describe('valor de cada parâmetro, na chave que a tela de templates mostra (ex.: "1", "2")'),
     }).passthrough(),
+  },
+  consultar_aluno_sistema_escolar: {
+    description:
+      'Busca no SISTEMA ESCOLAR (dado real, não a base de conhecimento) o cadastro do aluno pelo ' +
+      'número de WhatsApp deste lead: matrícula, curso/turma, horário de aula, notas, frequência ' +
+      '(faltas/presenças) e situação financeira (só o status — nunca peça ou repita boleto/PIX). Use ' +
+      'para QUALQUER pergunta sobre a situação PESSOAL de um aluno já matriculado. Se não achar (aluno ' +
+      'não cadastrado com este número), ou se vier mais de um cadastro para o mesmo número (ambíguo), ' +
+      'NÃO invente — peça o nome completo pra desambiguar, ou passe para search_knowledge se for ' +
+      'pergunta genérica (não sobre uma pessoa).',
+    inputSchema: z.object({}),
+  },
+  consultar_catalogo_cursos: {
+    description:
+      'Busca no SISTEMA ESCOLAR o catálogo REAL de cursos e pacotes públicos (preço, parcelamento, ' +
+      'trilha, público-alvo, saídas profissionais). Use ANTES de responder preço/parcelamento/conteúdo ' +
+      'de curso para um lead — é a fonte de verdade sobre valores, mais atual que qualquer material ' +
+      'anexado. Sem resultado ou dado desatualizado: caia para search_knowledge.',
+    inputSchema: z.object({}),
   },
 } as const;
 
@@ -993,6 +1017,20 @@ async function executarTurnoDoAgente(
   // Contexto do RUN em toda linha de log do turno (F2-16): job_id É o run id.
   const runLog = withFields(deps.log, { job_id: job.id, tenant_id: tenantId, lead_id: leadId });
 
+  // Integração com sistema escolar externo (org_sistema_escolar_config,
+  // migration 0169) — `null` é o estado NORMAL de toda org que não é a
+  // Capital Code (nenhuma linha configurada). Falha de leitura/decrypt
+  // também degrada pra null: as duas tools de sistema escolar só somem do
+  // turno (mesmo gate de search_knowledge/activeKbVersionId), nunca derruba.
+  let sistemaEscolarConfig: Awaited<ReturnType<typeof carregarConfigSistemaEscolar>> = null;
+  try {
+    sistemaEscolarConfig = await carregarConfigSistemaEscolar(pool, tenantId);
+  } catch (err) {
+    runLog.warn('leitura da config do sistema escolar falhou — turno segue sem essas tools', {
+      error: err instanceof Error ? err.message.slice(0, 200) : 'erro desconhecido',
+    });
+  }
+
   // AS DUAS CAMADAS QUE CUSTAM DINHEIRO, resolvidas UMA vez por turno.
   //
   // Os knobs (`deps.knobs.jailbreak`, `deps.knobs.promiseSemantic`) nascem no boot
@@ -1623,6 +1661,62 @@ async function executarTurnoDoAgente(
         return turnoProjeta(mcpToolIdsDoTurno) ? projetarRetornoDeTool(out) : out;
       },
     }),
+    consultar_aluno_sistema_escolar: tool({
+      ...AGENT_TOOL_DEFS.consultar_aluno_sistema_escolar,
+      execute: async () => {
+        // Gate igual ao de search_knowledge: sem config pra esta org, a tool nem
+        // deveria ter entrado no turno (ver bloco de montagem de tools abaixo) —
+        // este branch é defesa em profundidade, não o caminho normal.
+        if (sistemaEscolarConfig === null) {
+          return {
+            ok: false,
+            error: { code: 'nao_configurado', message: 'sistema escolar não configurado para esta organização.' },
+          };
+        }
+        const telefone = openingContext.context.contact.phone;
+        if (!telefone) {
+          return {
+            ok: false,
+            error: { code: 'sem_telefone', message: 'este contato não tem telefone registrado — não dá pra buscar.' },
+          };
+        }
+        try {
+          const out = await buscarAlunoPorTelefone(sistemaEscolarConfig, telefone);
+          return { ok: true, ...out };
+        } catch (err) {
+          runLog.warn('consulta ao sistema escolar (aluno) falhou', {
+            error: err instanceof Error ? err.message : String(err),
+          });
+          return {
+            ok: false,
+            error: { code: 'falha_consulta', message: 'não consegui consultar o sistema escolar agora — siga sem esse dado, ou peça pra tentar de novo em instantes.' },
+          };
+        }
+      },
+    }),
+    consultar_catalogo_cursos: tool({
+      ...AGENT_TOOL_DEFS.consultar_catalogo_cursos,
+      execute: async () => {
+        if (sistemaEscolarConfig === null) {
+          return {
+            ok: false,
+            error: { code: 'nao_configurado', message: 'sistema escolar não configurado para esta organização.' },
+          };
+        }
+        try {
+          const out = await buscarCatalogoCursos(sistemaEscolarConfig);
+          return { ok: true, ...out };
+        } catch (err) {
+          runLog.warn('consulta ao sistema escolar (catálogo) falhou', {
+            error: err instanceof Error ? err.message : String(err),
+          });
+          return {
+            ok: false,
+            error: { code: 'falha_consulta', message: 'não consegui consultar o catálogo agora — use search_knowledge ou avise que vai confirmar.' },
+          };
+        }
+      },
+    }),
     send_message: tool({
       ...AGENT_TOOL_DEFS.send_message,
       execute: async ({ body }) => {
@@ -2140,6 +2234,14 @@ async function executarTurnoDoAgente(
   // publicado tem KB ativa — def estática permanece no AGENT_TOOL_DEFS (prefixo).
   if (agentConfig?.activeKbVersionId == null) {
     delete rawTools.search_knowledge;
+  }
+
+  // Tools do sistema escolar só entram quando a ORG tem a integração
+  // configurada (org_sistema_escolar_config) — de resto, todo self-host que
+  // não é a Capital Code nunca vê essas duas tools no prompt.
+  if (sistemaEscolarConfig === null) {
+    delete rawTools.consultar_aluno_sistema_escolar;
+    delete rawTools.consultar_catalogo_cursos;
   }
 
   // A ferramenta de template só entra em canal que EXIGE template fora da janela.

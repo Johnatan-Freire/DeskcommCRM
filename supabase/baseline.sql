@@ -13974,3 +13974,44 @@ alter table public.channel_knobs
   alter column number_activated_at drop not null;
 
 notify pgrst, 'reload schema';
+
+-- ---- config por org da integração com sistema escolar (migration 0169) ----
+--
+-- Um-para-um por organização; usado pelos agentes "Alunos" e "Interessados"
+-- via lib/agent-engine (service_role). Chave AES-256-GCM no mesmo formato de
+-- ai_provider_credentials (lib/crypto/aes_gcm.ts) — reaproveitado, não
+-- duplicado. Sem tela de configuração ainda: SELECT de authenticated já
+-- nasce revogado (nenhum caminho de browser precisa ler o segredo).
+create table if not exists public.org_sistema_escolar_config (
+  organization_id uuid primary key references public.organizations(id) on delete cascade,
+  base_url text not null,
+  api_key_encrypted bytea not null,
+  api_key_iv bytea not null,
+  api_key_tag bytea not null,
+  api_key_last4 text not null,
+  is_active boolean not null default true,
+  created_by uuid,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+alter table public.org_sistema_escolar_config enable row level security;
+
+drop trigger if exists trg_org_sistema_escolar_config_updated_at on public.org_sistema_escolar_config;
+create trigger trg_org_sistema_escolar_config_updated_at
+  before update on public.org_sistema_escolar_config
+  for each row execute function public.fn_set_updated_at();
+
+drop policy if exists tenant_isolation_org_sistema_escolar_config_write on public.org_sistema_escolar_config;
+create policy tenant_isolation_org_sistema_escolar_config_write on public.org_sistema_escolar_config
+  for all using (
+    organization_id in (select public.fn_user_org_ids())
+      and public.fn_role_at_least(organization_id, 'admin')
+  ) with check (
+    organization_id in (select public.fn_user_org_ids())
+      and public.fn_role_at_least(organization_id, 'admin')
+  );
+
+revoke select on public.org_sistema_escolar_config from authenticated, anon;
+
+notify pgrst, 'reload schema';
