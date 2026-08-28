@@ -29,6 +29,7 @@ import { seedPlatformPlaybook } from '@/lib/agent-engine/agent/playbook-seed';
 import { runCronLoop } from '@/lib/agent-engine/cron/scheduler';
 import { createPool } from '@/lib/agent-engine/db/pool';
 import { runDrainLoop } from '@/lib/agent-engine/edge/crm/drain';
+import { runEventLogDrainLoop } from '@/lib/event-log/drain-loop';
 import { crmEdgeConfigFromEnv } from '@/lib/agent-engine/edge/crm/mcp-client';
 import { enforceHolds, sessionHealthMetrics } from '@/lib/agent-engine/edge/crm/session-watchdog';
 import { runSessionWatchdogLoop } from '@/lib/agent-engine/edge/crm/session-reconciler';
@@ -241,6 +242,22 @@ export async function startWorker(
     loopsAbort.signal,
   );
 
+  // Handlers do event_log (mídia, branding, follow-up…) no ritmo do worker.
+  // Antes disto eles só rodavam pelo cron `event-log-drain`, 1×/min: a cadeia
+  // persist→derive de um áudio levava 103-188s contra os 45s que o drain do
+  // turno espera, e o agente respondia "não consigo ouvir" com a transcrição
+  // pronta segundos depois. O cron continua como rede de segurança — o claim
+  // otimista do `drainEventLog` torna os dois seguros em paralelo.
+  const eventLogLoop = runEventLogDrainLoop(
+    {
+      intervalMs: env.EVENT_LOG_DRAIN_INTERVAL_MS,
+      idleIntervalMs: env.EVENT_LOG_DRAIN_IDLE_INTERVAL_MS,
+      batchSize: env.EVENT_LOG_DRAIN_BATCH_SIZE,
+    },
+    log,
+    loopsAbort.signal,
+  );
+
   // Watchdog de sessão (4A-2): reconcilia channel_sessions×WAHA + redrive de
   // queued. Liga só com as credenciais do WAHA no env (sem elas: warn + off).
   const sessionWatchdogLoop =
@@ -382,7 +399,7 @@ export async function startWorker(
     server.close();
     server.closeIdleConnections();
     loopsAbort.abort();
-    await Promise.all([drainLoop, healthLoop, cronLoop, sessionWatchdogLoop, flywheelLoop]);
+    await Promise.all([drainLoop, eventLogLoop, healthLoop, cronLoop, sessionWatchdogLoop, flywheelLoop]);
     await workerLoop;
     let graceTimer: NodeJS.Timeout | undefined;
     const grace = new Promise<'grace'>((resolve) => {
@@ -448,6 +465,7 @@ export async function main(): Promise<void> {
       maxContextTokens: env.LEAD_CONTEXT_MAX_TOKENS,
       notesIndexMaxTokens: env.LEAD_NOTES_INDEX_MAX_TOKENS,
       maxSteps: env.AGENT_MAX_STEPS,
+      maxSendsPerTurn: env.MAX_SENDS_PER_TURN,
       queuedRetryDelayMs: env.SEND_QUEUED_RETRY_MS,
       breaker: {
         exactFailureWarn: env.TOOL_BREAKER_EXACT_WARN,

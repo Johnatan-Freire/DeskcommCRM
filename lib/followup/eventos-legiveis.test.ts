@@ -68,6 +68,17 @@ describe("resumoDoNo", () => {
     expect(r.resumo).toContain("agente escreve");
   });
 
+  it("texto fixo não menciona o agente", () => {
+    const r = resumoDoNo({
+      id: "a",
+      type: "action",
+      label: "Saudação",
+      position: { x: 0, y: 0 },
+      config: { mode: "text", body: "Olá, qual é o seu nome?" },
+    });
+    expect(r.resumo).toBe("envia um texto fixo");
+  });
+
   it("a espera adaptativa mostra a faixa que o dono do fluxo configurou", () => {
     const r = resumoDoNo({
       id: "w",

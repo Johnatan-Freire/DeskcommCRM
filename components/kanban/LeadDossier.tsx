@@ -10,12 +10,14 @@ import { ScoreSlot } from "./ScoreSlot";
 import { LeadTimeline } from "./LeadTimeline";
 import { OwnerBadge } from "./OwnerBadge";
 import { resolveLeadOwner } from "@/lib/kanban/owner";
+import type { CustomFieldDef } from "@/components/contacts/CustomFieldsEditor";
 
 interface Props {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   lead: Lead;
   pipelineId: string;
+  fieldDefs?: CustomFieldDef[];
   stageName: string;
   ownerNames?: Map<string, string | null>;
 }
@@ -51,6 +53,7 @@ export function LeadDossier({
   onOpenChange,
   lead,
   pipelineId,
+  fieldDefs = [],
   stageName,
   ownerNames,
 }: Props) {
@@ -141,7 +144,7 @@ export function LeadDossier({
           <h3 className="mb-2 text-xs font-medium uppercase tracking-wide text-text-muted">
             Dados do negócio
           </h3>
-          <LeadFieldsForm lead={lead} pipelineId={pipelineId} />
+          <LeadFieldsForm lead={lead} pipelineId={pipelineId} fieldDefs={fieldDefs} />
         </div>
       </SheetContent>
     </Sheet>

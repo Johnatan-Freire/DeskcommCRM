@@ -24,6 +24,7 @@ import {
   type FollowupFlowDetailRow,
 } from "@/hooks/followup/useFollowupFlow";
 import { FlowStatusBadge } from "../../_components/FlowStatusBadge";
+import { DeleteFollowupFlowButton } from "../../_components/DeleteFollowupFlowButton";
 import { TriggerConfigControl } from "./TriggerConfigControl";
 
 interface Props {
@@ -146,6 +147,7 @@ export function PublishBar({ flowId, flow, graph, dirty, onSaved, onPublishError
         >
           Rollback
         </Button>
+        <DeleteFollowupFlowButton flowId={flowId} flowName={flow.name} redirectToList />
       </div>
     </div>
   );

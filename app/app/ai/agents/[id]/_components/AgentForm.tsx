@@ -46,6 +46,7 @@ import { HandoffKeywordsInput } from "./HandoffKeywordsInput";
 import { FollowupFlowPicker } from "./FollowupFlowPicker";
 import { PainelDoOperador } from "./PainelDoOperador";
 import { PainelDeSeguranca } from "./PainelDeSeguranca";
+import { BasesDoAgente, type MaterialDoAcervo } from "./BasesDoAgente";
 import { FunisDoAgente, type CoberturaPorFunil } from "./FunisDoAgente";
 import { PublishConfirmDialog } from "./PublishConfirmDialog";
 import {
@@ -114,6 +115,15 @@ type Props = (EditProps | CreateProps) & {
   funis?: FunilDaResposta[];
   /** Quanto de cada funil o assistente sabe percorrer (spec 17 passo 4). */
   cobertura?: CoberturaPorFunil;
+  /**
+   * O acervo da organização, para o assistente escolher o que consulta (0181).
+   *
+   * Vem por PROP pelo mesmo motivo dos funis: a página já é server component, e
+   * um fetch client-side faria a lista piscar vazia no primeiro render — sendo
+   * que "nenhum material" é exatamente o estado que esta seção usa para dizer
+   * algo importante.
+   */
+  materiais?: MaterialDoAcervo[];
 };
 
 interface FormState {
@@ -144,6 +154,7 @@ interface FormState {
   operator_model: string;
   operator_tool_ids: string[];
   pipeline_ids: string[];
+  knowledge_source_ids: string[];
 }
 
 interface FollowupValue {
@@ -206,6 +217,8 @@ function buildState(args: {
     operator_tool_ids: version?.operator_tool_ids ?? [],
     // `?? []` = nenhum funil. Agente novo nasce fechado, como o banco.
     pipeline_ids: version?.pipeline_ids ?? [],
+    // `?? []` = nenhum material. Mesma direção segura: agir de menos.
+    knowledge_source_ids: version?.knowledge_source_ids ?? [],
   };
 }
 
@@ -236,11 +249,13 @@ function toVersionPayload(s: FormState) {
     operator_model: s.operator_model.trim() === "" ? null : s.operator_model.trim(),
     operator_tool_ids: s.operator_tool_ids,
     pipeline_ids: s.pipeline_ids,
+    knowledge_source_ids: s.knowledge_source_ids,
   };
 }
 
 export function AgentForm(props: Props) {
   const funis = props.funis ?? [];
+  const materiais = props.materiais ?? [];
   const router = useRouter();
   const isEdit = props.mode === "edit";
   const readOnly = props.readOnly ?? false;
@@ -918,6 +933,14 @@ export function AgentForm(props: Props) {
               <p className="text-xs text-destructive">{validation.tool_ids}</p>
             ) : null}
           </Card>
+
+          {/* O acervo que este assistente consulta (0181) */}
+          <BasesDoAgente
+            materiais={materiais}
+            value={form.knowledge_source_ids}
+            onChange={(ids) => patch({ knowledge_source_ids: ids })}
+            disabled={disabled}
+          />
 
           {/* Triggers */}
           <Card className="space-y-2 p-4">

@@ -50,7 +50,7 @@ import { useEtapasDeGatilho } from "@/hooks/followup/useEtapasDeGatilho";
  * «poucos minutos», não «na hora» — prometer instantâneo seria o controle
  * mentindo sobre a própria função.
  */
-type TriggerKind = "manual" | "silence" | "stage_change" | "case_opened";
+type TriggerKind = "manual" | "silence" | "stage_change" | "case_opened" | "webhook";
 
 interface TriggerFormState {
   kind: TriggerKind;
@@ -67,7 +67,14 @@ const KIND_LABEL: Record<TriggerKind, string> = {
   manual: "Manual",
   silence: "Silêncio",
   stage_change: "Etapa do funil",
+  // "Agente pediu ajuda", e não "Pedido de ajuda": numa lista ao lado de
+  // "Manual", "Silêncio" e "Etapa do funil", o rótulo sem sujeito não diz
+  // QUEM pediu. O resumo do botão (`resumoDoGatilho`) e o vocabulário
+  // (`lib/followup/vocabulario.ts`) já falam de "o agente pede ajuda" —
+  // esta era a única das três grafias sem sujeito, e as duas specs que
+  // cercam o gatilho procuram por ela com `exact: true`.
   case_opened: "Agente pediu ajuda",
+  webhook: "Automação (Webhooks)",
 };
 
 function parseTriggerConfig(raw: Record<string, unknown>): TriggerFormState {
@@ -84,7 +91,9 @@ function parseTriggerConfig(raw: Record<string, unknown>): TriggerFormState {
         ? "stage_change"
         : raw.kind === "case_opened"
           ? "case_opened"
-          : "manual";
+          : raw.kind === "webhook"
+            ? "webhook"
+            : "manual";
   const params =
     (raw.params as { threshold_minutes?: number; segments?: string[]; stage_id?: string } | undefined) ?? {};
   return {
@@ -110,6 +119,7 @@ function toTriggerConfig(form: TriggerFormState): Record<string, unknown> {
   // Sem `params`: não há o que casar. Todo caso aberto da organização dispara
   // todo fluxo armado assim.
   if (form.kind === "case_opened") return { kind: "case_opened", ...cancelOnReply };
+  if (form.kind === "webhook") return { kind: "webhook", ...cancelOnReply };
 
   const segments = form.segments
     .split(",")
@@ -138,6 +148,7 @@ function summaryLabel(
     return etapa ? `Gatilho: entrou em «${etapa.stageName}» em ${etapa.pipelineName}` : "Gatilho: Etapa do funil";
   }
   if (cfg.kind === "case_opened") return "Gatilho: quando o agente pede ajuda";
+  if (cfg.kind === "webhook") return "Disparado por uma automação em Webhooks";
   if (cfg.kind === "manual" || cfg.kind === undefined) return "Gatilho: Manual";
   // conversation_end de dados antigos (API crua) — sem UI própria, mas mostrado
   // com transparência em vez de mentir "Manual".
@@ -149,12 +160,14 @@ interface Props {
   triggerConfig: Record<string, unknown>;
 }
 
-export function TriggerConfigControl({ flowId, triggerConfig }: Props) {
+export function TriggerConfigControl({
+  flowId,
+  triggerConfig,
+}: Props) {
   const update = useUpdateTriggerConfig(flowId);
   const [open, setOpen] = useState(false);
   const [saved, setSaved] = useState<TriggerFormState>(() => parseTriggerConfig(triggerConfig));
   const [form, setForm] = useState<TriggerFormState>(saved);
-
   // A leitura das etapas acompanha o botão, não o popover: o rótulo fechado
   // precisa do nome da etapa para não exibir «Etapa do funil» genérico num
   // fluxo já configurado.
@@ -224,6 +237,7 @@ export function TriggerConfigControl({ flowId, triggerConfig }: Props) {
                 <SelectItem value="silence">{KIND_LABEL.silence}</SelectItem>
                 <SelectItem value="stage_change">{KIND_LABEL.stage_change}</SelectItem>
                 <SelectItem value="case_opened">{KIND_LABEL.case_opened}</SelectItem>
+                <SelectItem value="webhook">{KIND_LABEL.webhook}</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -289,6 +303,13 @@ export function TriggerConfigControl({ flowId, triggerConfig }: Props) {
                 Se o caso for resolvido antes, o follow-up é cancelado sozinho.
               </p>
             </div>
+          )}
+
+          {form.kind === "webhook" && (
+            <p className="text-xs text-muted-foreground">
+              O fluxo começa quando uma regra em Webhooks usa a ação «Iniciar fluxo de
+              mensagem» apontando para este fluxo publicado.
+            </p>
           )}
 
           {form.kind === "silence" && (

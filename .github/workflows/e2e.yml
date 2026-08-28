@@ -147,7 +147,9 @@ jobs:
         risk-radar.spec.ts invite-lifecycle.spec.ts system-update.spec.ts
         agente-papeis-operador.spec.ts prova-painel-provedores.spec.ts
         followup-linguagem.spec.ts followup-ramos.spec.ts
-        wizard-do-funcionario.spec.ts mfa-opcional.spec.ts
+        wizard-do-funcionario.spec.ts mfa-opcional.spec.ts inbox-responder-citando.spec.ts
+        agenda-tela-do-produto.spec.ts
+        notificacoes-diz-o-que-falta.spec.ts
       # ⚠️ A ORDEM DESTA LISTA NÃO DECIDE A ORDEM DE EXECUÇÃO. O Playwright
       # ordena os arquivos por CAMINHO, não pela ordem em que são passados na
       # linha de comando. Medido no run 31838253496: `marca-logo.spec.ts` estava
@@ -188,7 +190,17 @@ jobs:
       # (Este comentário mora FORA do bloco `>-` porque dentro dele `#` não é
       # comentário: é conteúdo, e cada palavra viraria argumento do playwright.
       # Medido: com o texto dentro, a variável ia de 23 para 205 tokens.)
+      #
+      # `agente-marca-consulta` entrou aqui em 2026-08-27, e a dívida que a segurava era
+      # explícita: ela estava em FORA_DO_CI com o motivo escrito de que eu não conseguira
+      # EXECUTÁ-LA. Foi executada em ambiente completo (banco do baseline, app buildado),
+      # 3 casos / 3 verdes, e o primeiro run achou um defeito real de servidor — a tela não
+      # dizia de quem era o compromisso. Entra na PARTE_2 e não na 1 porque é AQUI que mora
+      # o molde dela, `agente-organiza-operacao`; o comentário antigo dizia PARTE_1 e estava
+      # errado sobre o próprio vizinho.
       SPECS_PARTE_2: >-
+        agente-marca-consulta.spec.ts agenda-marcar-pela-tela.spec.ts agenda-remarcar-e-cancelar.spec.ts
+        agenda-tipos-de-agendamento.spec.ts agenda-grade-interativa.spec.ts
         agente-novo-e-uso.spec.ts agente-organiza-operacao.spec.ts
         central-de-avisos-capacidades.spec.ts escalacao-ciclo.spec.ts
         navegacao.spec.ts olhar-telas-do-epico.spec.ts pipelines-gestao.spec.ts
@@ -202,6 +214,17 @@ jobs:
         followup-dossie.spec.ts followup-tempo-adaptativo.spec.ts
         gatilho-de-etapa.spec.ts gatilho-de-caso.spec.ts
         marca-logo.spec.ts
+        historico-de-captacao.spec.ts
+        automacao-diz-a-verdade.spec.ts
+        inbox-quem-manda.spec.ts
+        acervo-de-conhecimento.spec.ts
+        agenda-kit-visual.spec.ts
+        agenda-conectar-google.spec.ts
+        agenda-painel-cabe-na-tela.spec.ts
+        agenda-ver-na-agenda.spec.ts
+        agenda-escopo-da-organizacao.spec.ts
+        agenda-caminho-ate-os-horarios.spec.ts
+        agenda-google-volta-do-consentimento.spec.ts
       # Cada item aqui tem o motivo MEDIDO, não presumido — e o gate cobra que a
       # lista exista e some com as outras duas.
       #
@@ -242,8 +265,84 @@ jobs:
       # spec media a sorte do ambiente. `scripts/seed-e2e-catalogo-openrouter.ts`
       # (main, 2026-08-09) semeia o catálogo no job, então a condição que a excluía
       # deixou de existir e ela voltou para a lista de execução.
+      #
+      # `inbox-tempo-real` entrou aqui em 2026-08-26, no dia seguinte ao merge, e o
+      # motivo é medido nos dois eixos que importam — não é "está flaky, tira".
+      #
+      #  (a) ELE NÃO DISCRIMINA O CONSERTO QUE DIZ GUARDAR. Bancada local fiel a
+      #      este job (Supabase local pg17, `baseline.sql`, Realtime reiniciado
+      #      depois do baseline, `next build` de produção, os mesmos seeds),
+      #      revertendo SÓ `lib/supabase/browser.ts` para a versão anterior ao
+      #      #327 — e conferindo no bundle que o conserto saiu
+      #      (`grep -rc realtime-token .next/static` → 0, controle positivo
+      #      `sb-deskcomm-auth` → 1):
+      #
+      #          com o conserto  → 1 passed
+      #          sem o conserto  → 1 passed
+      #
+      #      Causa provável: `useMessagesRealtime` liga `refetchOnWindowFocus:
+      #      true` e o `execFileSync` que injeta a mensagem devolve o foco à
+      #      janela. Dois caminhos, mesma saída. Quem discrimina de verdade é
+      #      `tests/unit/realtime-token-do-socket.test.ts`, no `verify`.
+      #
+      #  (b) ELE REPROVA PR ALHEIO POR SORTE. Desde o conserto do locator:
+      #      #327 `dd58ec7c` pass · #343 `b508208b` pass · #344 `4e5acb21` FAIL ·
+      #      #344 rerun do MESMO sha FAIL. O #344 não toca uma linha de inbox,
+      #      realtime ou socket.
+      #
+      #      Um gate que reprova por moeda é pior que gate nenhum: ele treina o
+      #      time a reexecutar em vez de olhar, e foi assim que a degradação
+      #      silenciosa passou despercebida da primeira vez.
+      #
+      #      A spec CONTINUA no repositório e continua sendo a cerca de ponta a
+      #      ponta contra o sintoma relatado — roda local. Volta para a lista de
+      #      execução quando a issue #347 entregar entrega determinística (o
+      #      caminho provável é desligar o `refetchOnWindowFocus` durante a
+      #      asserção, para sobrar um caminho só).
+      # ✅ `agenda-marcar-pela-tela` SAIU DAQUI — e o registro é o motivo.
+      #
+      # Ela nasceu `skip` pela DECISÃO 21.3: a frente 1 é API e não tem pixel
+      # próprio, então em vez de CITAR num relatório qual spec vai prová-la em
+      # tela, a spec é CRIADA com a condição de saída no cabeçalho.
+      #
+      # ⚠️ E ESSA CONDIÇÃO VENCEU SEM NINGUÉM VOLTAR PARA CONFERIR. Declarar a
+      # condição foi a coisa certa; o que faltou é que ninguém relê condição de
+      # saída. Medido quando alguém foi olhar:
+      #
+      #     grep -n "^export async function" app/api/v1/agenda/agendamentos/route.ts
+      #     # GET:95  POST:145  PATCH:149  DELETE:153
+      #
+      # Escrita e executada, ela achou CINCO defeitos que nenhuma leitura de
+      # código tinha achado — entre eles a tela dizendo "Marcado ✓" sem criar
+      # linha nenhuma, e um laço de requisições no painel de marcação.
+      #
+      # Entra na PARTE_2 ao lado de `agente-marca-consulta` porque as duas usam
+      # `seed-e2e-agenda.ts` — e cada uma o chama por si, para nenhuma depender
+      # da ordem em que a outra rodou.
+      # para dirigir, e a condição que a exclui deixa de existir. Enquanto isso,
+      # rodá-la no CI custaria um job para exercitar um `skip`.
+      #
+      # `agenda-conectar-google` entra pela MESMA 21.3 e pela frente 3 (Google
+      # Calendar BYO), que também não tem pixel: o botão "Conectar Google" e a
+      # faixa de estado moram na tela da Agenda, da frente 2.
+      #
+      # São DUAS condições de saída, e a primeira depende só de tela:
+      #
+      #  (a) o caso SEM CHAVE sai daqui assim que a tela consumir
+      #      `googleEstaConfigurado()` — ele não precisa de Google nenhum, porque
+      #      o que prova é a instalação SEM `GOOGLE_CALENDAR_CLIENT_ID`, que é o
+      #      estado de 100% dos deploys novos (DECISÃO 3.1, envs opcionais). É o
+      #      caso que vem PRIMEIRO no arquivo de propósito: spec que só cobre o
+      #      caminho feliz deixa sem prova justamente a primeira tela que todo
+      #      self-hoster encontra;
+      #
+      #  (b) o caso COM CHAVE precisa, além da tela, de uma conta Google de teste
+      #      com consentimento pré-aprovado. Sem ela o job pararia num
+      #      `accounts.google.com` esperando login humano — e é por isto que ela
+      #      fica FORA do CI em vez de ficar sem existir.
       FORA_DO_CI: >-
         vps-fresh-onboarding.spec.ts
+        inbox-tempo-real.spec.ts
     steps:
       - uses: actions/checkout@v7
 
@@ -294,6 +393,41 @@ jobs:
         run: |
           psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" \
             -v ON_ERROR_STOP=1 -q -f supabase/baseline.sql
+
+      # ⚠️ O REALTIME PRECISA REINICIAR DEPOIS DO BASELINE — senão ele assina e
+      # não entrega, em silêncio.
+      #
+      # A ordem acima é `supabase start` (que sobe o Realtime) e SÓ DEPOIS o
+      # baseline, que é quem adiciona `messages`, `conversations`, `crm_leads` e
+      # as demais à publication `supabase_realtime`. O Realtime já subiu com a
+      # publication sem essas tabelas e não as reconhece depois.
+      #
+      # Medido no PR #327, com o defeito atravessando três rodadas: o script de
+      # apoio confirmou a gravação (`[e2e-chega-mensagem] entregue em 6f5fd1f2…`)
+      # e o snapshot da página no mesmo instante mostrava "Nenhuma mensagem nesta
+      # conversa." — gravado no banco, nunca entregue à tela. Canal anônimo e
+      # canal sem publication falham do MESMO jeito: respondem SUBSCRIBED e
+      # calam, que é a razão de isto ter custado três rodadas de 15 minutos.
+      #
+      # Na VPS o problema não existe: lá o `install.sh` aplica o baseline e só
+      # então o compose sobe os serviços. Reiniciar aqui é o que faz o ambiente
+      # do teste refletir o de quem instalou.
+      - name: Reiniciar o Realtime (a publication nasceu no passo anterior)
+        run: |
+          IDS=$(docker ps -q --filter name=supabase_realtime)
+          if [ -z "$IDS" ]; then
+            echo "::error::Nenhum container supabase_realtime — o stack não subiu como esperado."
+            exit 1
+          fi
+          docker restart $IDS
+          # Espera ficar saudável: seguir sem isso devolve o mesmo silêncio que
+          # este passo existe para eliminar, só que mais tarde e sem explicação.
+          for i in $(seq 1 30); do
+            estado=$(docker inspect -f '{{.State.Health.Status}}' $IDS 2>/dev/null || echo desconhecido)
+            [ "$estado" = "healthy" ] && { echo "realtime saudável em ~$((i*2))s"; break; }
+            sleep 2
+          done
+          docker inspect -f '{{.State.Health.Status}}' $IDS
 
       - name: Exportar credenciais do stack local
         run: |

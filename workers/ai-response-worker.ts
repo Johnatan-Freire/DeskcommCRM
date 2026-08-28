@@ -21,9 +21,9 @@ import {
   gatewayConfig,
   gatewayHeaders,
   isAiGatewayConfigured,
-  isEmbeddingProviderConfigured,
 } from "@/lib/ai/gateway";
 import { embedText } from "@/lib/ai/embed";
+import { MODELO_DE_EMBEDDING } from "@/lib/ai/embeddings/chave";
 import { getBudgetStatus, type BudgetStatus } from "@/lib/ai/budget/check";
 import {
   AVISO_CORPO,
@@ -54,7 +54,10 @@ import { createAdminClient } from "@/lib/supabase/admin";
 
 const RECENT_MESSAGES_LIMIT = 20;
 const RAG_TOP_K = 5;
-const RAG_THRESHOLD = 0.72;
+// 0.40 e nao 0.72: o valor foi CALIBRADO com medicao na migration 0097 (pergunta literal 0.849, parafrase 0.49-0.65, irrelevante 0.27).
+// Com 0.72 toda parafrase — que e como o cliente escreve — era descartada, e o RAG parecia quebrado funcionando.
+// O banco moveu o default; estes tres sitios de codigo ficaram para tras e venciam o banco, porque quem corta pelo limiar e o TypeScript.
+const RAG_THRESHOLD = 0.4;
 const WINDOW_24H_MS = 24 * 60 * 60 * 1000;
 const HANDOFF_RECENT_GUARD_MS = 5_000;
 
@@ -681,7 +684,12 @@ async function buildContext(input: BuildContextInput): Promise<GuardDecision> {
     .maybeSingle();
   if (publicado) return skip("engine_owns_reply");
 
-  if (!agent.active_kb_version_id) return skip("kb_version_missing");
+  // Base de conhecimento ausente NÃO cala mais o bot.
+  //
+  // Este `skip` derrubava a resposta inteira — a organização sem material
+  // configurado simplesmente não recebia atendimento automático, e o motivo
+  // (`kb_version_missing`) só existia no log do worker. Responder sem material é
+  // pior que responder com; não responder é pior que os dois.
 
   // O teto de gasto NÃO mora aqui. Ele é aplicado em `processMessageReceived`,
   // DEPOIS da triagem determinística (G1/G4) — ver o comentário no call site.
@@ -699,10 +707,10 @@ async function buildContext(input: BuildContextInput): Promise<GuardDecision> {
     .slice()
     .reverse();
 
-  // RAG retrieval (best-effort — empty list when embedding provider missing)
+  // RAG best-effort: lista vazia quando não há material ou não há chave.
   const retrieved_chunks = await retrieveContext({
     organizationId: input.organizationId,
-    kbVersionId: agent.active_kb_version_id,
+    kbVersionId: agent.active_kb_version_id ?? null,
     query: inbound_body,
   });
 
@@ -771,37 +779,67 @@ async function resolveLeadId(
 
 interface RetrieveInput {
   organizationId: string;
-  kbVersionId: string;
+  /** LEGADO: só é usado quando a organização não tem material cadastrado. */
+  kbVersionId: string | null;
   query: string;
 }
 
+/**
+ * Este caminho só roda em organização SEM agente publicado (o engine é dono da
+ * resposta quando há um). Como não há versão publicada, não há
+ * `knowledge_source_ids` para ler: aqui o escopo é a organização inteira, que é
+ * o comportamento que este worker sempre teve — antes por acidente (a KB do
+ * agente default), agora por escrito.
+ */
 async function retrieveContext(input: RetrieveInput): Promise<RagHit[]> {
-  if (!isEmbeddingProviderConfigured()) return [];
+  const admin = createAdminClient();
+
+  const { data: fontesRows } = await admin
+    .from("ai_knowledge_sources")
+    .select("id")
+    .eq("organization_id", input.organizationId)
+    .eq("is_active", true)
+    .eq("status", "ready")
+    .not("active_kb_version_id", "is", null);
+  const fontes = ((fontesRows ?? []) as Array<{ id: string }>).map((f) => f.id);
+
+  if (fontes.length === 0 && !input.kbVersionId) return [];
+
   let embedding: number[];
   try {
     const { embedding: e } = await embedText(input.query, {
       organizationId: input.organizationId,
+      ponto: "embedding_consultar",
     });
     embedding = e;
   } catch (err) {
-    logger.warn("[ai-response-worker] embed failed; proceeding without RAG", {
+    logger.warn("[ai-response-worker] embed falhou; segue sem RAG", {
       error: err instanceof Error ? err.message : String(err),
       organization_id: input.organizationId,
     });
     return [];
   }
 
-  const admin = createAdminClient();
-  const { data, error } = await admin.rpc("retrieve_top_k_chunks" as never, {
-    p_organization_id: input.organizationId,
-    p_kb_version_id: input.kbVersionId,
-    p_embedding: embedding as unknown as string,
-    p_k: RAG_TOP_K,
-    p_threshold: RAG_THRESHOLD,
-  } as never);
+  const { data, error } =
+    fontes.length > 0
+      ? await admin.rpc("fn_buscar_trechos_das_fontes" as never, {
+          p_organization_id: input.organizationId,
+          p_source_ids: fontes as unknown as string,
+          p_embedding: embedding as unknown as string,
+          p_k: RAG_TOP_K,
+          p_threshold: RAG_THRESHOLD,
+          p_embedding_model: MODELO_DE_EMBEDDING,
+        } as never)
+      : await admin.rpc("retrieve_top_k_chunks" as never, {
+          p_organization_id: input.organizationId,
+          p_kb_version_id: input.kbVersionId,
+          p_embedding: embedding as unknown as string,
+          p_k: RAG_TOP_K,
+          p_threshold: RAG_THRESHOLD,
+        } as never);
 
   if (error) {
-    logger.warn("[ai-response-worker] retrieve_top_k_chunks failed", {
+    logger.warn("[ai-response-worker] busca de trechos falhou", {
       error: error.message,
       organization_id: input.organizationId,
     });

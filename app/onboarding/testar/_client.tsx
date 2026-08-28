@@ -142,7 +142,7 @@ export function TestarClient({ nome, agenteId, versaoId }: Props) {
               maxLength={4000}
             />
           </div>
-          <div className="flex items-center justify-between gap-2">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             {transcript.length > 0 ? (
               <Button
                 type="button"
@@ -159,7 +159,12 @@ export function TestarClient({ nome, agenteId, versaoId }: Props) {
             ) : (
               <span />
             )}
-            <Button type="button" onClick={ensaiar} disabled={carregando || mensagem.trim() === ""}>
+            <Button
+              type="button"
+              onClick={ensaiar}
+              disabled={carregando || mensagem.trim() === ""}
+              className="w-full sm:w-auto"
+            >
               {carregando
                 ? "Ele está pensando..."
                 : transcript.length > 0
@@ -221,7 +226,7 @@ export function TestarClient({ nome, agenteId, versaoId }: Props) {
         </div>
       )}
 
-      <div className="flex justify-between gap-2">
+      <div className="flex flex-wrap justify-between gap-2">
         <Button
           type="button"
           variant="ghost"

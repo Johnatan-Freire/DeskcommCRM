@@ -242,8 +242,24 @@ function montar(
   return { operacoes, tabelasConsultadas };
 }
 
+/**
+ * Os itens da Central que são DESTE assunto.
+ *
+ * ⚠️ A versão anterior filtrava só por TABELA, e o nome mentia: qualquer item de
+ * qualquer assunto entrava na conta. O defeito ficou visível quando
+ * `triggerHandoff` passou a abrir o seu próprio item (`kind='handoff'`) — três
+ * casos deste arquivo vermelharam sem que nada de orçamento tivesse mudado.
+ * Régua que mede o vizinho reprova por motivo alheio.
+ *
+ * O `kind` só existe no INSERT (o UPDATE do retrato carrega `{status}` e a
+ * identidade está no filtro, não na linha), então o corte é: item da Central que
+ * NÃO declara um kind de outro assunto.
+ */
+const KINDS_DE_OUTROS_ASSUNTOS = new Set(["handoff", "qr_rescan", "job_dead", "event_dead"]);
 const itensDeOrcamento = (operacoes: Operacao[]) =>
-  operacoes.filter((o) => o.table === "agent_inbox_items");
+  operacoes.filter(
+    (o) => o.table === "agent_inbox_items" && !KINDS_DE_OUTROS_ASSUNTOS.has(String(o.row.kind)),
+  );
 
 beforeEach(() => {
   vi.clearAllMocks();

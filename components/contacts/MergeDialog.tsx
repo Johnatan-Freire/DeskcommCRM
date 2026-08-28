@@ -20,6 +20,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { createClient } from "@/lib/supabase/browser";
+import { phoneForDisplay } from "@/lib/channels/phone-variants";
 
 interface CandidateSummary {
   id?: string;
@@ -94,7 +95,7 @@ export function MergeDialog({ queueItemId, open, onOpenChange }: Props) {
               >
                 <div className="font-medium">{c.name ?? "—"}</div>
                 <div className="text-muted-foreground">{c.email ?? "—"}</div>
-                <div className="text-muted-foreground">{c.phone_number ?? "—"}</div>
+                <div className="text-muted-foreground">{c.phone_number ? phoneForDisplay(c.phone_number) : "—"}</div>
               </div>
             ))}
           </div>

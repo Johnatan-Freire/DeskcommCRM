@@ -1,6 +1,6 @@
 import type { ComponentType } from "react";
 
-import { Play, Clock, GitBranch, Brain, PaperPlaneTilt, Flag } from "@/lib/ui/icons";
+import { Play, Clock, GitBranch, Brain, ChatCircle, ArrowsClockwise, PaperPlaneTilt, Flag } from "@/lib/ui/icons";
 import type { FlowNode, NodeType } from "@/lib/followup/graph-schema";
 import { RESULTADOS_DO_FIM } from "@/lib/followup/vocabulario";
 
@@ -68,6 +68,27 @@ export const NODE_VISUALS: Record<NodeType, NodeVisual> = {
       target: "last_reply",
     }),
   },
+  match_reply: {
+    type: "match_reply",
+    paletteLabel: "Resposta (texto)",
+    icon: ChatCircle,
+    chipClassName: "bg-info-bg text-info-fg",
+    borderClassName: "border-l-info",
+    defaultLabel: "Casar resposta",
+    defaultConfig: () => ({
+      branches: [{ id: "br_sim", label: "Sim", op: "contains", pattern: "sim" }],
+      grace_timeout_ms: 900_000,
+    }),
+  },
+  repeat: {
+    type: "repeat",
+    paletteLabel: "Repetir",
+    icon: ArrowsClockwise,
+    chipClassName: "bg-warning-bg text-warning-fg",
+    borderClassName: "border-l-warning",
+    defaultLabel: "Repetir pela resposta",
+    defaultConfig: () => ({ max_count: 12 }),
+  },
   action: {
     type: "action",
     paletteLabel: "Ação",
@@ -119,9 +140,23 @@ export function describeNodeConfig(type: NodeType, config: FlowNode["config"]): 
       const c = config as ConfigOf<"ai_classify">;
       return `${c.classes.length} classes · grace ${Math.round(c.grace_timeout_ms / 60_000)}min`;
     }
+    case "match_reply": {
+      const c = config as ConfigOf<"match_reply">;
+      return `${c.branches.length} regras · grace ${Math.round(c.grace_timeout_ms / 60_000)}min${
+        c.save_to
+          ? ` · grava resposta${c.if_exists === "skip" ? " · pula se já existir" : c.if_exists === "confirm" ? " · confirma se já existir" : ""}`
+          : ""
+      }`;
+    }
+    case "repeat": {
+      const c = config as ConfigOf<"repeat">;
+      return `até ${c.max_count} voltas`;
+    }
     case "action": {
       const c = config as ConfigOf<"action">;
-      return c.mode === "ai_message" ? c.prompt_hint : "Template fixo";
+      if (c.mode === "ai_message") return c.prompt_hint;
+      if (c.mode === "text") return c.body;
+      return "Template fixo";
     }
     case "end": {
       const c = config as ConfigOf<"end">;

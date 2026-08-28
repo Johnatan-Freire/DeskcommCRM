@@ -4,14 +4,14 @@
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import { ensureConversation } from "@/lib/automation/start-conversation";
-import { phoneLookupVariants } from "@/lib/channels/phone-variants";
+import { ensureConversation, sessaoProntaParaEnvio } from "@/lib/automation/start-conversation";
+import { phoneLookupVariants, canonicalPhoneBR } from "@/lib/channels/phone-variants";
 import { parseDialablePhone } from "@/lib/messaging/contact-card";
 
 type Admin = SupabaseClient;
 
 export interface OpenSharedContactInput {
-  channel_session_id: string;
+  channel_session_id?: string;
   contact_id?: string;
   phone_number?: string;
   name?: string;
@@ -58,17 +58,18 @@ async function resolveContactId(
 
   const phone = input.phone_number ? parseDialablePhone(input.phone_number) : null;
   if (!phone) throw new Error("invalid_phone");
+  const canonico = canonicalPhoneBR(phone);
 
-  const existente = await findContactByPhoneVariants(admin, orgId, phone);
+  const existente = await findContactByPhoneVariants(admin, orgId, canonico);
   if (existente) return existente.id;
 
-  const waid = phone.replace(/\D/g, "");
+  const waid = canonico.replace(/\D/g, "");
   const { data: contactId, error: upsertErr } = await admin.rpc(
     "fn_upsert_wa_contact" as never,
     {
       p_org: orgId,
       p_kind: "phone",
-      p_phone: phone,
+      p_phone: canonico,
       p_lid: null,
       p_chat_id: waid,
       p_notify: input.name?.trim() || null,
@@ -86,11 +87,13 @@ export async function openSharedContactConversation(
   organizationId: string,
   input: OpenSharedContactInput,
 ): Promise<OpenSharedContactResult> {
+  const sessionId = input.channel_session_id ?? (await sessaoProntaParaEnvio(admin, organizationId));
+  if (!sessionId) throw new Error("session_not_found");
   const { data: session, error: sessErr } = await admin
     .from("channel_sessions")
     .select("id")
     .eq("organization_id", organizationId)
-    .eq("id", input.channel_session_id)
+    .eq("id", sessionId)
     .maybeSingle();
   if (sessErr) throw new Error(sessErr.message);
   if (!session) throw new Error("session_not_found");
@@ -100,8 +103,7 @@ export async function openSharedContactConversation(
     admin,
     organizationId,
     contactId,
-    input.channel_session_id,
+    sessionId,
   );
-
   return { conversation_id: conversationId, contact_id: contactId };
 }

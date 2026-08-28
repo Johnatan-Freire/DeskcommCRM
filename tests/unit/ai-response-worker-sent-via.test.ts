@@ -234,7 +234,16 @@ function prepararWorker(confidenceThreshold: number): LinhaInserida[] {
 
 function mensagemOutbound(inserted: LinhaInserida[]): Record<string, unknown> {
   const linhas = inserted.filter(
-    (i) => i.table === "messages" && i.row["direction"] === "outbound",
+    (i) =>
+      i.table === "messages" &&
+      i.row["direction"] === "outbound" &&
+      // O AVISO DE ESCALAÇÃO não é rascunho do bot: é texto de sistema que
+      // `triggerHandoff` manda ao lead ao tirar a IA de campo, e ele nasce
+      // marcado (`metadata.aviso_de_escalacao`). Sem este corte, o caso de
+      // handoff G3 passa a ver DUAS linhas outbound e a guarda anti-vacuidade
+      // abaixo reprova por um motivo que não é o deste arquivo — que é o
+      // `sent_via` do RASCUNHO caber na constraint do banco.
+      (i.row["metadata"] as Record<string, unknown> | null)?.["aviso_de_escalacao"] !== true,
   );
   // Anti-vacuidade: se o pipeline desviou antes do insert, não há o que
   // asseverar e o teste passaria à toa.

@@ -122,6 +122,8 @@ const TIPO_DO_NO: Record<FlowNode["type"], string> = {
   wait: "Espera",
   condition: "Condição",
   ai_classify: "Interpretação da resposta",
+  match_reply: "Resposta (texto)",
+  repeat: "Repetição",
   action: "Mensagem",
   end: "Fim",
 };
@@ -160,13 +162,25 @@ export function resumoDoNo(node: FlowNode): NoDoDossie {
       };
     case "ai_classify":
       return { ...base, resumo: `classifica a resposta em: ${node.config.classes.join(", ")}` };
+    case "match_reply":
+      return {
+        ...base,
+        resumo: `casa a resposta com: ${node.config.branches.map((b) => b.label).join(", ")}`,
+      };
+    case "repeat":
+      return {
+        ...base,
+        resumo: `repete até ${node.config.max_count} voltas conforme a resposta`,
+      };
     case "action":
       return {
         ...base,
         resumo:
           node.config.mode === "ai_message"
             ? "o agente escreve e envia a mensagem"
-            : "envia uma mensagem de modelo pronto",
+            : node.config.mode === "text"
+              ? "envia um texto fixo"
+              : "envia uma mensagem de modelo pronto",
       };
     case "end":
       return { ...base, resumo: `encerra — ${DESFECHO[node.config.outcome] ?? node.config.outcome}` };
@@ -219,6 +233,11 @@ function fraseDoRamoDeclarado(origem: FlowNode | undefined, branchId: string): s
   if (origem.type === "ai_classify") {
     const label = origem.config.branches?.find((b) => b.id === branchId)?.label;
     return label ? fraseDaClasse(label) : RAMO_SEM_NOME;
+  }
+
+  if (origem.type === "match_reply") {
+    const label = origem.config.branches.find((b) => b.id === branchId)?.label;
+    return label ? `quando a resposta casa com “${label}”` : RAMO_SEM_NOME;
   }
 
   if (origem.type === "condition") {

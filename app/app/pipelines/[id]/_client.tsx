@@ -75,8 +75,10 @@ export function PipelinePageClient({
       data-refetch-divergencias={seguranca.divergencias}
       data-refetch-em={seguranca.ultimaVerificacao ?? ""}
     >
-      <header className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
+      {/* `flex-col` no mobile: nome de funil comprido e as ações não
+          podem empurrar o botão para fora da viewport. */}
+      <header className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex min-w-0 items-center gap-3">
           <Link
             href="/app/kanban"
             data-testid="pipeline-voltar-funis"
@@ -85,11 +87,11 @@ export function PipelinePageClient({
             <CaretLeft size={16} /> Funis
           </Link>
           <span className="text-border">/</span>
-          <h1 className="text-2xl font-semibold tracking-tight">
+          <h1 className="min-w-0 truncate text-2xl font-semibold tracking-tight">
             {data?.pipeline.name ?? initialName}
           </h1>
         </div>
-        <Button onClick={() => setNewOpen(true)} disabled={!data}>
+        <Button onClick={() => setNewOpen(true)} disabled={!data} className="shrink-0">
           <Plus size={16} className="mr-2" /> Novo Lead
         </Button>
       </header>
@@ -120,6 +122,7 @@ export function PipelinePageClient({
           pipeline={data.pipeline}
           selectedIds={selectedIds}
           onSelectionChange={setSelectedIds}
+          leadInicial={searchParams.get("lead")}
         />
       )}
       <BulkActionBar

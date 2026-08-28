@@ -57,7 +57,9 @@ export function NewFlowDialog({ open, onOpenChange }: Props) {
     >
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Novo fluxo de follow-up</DialogTitle>
+          <DialogTitle>
+            Novo fluxo de follow-up
+          </DialogTitle>
           <DialogDescription>
             Nasce como rascunho. Você monta as etapas no editor visual em seguida.
           </DialogDescription>

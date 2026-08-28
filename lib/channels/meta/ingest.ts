@@ -24,7 +24,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { ARCHIVED_AT, queryTolerantToMissingArchived } from "../archived";
-import { phoneLookupVariants } from "../phone-variants";
+import { aplicarEfeitosPosEntrada } from "../pos-entrada";
+import { canonicalPhoneBR, phoneLookupVariants } from "../phone-variants";
 import type { ChannelTenantScope } from "../types";
 import type { InboundMessageEvent } from "./webhook";
 
@@ -86,8 +87,7 @@ async function sessionByPhoneNumberId(
 
 /**
  * Contato já existente sob QUALQUER variante do número. Só depois de não achar é que
- * deixamos o upsert criar — assim o cadastro nasce uma vez só, e o número gravado
- * continua sendo o que já estava lá (não sobrescrevemos o formato de ninguém).
+ * deixamos o upsert criar — assim o cadastro nasce uma vez só.
  */
 async function findContactByVariants(
   admin: Admin,
@@ -137,9 +137,11 @@ export async function ingestMetaInbound(
   const orgId = sessao.organization_id;
 
   const existente = await findContactByVariants(admin, orgId, e.from);
-  // O upsert recebe o número JÁ EXISTENTE quando há um — é o que impede o contato de
-  // ser recriado sob a outra grafia do nono dígito.
-  const phone = existente?.phone_number ?? `+${e.from.replace(/\D/g, "")}`;
+  // Celular BR grava COM o nono. A busca acima já reencontra a grafia sem o 9;
+  // a RPC promove o cadastro antigo quando ainda está nos 12 dígitos.
+  const phone = existente?.phone_number
+    ? canonicalPhoneBR(existente.phone_number)
+    : canonicalPhoneBR(`+${e.from.replace(/\D/g, "")}`);
 
   const { data: contactId, error: erroContato } = await admin.rpc(
     "fn_upsert_wa_contact" as never,
@@ -206,9 +208,21 @@ export async function ingestMetaInbound(
     p_at: e.sentAt.toISOString(),
   } as never);
 
+  const messageId = (inserida as { id: string } | null)?.id ?? "";
+  await aplicarEfeitosPosEntrada(admin, {
+    organizationId: orgId,
+    contactId: contactId as string,
+    conversationId: conversationId as string,
+    messageId: messageId || null,
+    channelSessionId: sessao.id,
+    texto: e.text ?? null,
+    nomeDoContato: e.profileName ?? null,
+    origem: "meta_webhook",
+  });
+
   return {
     status: "ingested",
-    messageId: (inserida as { id: string } | null)?.id ?? "",
+    messageId,
     conversationId: conversationId as string,
   };
 }

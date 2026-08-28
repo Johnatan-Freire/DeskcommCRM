@@ -71,7 +71,13 @@ function makeDb(
     let payload: Row | undefined;
 
     function matches(row: Row): boolean {
-      return filters.every(([k, v]) => row[k] === v);
+      return filters.every(([k, v]) => {
+        if (k === "followup_flow_pointers.surface") {
+          const pointer = tables.followup_flow_pointers?.find((p) => p.id === row.pointer_id);
+          return (pointer?.surface ?? "followup") === v;
+        }
+        return row[k] === v;
+      });
     }
 
     function execute(): { data: Row[] | null; error: { code?: string; message: string } | null } {

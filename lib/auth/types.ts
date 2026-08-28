@@ -65,6 +65,23 @@ export interface AuthUser {
    * e trocar para espanhol meio segundo depois, em toda navegação.
    */
   locale?: string | null;
+  /**
+   * Fuso de APRESENTAÇÃO, de `user_metadata.timezone`.
+   *
+   * Vem aqui pelo mesmo motivo do `locale` acima: a grade da Agenda precisa
+   * dele no primeiro render, e buscá-lo depois desenharia o dia inteiro no
+   * fuso errado para corrigir meio segundo depois — com os compromissos
+   * pulando de posição na frente de quem está olhando.
+   *
+   * NÃO é o fuso da REGRA. Em que fuso as janelas de trabalho valem é
+   * `attendant_availability.schedule.timezone`, e são perguntas diferentes:
+   * quem está em Manaus vê a grade no horário de Manaus enquanto a jornada
+   * continua valendo no fuso em que foi configurada.
+   *
+   * Até esta linha o campo era escrito pela tela de perfil e lido por NINGUÉM —
+   * o anti-pattern "tela oferece o que o código ignora".
+   */
+  timezone?: string | null;
   organizations: UserOrgMembership[];
 }
 

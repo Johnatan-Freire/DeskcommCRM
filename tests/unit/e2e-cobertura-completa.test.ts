@@ -109,6 +109,25 @@ describe("cobertura do e2e no CI", () => {
     expect(fantasmas, "lista do CI aponta para spec inexistente — renomeada ou apagada").toEqual([]);
   });
 
+  /**
+   * AQUI HAVIA UM CASO QUE COBRAVA O NÚMERO ESCRITO NO CLAUDE.md — e ele saiu
+   * porque o número saiu de lá, o que é a solução MELHOR.
+   *
+   * Convergência independente, na mesma tarde: eu vi a contagem apodrecida
+   * ("48 das 49" com 50 de 51 no repo), corrigi o número e escrevi um gate para
+   * prendê-lo. Em paralelo, o time tratou o mesmo apodrecimento pela raiz —
+   * apagou o número do CLAUDE.md e deixou no lugar o comando que o produz.
+   *
+   * A deles vence, e não por gentileza: é o que o DoD 16 daquele arquivo manda
+   * fazer ("onde a afirmação puder virar comando, troque em vez de corrigir: um
+   * número corrigido envelhece de novo; um `rode isto para saber` não envelhece
+   * nunca"). Um gate que prende um número congela a manutenção dele para sempre;
+   * tirar o número dissolve a classe inteira do problema.
+   *
+   * Não sobrou buraco: sem número no texto, não há o que divergir do workflow.
+   * As três pontas que importam — disco→listas, listas→disco e listas→Playwright
+   * — seguem cobradas pelos casos vizinhos.
+   */
   it("as listas são de fato passadas ao Playwright", () => {
     // A terceira ponta. Declarar não é executar: sem o consumo, acrescentar o nome
     // à variável deixa este gate verde e a spec continua fora do run.

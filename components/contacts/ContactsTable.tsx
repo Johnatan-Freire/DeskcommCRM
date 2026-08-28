@@ -1,8 +1,12 @@
 "use client";
+import { useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useQueryClient } from "@tanstack/react-query";
 import { format, formatRelative, isToday, isYesterday } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { CaretDown, CaretUp, ChatCircle } from "@/lib/ui/icons";
+import { toast } from "sonner";
+import { CaretDown, CaretUp, ChatCircle, Trash } from "@/lib/ui/icons";
 import {
   Table,
   TableBody,
@@ -13,9 +17,20 @@ import {
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { useDeleteContact } from "@/hooks/contacts/useDeleteContact";
 import type { ContactOrderBy } from "@/lib/schemas/contacts";
 import type { Contact } from "@/lib/types/contacts";
 import { rotuloDoContato } from "@/lib/contacts/rotulo-do-contato";
+import { phoneForDisplay } from "@/lib/channels/phone-variants";
 
 interface Props {
   contacts: Contact[];
@@ -83,7 +98,50 @@ function SortableHead({
 }
 
 export function ContactsTable({ contacts, orderBy, orderDir, onSort }: Props) {
+  const del = useDeleteContact();
+  const [alvo, setAlvo] = useState<Contact | null>(null);
+  const [abrindo, setAbrindo] = useState<string | null>(null);
+  const router = useRouter();
+  const qc = useQueryClient();
+
+  async function iniciarConversa(c: Contact) {
+    if (!c.phone_number || abrindo) return;
+    setAbrindo(c.id);
+    try {
+      const res = await fetch("/api/v1/conversations/open-with-contact", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ contact_id: c.id, phone_number: c.phone_number }),
+      });
+      const json = (await res.json()) as {
+        data?: { conversation_id: string };
+        error?: { message?: string };
+      };
+      if (!res.ok || !json.data?.conversation_id) {
+        throw new Error(json.error?.message ?? "Não foi possível abrir a conversa.");
+      }
+      await qc.invalidateQueries({ queryKey: ["contacts"] });
+      router.push(`/app/inbox?id=${json.data.conversation_id}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Não foi possível abrir a conversa.");
+    } finally {
+      setAbrindo(null);
+    }
+  }
+
+  async function confirmarExclusao() {
+    if (!alvo) return;
+    try {
+      await del.mutateAsync(alvo.id);
+      toast.success("Contato excluído.");
+      setAlvo(null);
+    } catch {
+      // hook handles toast
+    }
+  }
+
   return (
+    <>
     <Table>
       <TableHeader>
         <TableRow>
@@ -117,8 +175,8 @@ export function ContactsTable({ contacts, orderBy, orderDir, onSort }: Props) {
             onSort={onSort}
           />
           <TableHead>Status</TableHead>
-          <TableHead className="w-[52px]">
-            <span className="sr-only">Conversa</span>
+          <TableHead className="w-[88px]">
+            <span className="sr-only">Ações</span>
           </TableHead>
         </TableRow>
       </TableHeader>
@@ -134,7 +192,7 @@ export function ContactsTable({ contacts, orderBy, orderDir, onSort }: Props) {
               {c.email ?? "—"}
             </TableCell>
             <TableCell className="text-muted-foreground">
-              {c.phone_number ?? "—"}
+              {c.phone_number ? phoneForDisplay(c.phone_number) : "—"}
             </TableCell>
             <TableCell>
               <div className="flex flex-wrap gap-1">
@@ -160,28 +218,72 @@ export function ContactsTable({ contacts, orderBy, orderDir, onSort }: Props) {
               </div>
             </TableCell>
             <TableCell>
-              {c.conversa ? (
-                <Button variant="ghost" size="icon" className="h-8 w-8" asChild>
-                  <Link
-                    href={`/app/inbox?id=${c.conversa.id}`}
-                    title="Abrir conversa no Inbox"
-                    aria-label={`Abrir conversa com ${displayName(c)} no Inbox`}
+              <div className="flex items-center justify-end gap-0.5">
+                {c.conversa ? (
+                  <Button variant="ghost" size="icon" className="h-8 w-8" asChild>
+                    <Link
+                      href={`/app/inbox?id=${c.conversa.id}`}
+                      title="Abrir conversa no Inbox"
+                      aria-label={`Abrir conversa com ${displayName(c)} no Inbox`}
+                    >
+                      <ChatCircle size={16} weight="regular" aria-hidden />
+                      {c.conversa.unread > 0 && (
+                        <span className="sr-only">{c.conversa.unread} sem ler</span>
+                      )}
+                    </Link>
+                  </Button>
+                ) : c.phone_number ? (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8"
+                    title="Iniciar conversa no Inbox"
+                    aria-label={`Iniciar conversa com ${displayName(c)} no Inbox`}
+                    disabled={abrindo === c.id}
+                    onClick={() => void iniciarConversa(c)}
                   >
                     <ChatCircle size={16} weight="regular" aria-hidden />
-                    {c.conversa.unread > 0 && (
-                      <span className="sr-only">{c.conversa.unread} sem ler</span>
-                    )}
-                  </Link>
+                  </Button>
+                ) : null}
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 text-muted-foreground hover:text-error-fg"
+                  title="Excluir contato"
+                  aria-label={`Excluir contato ${displayName(c)}`}
+                  onClick={() => setAlvo(c)}
+                >
+                  <Trash size={16} weight="regular" aria-hidden />
                 </Button>
-              ) : (
-                <span className="text-muted-foreground text-xs" aria-hidden>
-                  —
-                </span>
-              )}
+              </div>
             </TableCell>
           </TableRow>
         ))}
       </TableBody>
     </Table>
+
+    <AlertDialog open={alvo !== null} onOpenChange={(open) => { if (!open) setAlvo(null); }}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Excluir contato?</AlertDialogTitle>
+          <AlertDialogDescription>
+            {alvo
+              ? `Isso remove ${displayName(alvo)} e a conversa associada, se houver. Esta ação não pode ser desfeita.`
+              : null}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={del.isPending}>Cancelar</AlertDialogCancel>
+          <Button
+            variant="destructive"
+            onClick={() => void confirmarExclusao()}
+            disabled={del.isPending}
+          >
+            {del.isPending ? "Excluindo…" : "Excluir"}
+          </Button>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+    </>
   );
 }

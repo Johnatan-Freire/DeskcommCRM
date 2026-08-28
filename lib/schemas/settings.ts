@@ -111,7 +111,7 @@ export const notificationPrefsSchema = z.object({
 });
 export type NotificationPrefsInput = z.infer<typeof notificationPrefsSchema>;
 
-const customFieldSchema = z.object({
+export const customFieldSchema = z.object({
   key: z
     .string()
     .min(1)
@@ -135,6 +135,7 @@ const customFieldSchema = z.object({
     .array(z.object({ value: z.string().min(1), label: z.string().min(1) }))
     .optional(),
 });
+export type CustomFieldDef = z.infer<typeof customFieldSchema>;
 
 export const pipelineConfigPatchSchema = z.object({
   vocabulary: z

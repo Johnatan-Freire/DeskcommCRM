@@ -17,8 +17,11 @@ import { ConversationTagsEditor } from "./ConversationTagsEditor";
 import { ContactTagsEditor } from "./ContactTagsEditor";
 import { useDefaultPipeline } from "@/hooks/pipelines/useDefaultPipeline";
 import { NewLeadDialog } from "@/components/kanban/NewLeadDialog";
+import { CustomFieldsEditor, type CustomFieldDef } from "@/components/contacts/CustomFieldsEditor";
+import { useEditLead } from "@/hooks/kanban/useUpdateLead";
 import { cn } from "@/lib/utils";
 import { rotuloDoContato } from "@/lib/contacts/rotulo-do-contato";
+import { phoneForDisplay } from "@/lib/channels/phone-variants";
 
 interface Props {
   conversation: ConversationWithContact | null;
@@ -31,6 +34,9 @@ interface LeadRow {
   value_cents: number | null;
   currency: string | null;
   updated_at: string;
+  pipeline_id: string;
+  custom_fields: Record<string, unknown> | null;
+  field_defs: CustomFieldDef[];
 }
 
 interface OrderRow {
@@ -51,6 +57,14 @@ interface ActivityRow {
   /** 0071 — o porquê legível e quem agiu. */
   reason: string | null;
   actor_kind: string | null;
+  /**
+   * O NOME de quem agiu. `actor_kind` responde "uma pessoa ou o agente?"; esta
+   * responde "qual pessoa?" — e é a diferença entre "Transferiu a conversa ·
+   * Você/time" e "Transferiu a conversa · Maria Silva", que é a pergunta que o
+   * painel existe para responder. `null` é estado declarado (sem service role),
+   * e aí a linha volta ao rótulo genérico.
+   */
+  performed_by_name?: string | null;
 }
 
 /**
@@ -219,6 +233,121 @@ function SemLista({
   );
 }
 
+/**
+ * Só os campos do funil, no lugar onde a conversa acontece.
+ *
+ * Título, valor e tags já têm casa no dossiê. Quem atende descobre o dado
+ * customizado (CPF, plano, endereço) aqui — e tinha de ir no Kanban gravar.
+ */
+function InboxLeadEditor({
+  leads,
+  selecionadoId,
+  onSelecionar,
+  onSalvo,
+}: {
+  leads: LeadRow[];
+  selecionadoId: string | null;
+  onSelecionar: (id: string) => void;
+  onSalvo: () => void;
+}) {
+  const ativo = leads.find((l) => l.id === selecionadoId) ?? leads[0]!;
+
+  return (
+    <div className="mt-2 space-y-2">
+      {leads.length > 1 && (
+        <ul className="space-y-1">
+          {leads.map((l) => {
+            const marcado = l.id === ativo.id;
+            return (
+              <li key={l.id}>
+                <button
+                  type="button"
+                  data-testid={`inbox-lead-${l.id}`}
+                  aria-pressed={marcado}
+                  onClick={() => onSelecionar(l.id)}
+                  className={cn(
+                    "w-full rounded-md border p-2 text-left text-xs",
+                    marcado ? "border-accent bg-accent/10" : "border-border",
+                  )}
+                >
+                  <div className="truncate font-medium">{l.title}</div>
+                  <div className="text-muted-foreground">
+                    {l.status} · {formatMoney(l.value_cents, l.currency)}
+                  </div>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      {leads.length === 1 && (
+        <p className="text-xs text-muted-foreground">
+          {ativo.title} · {ativo.status}
+        </p>
+      )}
+      <CamposDoFunil
+        key={ativo.id}
+        leadId={ativo.id}
+        pipelineId={ativo.pipeline_id}
+        fieldDefs={ativo.field_defs ?? []}
+        valores={ativo.custom_fields ?? {}}
+        onSalvo={onSalvo}
+      />
+    </div>
+  );
+}
+
+function CamposDoFunil({
+  leadId,
+  pipelineId,
+  fieldDefs,
+  valores,
+  onSalvo,
+}: {
+  leadId: string;
+  pipelineId: string;
+  fieldDefs: CustomFieldDef[];
+  valores: Record<string, unknown>;
+  onSalvo: () => void;
+}) {
+  const edit = useEditLead(pipelineId);
+  const [customFields, setCustomFields] = useState(valores);
+
+  if (fieldDefs.length === 0) {
+    return <p className="text-xs text-muted-foreground">Este funil não tem campos extras.</p>;
+  }
+
+  async function salvar() {
+    try {
+      await edit.mutateAsync({ leadId, patch: { custom_fields: customFields } });
+      toast.success("Campos atualizados");
+      onSalvo();
+    } catch {
+      // toast already shown
+    }
+  }
+
+  return (
+    <div className="space-y-3">
+      <CustomFieldsEditor
+        fields={fieldDefs}
+        value={customFields}
+        onChange={setCustomFields}
+        mode="lead"
+        className="gap-3 md:grid-cols-1"
+      />
+      <Button
+        size="sm"
+        className="h-7 w-full text-xs"
+        disabled={edit.isPending}
+        onClick={() => void salvar()}
+      >
+        {edit.isPending ? "Salvando…" : "Salvar"}
+      </Button>
+    </div>
+  );
+}
+
 export function CRMSidePanel({ conversation }: Props) {
   const contact = conversation?.contacts ?? null;
   const contactId = contact?.id ?? null;
@@ -240,6 +369,7 @@ export function CRMSidePanel({ conversation }: Props) {
 
   const [tagEditorOpen, setTagEditorOpen] = useState(false);
   const [leadDialogOpen, setLeadDialogOpen] = useState(false);
+  const [leadAtivoId, setLeadAtivoId] = useState<string | null>(null);
   const defaultPipeline = useDefaultPipeline(leadDialogOpen);
 
   useEffect(() => {
@@ -255,6 +385,7 @@ export function CRMSidePanel({ conversation }: Props) {
       setOrders(null);
       setActivities(null);
       setDemandas(null);
+      setLeadAtivoId(null);
       return;
     }
     let cancelled = false;
@@ -301,7 +432,19 @@ export function CRMSidePanel({ conversation }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [contactId, tentativa]);
+    // AS DUAS DEPS NOVAS SÃO O REFETCH DA TROCA DE COMANDO.
+    //
+    // Este painel não usa react-query: ele busca num `useEffect` e guarda em
+    // `useState`, então `invalidateQueries` não o alcança — e os hooks de
+    // claim/transfer/release/pausar invalidam só as chaves de conversa. Resultado
+    // medido: as quatro atividades novas ("Assumiu a conversa" e irmãs) nasciam no
+    // banco e a seção "Atividade" ao lado NUNCA as mostrava, porque `contactId` não
+    // muda quando o dono muda e o painel fica montado o tempo todo.
+    //
+    // Depender do DADO que muda é mais honesto que um contador de invalidação:
+    // `assigned_to_user_id` cobre assumir/transferir/liberar e `bot_silenced_until`
+    // cobre pausar e devolver — que são exatamente os quatro gestos que geram linha.
+  }, [contactId, tentativa, conversation?.assigned_to_user_id, conversation?.bot_silenced_until]);
 
   // Recarrega o resumo pelo MESMO caminho do "Tentar de novo": o efeito depende
   // de `tentativa`, então a demanda recém-marcada volta do servidor em vez de
@@ -342,7 +485,7 @@ export function CRMSidePanel({ conversation }: Props) {
         <Card className="mt-2 space-y-2 p-3 text-sm">
           <div className="font-medium">{displayName}</div>
           {contact?.phone_number && (
-            <div className="text-xs text-muted-foreground">{contact.phone_number}</div>
+            <div className="text-xs text-muted-foreground">{phoneForDisplay(contact.phone_number)}</div>
           )}
           {tags.length > 0 && (
             <div className="flex flex-wrap gap-1">
@@ -394,6 +537,10 @@ export function CRMSidePanel({ conversation }: Props) {
           pipelineId={defaultPipeline.data.pipeline.id}
           stages={defaultPipeline.data.stages}
           contactId={contactId}
+          onCreated={() => {
+            setLeadAtivoId(null);
+            recarregar();
+          }}
         />
       )}
 
@@ -463,28 +610,19 @@ export function CRMSidePanel({ conversation }: Props) {
 
       <Separator />
 
-      <section>
+      <section data-testid="inbox-campos-lead">
         <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
           Leads recentes
         </h3>
         {sectionsLoading ? (
           <Skeleton className="mt-2 h-14 w-full" />
         ) : leads && leads.length > 0 ? (
-          <ul className="mt-2 space-y-1.5">
-            {leads.map((l) => (
-              <li
-                key={l.id}
-                className="flex items-center justify-between rounded-md border border-border p-2 text-xs"
-              >
-                <div className="min-w-0">
-                  <div className="truncate font-medium">{l.title}</div>
-                  <div className="text-muted-foreground">
-                    {l.status} · {formatMoney(l.value_cents, l.currency)}
-                  </div>
-                </div>
-              </li>
-            ))}
-          </ul>
+          <InboxLeadEditor
+            leads={leads}
+            selecionadoId={leadAtivoId}
+            onSelecionar={setLeadAtivoId}
+            onSalvo={recarregar}
+          />
         ) : (
           <SemLista vazio="Sem leads." erro={erro} onTentarDeNovo={() => setTentativa((n) => n + 1)} />
         )}
@@ -580,7 +718,7 @@ export function CRMSidePanel({ conversation }: Props) {
                     </button>
                   )}
                   <div className="text-muted-foreground">
-                    {actorLabel(a.actor_kind)} · {shortDate(a.performed_at)}
+                    {a.performed_by_name ?? actorLabel(a.actor_kind)} · {shortDate(a.performed_at)}
                   </div>
                 </li>
               );

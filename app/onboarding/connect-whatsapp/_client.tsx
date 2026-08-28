@@ -5,11 +5,32 @@ import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { skipWhatsapp, markWhatsappConfigured } from "@/app/actions/onboarding/skipWhatsapp";
+import { CanalOficialClient } from "@/components/connections/CanalOficialClient";
+import { CanalParceiroClient } from "@/components/connections/CanalParceiroClient";
 
 interface Props {
   wahaConfigured: boolean;
   sessionName: string;
+  /**
+   * A volta do canal oficial depende de um valor que mora no `.env` do
+   * servidor, e o instalador NÃO o escreve — então numa instalação recém-feita
+   * ele está ausente. Sem ele o número envia e nunca recebe, e o lugar de dizer
+   * isso é ANTES de a pessoa buscar três credenciais no painel, não depois.
+   */
+  oficialPodeReceber: boolean;
 }
+
+/**
+ * COMO a pessoa já usa o número. Vive em `useState` e NUNCA é gravada.
+ *
+ * Gravar aqui seria o defeito: `cumprido` do passo é `Boolean(state.whatsapp)`
+ * (`lib/onboarding/passos.ts`), então persistir a escolha no clique marcaria o
+ * passo como resolvido — e quem fechasse o navegador no meio cairia direto no
+ * passo seguinte, sem telefone e sem caminho de volta, porque o roteador só
+ * devolve o primeiro passo NÃO cumprido. O banco só é tocado quando o passo
+ * termina de verdade: conectou, pulou, ou disse que já tinha conectado.
+ */
+type Forma = "qr" | "oficial" | "parceiro";
 
 type Status =
   | "INIT"
@@ -79,16 +100,140 @@ function explicacaoDoEstado(s: Status): string {
   }
 }
 
-export function ConnectWhatsappClient({ wahaConfigured, sessionName }: Props) {
+/**
+ * Um cartão de escolha — a MESMA forma que o resto do produto já usa
+ * (`app/app/settings/atendimento/_form.tsx`): `<label>` embrulhando um radio
+ * nativo. Não é `RadioGroup` porque esse componente não existe neste repo, e
+ * trazê-lo criaria um quarto dialeto de escolha ao lado de três iguais.
+ */
+function Escolha({
+  valor,
+  atual,
+  titulo,
+  corpo,
+  onEscolher,
+}: {
+  valor: Forma;
+  atual: Forma | null;
+  titulo: string;
+  corpo: string;
+  onEscolher: (v: Forma) => void;
+}) {
+  const marcada = atual === valor;
+  return (
+    <label
+      data-testid={`forma-${valor}`}
+      data-marcada={marcada ? "sim" : "nao"}
+      className={`flex cursor-pointer items-start gap-3 rounded-lg border p-3 transition-colors ${
+        marcada ? "border-primary bg-primary/5" : "border-border hover:bg-muted/40"
+      }`}
+    >
+      <input
+        type="radio"
+        name="forma-de-conectar"
+        value={valor}
+        checked={marcada}
+        onChange={() => onEscolher(valor)}
+        className="mt-1 h-4 w-4 shrink-0 accent-primary"
+        aria-label={titulo}
+      />
+      <span className="space-y-1">
+        <span className="block text-sm font-medium">{titulo}</span>
+        <span className="block text-xs text-muted-foreground">{corpo}</span>
+      </span>
+    </label>
+  );
+}
+
+/** Voltar à pergunta. Escolher errado não pode ser uma porta que tranca. */
+function VoltarParaEscolha({ onVoltar }: { onVoltar: () => void }) {
+  return (
+    <button
+      type="button"
+      data-testid="voltar-para-escolha"
+      onClick={onVoltar}
+      className="text-xs text-muted-foreground underline underline-offset-4 hover:text-foreground"
+    >
+      ← Escolher outra forma
+    </button>
+  );
+}
+
+/**
+ * As duas saídas do passo, iguais nos três ramos.
+ *
+ * Ficam FORA do ramo de propósito: o defeito que este projeto já pagou caro
+ * (commit c2f88e83) foi um aviso correto que nasceu sem botão — quem instalava
+ * sem chave ficava preso numa tela com o diagnóstico certo e nenhum caminho.
+ * Aqui, nenhuma escolha — nem a pergunta em si — deixa a pessoa sem saída.
+ */
+function Saidas({ status, sessionName }: { status: Status; sessionName: string }) {
   const [pending, startTransition] = useTransition();
+  return (
+    <div className="flex flex-wrap gap-2 pt-2">
+      <Button
+        type="button"
+        variant="outline"
+        disabled={pending}
+        onClick={() =>
+          startTransition(async () => {
+            try {
+              await skipWhatsapp();
+            } catch (err) {
+              if (isRedirectError(err)) throw err;
+              toast.error("Falha ao pular: " + String(err));
+            }
+          })
+        }
+      >
+        Pular por enquanto
+      </Button>
+      <Button
+        type="button"
+        disabled={pending || status === "WORKING"}
+        onClick={() =>
+          startTransition(async () => {
+            try {
+              await markWhatsappConfigured(
+                sessionName,
+                status === "WORKING" ? "WORKING" : "configured",
+              );
+            } catch (err) {
+              if (isRedirectError(err)) throw err;
+              toast.error("Falha ao marcar passo: " + String(err));
+            }
+          })
+        }
+      >
+        Conectei em outro lugar
+      </Button>
+    </div>
+  );
+}
+
+export function ConnectWhatsappClient({
+  wahaConfigured,
+  sessionName,
+  oficialPodeReceber,
+}: Props) {
+  const [pending, startTransition] = useTransition();
+  const [forma, setForma] = useState<Forma | null>(null);
   const [info, setInfo] = useState<SessionInfo>({ status: "INIT", session: sessionName });
   const [qrTick, setQrTick] = useState(0);
+  const [qrFailed, setQrFailed] = useState(false);
   const [busy, setBusy] = useState(false);
 
   const status = info.status;
 
-  // 1) On mount (when WAHA is configured), start the session if not yet started.
+  // 1) Sobe a sessão QUANDO A PESSOA ESCOLHE o código — não ao montar a tela.
+  //
+  // Era na montagem (o comentário aqui dizia "on mount, when WAHA is
+  // configured"), e isso é o defeito que esta tela veio corrigir: o canal
+  // nascia por código de barras só porque alguém pisou na rota, sem nunca ter
+  // sido perguntado. Quem tem conta oficial já entrava pelo caminho errado
+  // antes de clicar em coisa alguma, e descobria depois, em outra tela.
   useEffect(() => {
+    if (forma !== "qr") return;
     if (!wahaConfigured) return;
     let cancelled = false;
     (async () => {
@@ -120,10 +265,15 @@ export function ConnectWhatsappClient({ wahaConfigured, sessionName }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [wahaConfigured, sessionName]);
+  }, [forma, wahaConfigured, sessionName]);
 
   // 2) Poll status every 3 seconds until WORKING/FAILED.
+  //
+  // Também preso à escolha: sem isto, quem escolheu outra forma seguiria
+  // batendo de 3 em 3 segundos numa sessão que nunca subiu — e a tela do lado
+  // trocaria de estado sozinha por trás do formulário que a pessoa preenche.
   useEffect(() => {
+    if (forma !== "qr") return;
     if (!wahaConfigured) return;
     if (status === "WORKING" || status === "FAILED") return;
     const id = setInterval(async () => {
@@ -153,7 +303,7 @@ export function ConnectWhatsappClient({ wahaConfigured, sessionName }: Props) {
       }
     }, 3000);
     return () => clearInterval(id);
-  }, [wahaConfigured, status, sessionName]);
+  }, [forma, wahaConfigured, status, sessionName]);
 
   // 3) When status → WORKING, auto-advance.
   useEffect(() => {
@@ -186,8 +336,78 @@ export function ConnectWhatsappClient({ wahaConfigured, sessionName }: Props) {
 
   const showQr = wahaConfigured && status === "SCAN_QR_CODE";
 
+  // A PERGUNTA. Enquanto ninguém respondeu, nada é criado e nada é pedido —
+  // é o único estado em que esta tela não tem efeito colateral nenhum.
+  if (forma === null) {
+    return (
+      <div className="space-y-4 rounded-lg border bg-background p-6">
+        <fieldset className="space-y-3">
+          <legend className="text-sm font-medium">Como você já usa esse número?</legend>
+          <p className="text-xs text-muted-foreground">
+            Existe mais de um jeito de ter WhatsApp para empresa, e cada um conecta
+            de um jeito. Se você nunca ouviu falar dos outros dois, é o primeiro.
+          </p>
+          <div className="grid gap-2">
+            <Escolha
+              valor="qr"
+              atual={forma}
+              titulo="Leio um código com o celular"
+              corpo="É assim para quase todo mundo. Você abre o WhatsApp no celular que vai atender e aponta para um código que aparece aqui."
+              onEscolher={setForma}
+            />
+            <Escolha
+              valor="oficial"
+              atual={forma}
+              titulo="Tenho conta oficial na Meta"
+              corpo="Você cadastrou o número na Meta e tem as credenciais em mãos. Não usa o celular para conectar."
+              onEscolher={setForma}
+            />
+            <Escolha
+              valor="parceiro"
+              atual={forma}
+              titulo="Contrato de um provedor parceiro"
+              corpo="Uma empresa parceira cuida do seu WhatsApp e te deu uma chave de acesso."
+              onEscolher={setForma}
+            />
+          </div>
+        </fieldset>
+        <Saidas status={status} sessionName={sessionName} />
+      </div>
+    );
+  }
+
+  if (forma === "oficial" || forma === "parceiro") {
+    return (
+      <div className="space-y-4 rounded-lg border bg-background p-6">
+        <VoltarParaEscolha onVoltar={() => setForma(null)} />
+
+        {forma === "oficial" && !oficialPodeReceber && (
+          <div className="rounded-md border border-amber-300/60 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-500/40 dark:bg-amber-950/40 dark:text-amber-100">
+            <p className="font-medium">
+              Este servidor ainda não está pronto para RECEBER por este caminho.
+            </p>
+            <p className="mt-1">
+              Dá para conectar e já enviar, mas as respostas do cliente não vão chegar
+              até quem instalou o sistema completar uma configuração no servidor. Se
+              você quer atender hoje, o caminho do código com o celular funciona agora
+              — e dá para trocar depois, sem perder nada.
+            </p>
+          </div>
+        )}
+
+        {/* Os mesmos componentes da tela de Conexões, inteiros. Reescrevê-los
+            aqui criaria uma segunda cópia de um formulário que valida credencial
+            contra o outro lado ANTES de gravar — e duas cópias divergem. */}
+        {forma === "oficial" ? <CanalOficialClient /> : <CanalParceiroClient />}
+
+        <Saidas status={status} sessionName={sessionName} />
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4 rounded-lg border bg-background p-6">
+      <VoltarParaEscolha onVoltar={() => setForma(null)} />
       {!wahaConfigured && (
         <div className="rounded-md border border-amber-300/60 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-500/40 dark:bg-amber-950/40 dark:text-amber-100">
           <p className="font-medium">O WhatsApp desta instalação ainda não subiu.</p>
@@ -212,6 +432,41 @@ export function ConnectWhatsappClient({ wahaConfigured, sessionName }: Props) {
           */}
           <p className="text-sm font-medium">{rotuloDoEstado(busy ? "STARTING" : status)}</p>
           <p className="mt-1 text-xs text-muted-foreground">{explicacaoDoEstado(busy ? "STARTING" : status)}</p>
+
+          {/*
+            O CÓDIGO EM SI. `showQr` já existia calculado (e o `qrTick` já era
+            mantido, incrementado a cada resposta SCAN_QR_CODE do polling,
+            especificamente para isto) — só faltava a tag que os usasse. O
+            texto acima dizia "Escaneie o código abaixo" para um "abaixo" que
+            não existia, e nenhum teste e2e passa por este estado (o
+            `wizard-do-funcionario.spec.ts` pula o WhatsApp), então o buraco
+            não aparecia em CI.
+
+            `/api/v1/onboarding/whatsapp/qr` é a rota que já fazia o proxy da
+            imagem do WAHA (existia, sem consumidor). `qrTick` na query invalida
+            o cache do navegador a cada novo código — sem ele, a mesma URL não
+            recarregaria a imagem quando o WAHA girasse o QR por trás.
+          */}
+          {showQr && (
+            <div className="mt-3 flex flex-col items-center gap-2">
+              {qrFailed ? (
+                <p className="text-xs text-muted-foreground">
+                  Não consegui carregar o código agora. Ele deve reaparecer sozinho em
+                  instantes — se não aparecer, gere outro abaixo.
+                </p>
+              ) : (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  key={qrTick}
+                  src={`/api/v1/onboarding/whatsapp/qr?t=${qrTick}`}
+                  alt="Código QR para conectar o WhatsApp"
+                  className="h-48 w-48 rounded-md border bg-white object-contain sm:h-56 sm:w-56"
+                  onError={() => setQrFailed(true)}
+                  onLoad={() => setQrFailed(false)}
+                />
+              )}
+            </div>
+          )}
 
           {status === "WORKING" && (
             <p className="mt-3 text-sm font-medium text-emerald-700 dark:text-emerald-400">
@@ -253,44 +508,7 @@ export function ConnectWhatsappClient({ wahaConfigured, sessionName }: Props) {
         </div>
       )}
 
-      <div className="flex flex-wrap gap-2 pt-2">
-        <Button
-          type="button"
-          variant="outline"
-          disabled={pending}
-          onClick={() =>
-            startTransition(async () => {
-              try {
-                await skipWhatsapp();
-              } catch (err) {
-                if (isRedirectError(err)) throw err;
-                toast.error("Falha ao pular: " + String(err));
-              }
-            })
-          }
-        >
-          Pular por enquanto
-        </Button>
-        <Button
-          type="button"
-          disabled={pending || status === "WORKING"}
-          onClick={() =>
-            startTransition(async () => {
-              try {
-                await markWhatsappConfigured(
-                  sessionName,
-                  status === "WORKING" ? "WORKING" : "configured",
-                );
-              } catch (err) {
-                if (isRedirectError(err)) throw err;
-                toast.error("Falha ao marcar passo: " + String(err));
-              }
-            })
-          }
-        >
-          Conectei em outro lugar
-        </Button>
-      </div>
+      <Saidas status={status} sessionName={sessionName} />
     </div>
   );
 }

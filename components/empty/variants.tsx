@@ -12,6 +12,12 @@ import {
   GitBranch,
   Users,
 } from "@phosphor-icons/react";
+// Do barril, e não do `@phosphor-icons/react` que as linhas acima usam: a regra
+// (ADR-05) é o barril, e 116 arquivos a seguem. O import de cima é dívida
+// anterior a esta feature — replicá-la para ficar "consistente com o arquivo"
+// espalharia o problema em vez de parar de crescê-lo.
+import { CalendarBlank } from "@/lib/ui/icons";
+
 import { EmptyState, type EmptyStateAction } from "./EmptyState";
 
 interface VariantProps {
@@ -133,6 +139,21 @@ export function EmptyFilterResults({ primary, secondary }: VariantProps = {}) {
       icon={Funnel}
       headline="Nenhum resultado"
       subcopy="Tente ajustar os filtros ou a busca."
+      primary={primary}
+      secondary={secondary}
+    />
+  );
+}
+
+export function EmptyAgenda({ primary, secondary }: VariantProps = {}) {
+  return (
+    <EmptyState
+      icon={CalendarBlank}
+      headline="Sua agenda está livre esta semana"
+      // O vazio diz de onde VEM o próximo agendamento, em vez de constatar a
+      // ausência. "Nenhum agendamento encontrado" é verdadeiro e inútil: quem
+      // acabou de instalar não sabe o que fazer com essa frase.
+      subcopy="Agendamentos aparecem aqui quando alguém marca pela tela, quando o agente marca por você, ou quando chegam da agenda do Google conectada."
       primary={primary}
       secondary={secondary}
     />

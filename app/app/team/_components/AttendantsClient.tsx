@@ -67,8 +67,24 @@ interface Attendant {
   availability: AttendantAvailability;
 }
 
+/**
+ * ⚠️ JANELA VAZIA NÃO É "24/7" — a mesma coluna significa COISAS OPOSTAS nos dois
+ * sistemas que a leem, e isto está medido em `lib/agenda/horarios-livres.ts:214`:
+ *
+ *   roteamento (`isWithinSchedule`)  ·  vazio = aceita conversa a qualquer hora
+ *   agenda (horários livres)         ·  vazio = nada publicado ⇒ ZERO horário
+ *
+ * Esta tela dizia só o primeiro. Quem lia "24/7" concluía, com razão, que estava
+ * tudo configurado — e a Agenda, na tela ao lado, dizia "você ainda não publicou
+ * seus horários" sobre a MESMA linha do banco. O dono do produto passou por
+ * aqui, leu 24/7 e foi procurar o problema em outro lugar.
+ *
+ * "Não publicado" é o rótulo certo porque nomeia o que FALTA. O outro efeito —
+ * o roteamento aceitando a qualquer hora — é dito por extenso no diálogo, onde
+ * há espaço para as duas metades.
+ */
 function summarizeSchedule(windows: ScheduleWindow[]): string {
-  if (windows.length === 0) return "24/7";
+  if (windows.length === 0) return "Não publicado";
   return windows.map((w) => `${DOW_LABELS[w.dow]} ${w.start}–${w.end}`).join(", ");
 }
 
@@ -108,8 +124,9 @@ function ScheduleDialog({
         <DialogHeader>
           <DialogTitle>Horário de {attendant.name}</DialogTitle>
           <DialogDescription>
-            Sem janelas = disponível 24/7. Adicione janelas para restringir o roteamento a
-            horários específicos.
+            Sem janelas, o roteamento aceita conversa a qualquer hora — mas a Agenda não
+            oferece NENHUM horário para marcar. Adicione janelas para publicar seus
+            horários de atendimento.
           </DialogDescription>
         </DialogHeader>
 
@@ -136,7 +153,9 @@ function ScheduleDialog({
 
           <div className="space-y-2">
             {windows.length === 0 ? (
-              <p className="text-sm text-muted-foreground">Nenhuma janela — disponível 24/7.</p>
+              <p className="text-sm text-muted-foreground">
+                Nenhuma janela publicada — ninguém consegue marcar com esta pessoa.
+              </p>
             ) : null}
             {windows.map((w, i) => (
               <div key={i} className="flex items-center gap-2">
@@ -312,10 +331,11 @@ function RoutingCard({ canManage }: { canManage: boolean }) {
           </div>
         </div>
         {canManage ? (
-          <div className="flex justify-end">
+          <div className="flex sm:justify-end">
             <Button
               disabled={!dirty || update.isPending}
               onClick={() => update.mutate(current, { onSuccess: () => setDraft(null) })}
+              className="w-full sm:w-auto"
             >
               Salvar
             </Button>
@@ -355,10 +375,19 @@ export function AttendantsClient({ canManage }: Props) {
       <RoutingCard canManage={canManage} />
 
       <div className="rounded-md border">
-        <div className="border-b px-4 py-3">
-          <h2 className="text-sm font-semibold">Atendentes</h2>
+        <div className="border-b px-4 py-3" data-testid="atendentes-e-horarios">
+          <h2 className="text-sm font-semibold">Atendentes e horários de atendimento</h2>
           <p className="text-xs text-muted-foreground">
-            Status, carga atual e capacidade de cada atendente da organização.
+            {/*
+              A frase NOMEIA o que a coluna "Horário" faz, e isso é o conserto —
+              não enfeite. Esta é a única tela do produto onde se publica a
+              jornada, e ela se anunciava como "status, carga e capacidade": quem
+              procurava "meus horários" passava por cima. A Agenda manda para cá
+              (`/app/team?aba=atendimento`) quando ninguém publicou nada, e o
+              destino tinha de dizer que é o lugar certo.
+            */}
+            Status, carga e capacidade de cada atendente — e a jornada semanal que
+            decide os horários oferecidos na Agenda. Sem ela ninguém consegue marcar.
           </p>
         </div>
 

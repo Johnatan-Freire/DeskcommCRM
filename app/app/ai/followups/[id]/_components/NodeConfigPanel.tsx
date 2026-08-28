@@ -11,6 +11,8 @@ import { ActionForm } from "./forms/ActionForm";
 import { ClassifyForm } from "./forms/ClassifyForm";
 import { ConditionForm } from "./forms/ConditionForm";
 import { EndForm } from "./forms/EndForm";
+import { MatchReplyForm } from "./forms/MatchReplyForm";
+import { RepeatForm } from "./forms/RepeatForm";
 import { WaitForm } from "./forms/WaitForm";
 import type { ConfigOf } from "./forms/shared";
 import { NODE_VISUALS } from "./nodes/nodeVisuals";
@@ -93,6 +95,18 @@ export function NodeConfigPanel({ node, onChange, ramosLigados }: Props) {
         {type === "ai_classify" && (
           <ClassifyForm
             config={node.data.config as ConfigOf<"ai_classify">}
+            onChange={(config) => onChange({ config })}
+          />
+        )}
+        {type === "match_reply" && (
+          <MatchReplyForm
+            config={node.data.config as ConfigOf<"match_reply">}
+            onChange={(config) => onChange({ config })}
+          />
+        )}
+        {type === "repeat" && (
+          <RepeatForm
+            config={node.data.config as ConfigOf<"repeat">}
             onChange={(config) => onChange({ config })}
           />
         )}

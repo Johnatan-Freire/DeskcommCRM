@@ -286,23 +286,57 @@ export function UpdatePanel() {
         </p>
       )}
 
-      {data.notes?.requires_attention && (
+      {/* Os avisos de TODAS as versões da faixa, reunidos e sempre à vista.
+          Nenhum deles entra em `<details>`: esconder o que exige ação manual é
+          exatamente o defeito que esta tela passou a consertar. Cada um diz de
+          que versão veio — num salto de várias, "reconecte o número" sem dizer
+          de qual release não informa o operador, assusta. */}
+      {data.notes?.requires_attention.length ? (
         <div className="mb-4 rounded-md border border-warning bg-warning-bg p-3 text-sm text-warning-fg">
           <p className="mb-1 font-medium">⚠️ Requer atenção</p>
-          <p className="whitespace-pre-line">
-            {markdownParaTextoSimples(data.notes.requires_attention)}
-          </p>
+          {data.notes.requires_attention.map((aviso) => (
+            <div key={aviso.version} className="mt-2">
+              <p className="font-medium">Da versão {aviso.version}:</p>
+              <p className="whitespace-pre-line">{markdownParaTextoSimples(aviso.texto)}</p>
+            </div>
+          ))}
         </div>
+      ) : null}
+
+      {data.notes?.complete === false && data.notes.sections.length > 0 && (
+        <p className="mb-4 text-sm text-muted-foreground">
+          Este histórico começa na versão {data.notes.sections.at(-1)?.version} e pode não alcançar
+          a que você tem instalada ({versao}) — a última parte pode estar cortada. O texto completo
+          está no arquivo CHANGELOG.md do projeto.
+        </p>
       )}
 
-      {data.notes?.body && (
+      {data.notes?.sections.length ? (
         <div className="mb-6">
           <p className="mb-2 text-sm font-medium">O que muda</p>
-          <pre className="whitespace-pre-wrap font-sans text-sm text-muted-foreground">
-            {markdownParaTextoSimples(data.notes.body)}
-          </pre>
+          {data.notes.sections.map((secao, i) => (
+            <div key={secao.version} className="mb-3">
+              {/* A versão-alvo fica aberta; as do meio ficam recolhidas, para a
+                  lista não virar um muro de texto num salto de várias versões.
+                  Só o CORPO é recolhido — o aviso delas já está lá em cima. */}
+              {i === 0 ? (
+                <pre className="whitespace-pre-wrap font-sans text-sm text-muted-foreground">
+                  {markdownParaTextoSimples(secao.body)}
+                </pre>
+              ) : (
+                <details>
+                  <summary className="cursor-pointer text-sm font-medium">
+                    Versão {secao.version}
+                  </summary>
+                  <pre className="mt-2 whitespace-pre-wrap font-sans text-sm text-muted-foreground">
+                    {markdownParaTextoSimples(secao.body)}
+                  </pre>
+                </details>
+              )}
+            </div>
+          ))}
         </div>
-      )}
+      ) : null}
 
       <BotaoAtualizar mutate={() => atualizar.mutate()} isPending={atualizar.isPending} erro={erro} />
     </Layout>

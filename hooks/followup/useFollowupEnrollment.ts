@@ -31,7 +31,11 @@ export interface FollowupEnrollmentDossie {
   max_attempts: number;
   steps_taken: number;
   contact: { id: string; name: string };
-  flow: { pointer_id: string; name: string | null; version_id: string };
+  flow: {
+    pointer_id: string;
+    name: string | null;
+    version_id: string;
+  };
   agent_name: string | null;
   no_atual: NoDoDossie | null;
   nos: NoDoDossie[];

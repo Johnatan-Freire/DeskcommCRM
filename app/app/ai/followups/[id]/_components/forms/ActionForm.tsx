@@ -77,6 +77,7 @@ export function ActionForm({
   onChange: (c: ConfigOf<"action">) => void;
 }) {
   const [mode, setMode] = useState(config.mode);
+  const [body, setBody] = useState(config.mode === "text" ? config.body : "");
   const [promptHint, setPromptHint] = useState(config.mode === "ai_message" ? config.prompt_hint : "");
   const [fallbackTemplateId, setFallbackTemplateId] = useState(
     config.mode === "ai_message" ? (config.fallback_template_id ?? "") : "",
@@ -86,18 +87,21 @@ export function ActionForm({
 
   const commit = (next: {
     mode: ModoDaAcao;
+    body: string;
     promptHint: string;
     fallbackTemplateId: string;
     templateId: string;
   }) => {
     const candidate =
-      next.mode === "ai_message"
-        ? {
-            mode: "ai_message" as const,
-            prompt_hint: next.promptHint,
-            ...(next.fallbackTemplateId.trim() ? { fallback_template_id: next.fallbackTemplateId } : {}),
-          }
-        : { mode: "template" as const, template_id: next.templateId };
+      next.mode === "text"
+        ? { mode: "text" as const, body: next.body }
+        : next.mode === "ai_message"
+          ? {
+              mode: "ai_message" as const,
+              prompt_hint: next.promptHint,
+              ...(next.fallbackTemplateId.trim() ? { fallback_template_id: next.fallbackTemplateId } : {}),
+            }
+          : { mode: "template" as const, template_id: next.templateId };
     const parsed = actionConfigSchema.safeParse(candidate);
     if (!parsed.success) {
       setError(parsed.error.issues[0]?.message ?? "Configuração inválida.");
@@ -106,6 +110,8 @@ export function ActionForm({
     setError(null);
     onChange(parsed.data);
   };
+
+  const fields = { body, promptHint, fallbackTemplateId, templateId };
 
   return (
     <div className="space-y-3">
@@ -116,7 +122,7 @@ export function ActionForm({
           onValueChange={(v) => {
             const next = v as ModoDaAcao;
             setMode(next);
-            commit({ mode: next, promptHint, fallbackTemplateId, templateId });
+            commit({ mode: next, ...fields });
           }}
         >
           <SelectTrigger id="action-mode">
@@ -132,7 +138,23 @@ export function ActionForm({
         </Select>
       </div>
 
-      {mode === "ai_message" ? (
+      {mode === "text" ? (
+        <div className="space-y-2">
+          <Label htmlFor="action-body">Texto enviado ao contato</Label>
+          <Textarea
+            id="action-body"
+            maxLength={4000}
+            value={body}
+            onChange={(e) => {
+              setBody(e.target.value);
+              commit({ mode, ...fields, body: e.target.value });
+            }}
+          />
+          <p className="text-xs text-text-muted">
+            Sai exatamente assim, sem IA. No laço, {`{{volta}}`} e {`{{voltas}}`} viram o número da volta.
+          </p>
+        </div>
+      ) : mode === "ai_message" ? (
         <>
           <div className="space-y-2">
             <Label htmlFor="action-prompt-hint">Instrução para a IA</Label>
@@ -142,7 +164,7 @@ export function ActionForm({
               value={promptHint}
               onChange={(e) => {
                 setPromptHint(e.target.value);
-                commit({ mode, promptHint: e.target.value, fallbackTemplateId, templateId });
+                commit({ mode, ...fields, promptHint: e.target.value });
               }}
             />
           </div>
@@ -154,7 +176,7 @@ export function ActionForm({
               permiteVazio
               onChange={(v) => {
                 setFallbackTemplateId(v);
-                commit({ mode, promptHint, fallbackTemplateId: v, templateId });
+                commit({ mode, ...fields, fallbackTemplateId: v });
               }}
             />
           </div>
@@ -168,7 +190,7 @@ export function ActionForm({
             permiteVazio={false}
             onChange={(v) => {
               setTemplateId(v);
-              commit({ mode, promptHint, fallbackTemplateId, templateId: v });
+              commit({ mode, ...fields, templateId: v });
             }}
           />
         </div>
