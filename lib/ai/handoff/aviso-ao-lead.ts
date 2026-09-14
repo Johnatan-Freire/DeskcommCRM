@@ -43,8 +43,10 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { sendMessageHandler } from "@/app/api/v1/messages/_handler";
 import { motivoDoAviso, textoDoAviso } from "@/lib/escalacao/aviso-ao-lead";
-import { carregarRosterDeAtendimento, podeAssumirAgora } from "@/lib/escalacao/atendentes";
-import type { QuemPodeAssumir } from "@/lib/escalacao/disponibilidade";
+import {
+  quemPodeAssumirAgoraViaSupabase,
+  type QuemPodeAssumir,
+} from "@/lib/escalacao/disponibilidade";
 import { logger } from "@/lib/logger";
 
 /** Ator do envio — é o automático falando, não uma pessoa. */
@@ -109,10 +111,9 @@ export async function avisarLeadDoCrm(
 /**
  * Quantos podem assumir agora, no vocabulário que o texto espera.
  *
- * Reusa `carregarRosterDeAtendimento` + `podeAssumirAgora` — o par supabase-js
- * que a rota do painel e a capacidade do agente já usam. Não é um terceiro
- * leitor: é o MESMO predicado (`isAttendantEligible`) que o motor lê por `pg` em
- * `quemPodeAssumirAgora`. Duas portas, uma régua.
+ * Reusa `quemPodeAssumirAgoraViaSupabase`: a mesma leitura e a mesma regra do
+ * MCP de handoff. Assim a frase recebe também as agendas e sabe distinguir
+ * fila cheia de horário declarado encerrado.
  *
  * `null` quando a leitura falha — e `textoDoAviso` lê `null` como "não prometa
  * prazo", que é a direção certa do erro.
@@ -122,12 +123,7 @@ async function quemPodeAssumir(
   organizationId: string,
 ): Promise<QuemPodeAssumir | null> {
   try {
-    const roster = await carregarRosterDeAtendimento(admin, organizationId);
-    const agora = new Date();
-    return {
-      total: roster.length,
-      disponiveis: roster.filter((a) => podeAssumirAgora(a, agora)).length,
-    };
+    return await quemPodeAssumirAgoraViaSupabase(admin, organizationId, new Date());
   } catch (err) {
     logger.warn("[handoff-orchestrator] disponibilidade não lida — aviso sem prazo", {
       organization_id: organizationId,

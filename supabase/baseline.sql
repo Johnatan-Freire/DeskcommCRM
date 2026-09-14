@@ -17000,7 +17000,7 @@ grant execute on function public.fn_encrypt_oauth(text) to service_role;
 grant execute on function public.fn_lgpd_cascade_redact_contact(uuid, uuid, uuid) to service_role;
 grant execute on function public.fn_update_budget_consumption() to service_role;
 
--- ---- number_activated_at aceita null (migration 0168 local) ----
+-- ---- number_activated_at aceita null (migration 0202 local) ----
 --
 -- A aplicação trata `null` como idade desconhecida e aplica o degrau mais
 -- conservador de warm-up. A tela envia `null` quando o campo opcional fica em

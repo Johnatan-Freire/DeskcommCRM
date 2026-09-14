@@ -10,9 +10,9 @@ import { ConversationHeader } from "@/components/inbox/ConversationHeader";
  * instantâneo de pausar pela tela: a única forma era digitar uma mensagem de
  * verdade (silêncio de 5min, deslizante) ou esperar a IA decidir sozinha.
  *
- * "Pausar automático" e "Devolver ao automático" são mutuamente exclusivos —
- * o primeiro aparece quando a IA está atendendo, o segundo quando já está
- * pausada (silenciada OU force_human). Nunca os dois ao mesmo tempo.
+ * "Pausar o automático" e "Devolver ao automático" são mutuamente exclusivos.
+ * Pausar só aparece quando a conversa JÁ tem dono: sem dono, "Assumir" faz o
+ * mesmo gesto e dois botões para o mesmo efeito seriam ambíguos.
  */
 
 const pausarMutate = vi.fn();
@@ -63,16 +63,16 @@ function renderHeader(conversation: React.ComponentProps<typeof ConversationHead
 }
 
 describe("ConversationHeader — Pausar/Devolver automático são mutuamente exclusivos", () => {
-  it("IA atendendo normalmente: mostra 'Pausar automático', não mostra 'Devolver ao automático'", () => {
-    renderHeader(baseConversation());
-    expect(screen.getByTestId("pausar-automatico")).toBeTruthy();
+  it("conversa com dono e automático ativo: mostra 'Pausar', não mostra 'Devolver'", () => {
+    renderHeader(baseConversation({ assigned_to_user_id: "u-1" }));
+    expect(screen.getByTestId("pausar-o-automatico")).toBeTruthy();
     expect(screen.queryByTestId("devolver-ao-automatico")).toBeNull();
   });
 
   it("já pausada por bot_silenced_until: mostra 'Devolver ao automático', não mostra 'Pausar automático'", () => {
     renderHeader(baseConversation({ bot_silenced_until: "infinity" }));
     expect(screen.getByTestId("devolver-ao-automatico")).toBeTruthy();
-    expect(screen.queryByTestId("pausar-automatico")).toBeNull();
+    expect(screen.queryByTestId("pausar-o-automatico")).toBeNull();
   });
 
   it("já pausada por force_human do contato: mostra 'Devolver ao automático', não mostra 'Pausar automático'", () => {
@@ -82,18 +82,18 @@ describe("ConversationHeader — Pausar/Devolver automático são mutuamente exc
       }),
     );
     expect(screen.getByTestId("devolver-ao-automatico")).toBeTruthy();
-    expect(screen.queryByTestId("pausar-automatico")).toBeNull();
+    expect(screen.queryByTestId("pausar-o-automatico")).toBeNull();
   });
 
   it("conversa fechada: nenhum dos dois botões aparece", () => {
     renderHeader(baseConversation({ status: "closed" }));
-    expect(screen.queryByTestId("pausar-automatico")).toBeNull();
+    expect(screen.queryByTestId("pausar-o-automatico")).toBeNull();
     expect(screen.queryByTestId("devolver-ao-automatico")).toBeNull();
   });
 
-  it("clicar 'Pausar automático' chama a mutation com o id da conversa", () => {
-    renderHeader(baseConversation());
-    screen.getByTestId("pausar-automatico").click();
+  it("clicar 'Pausar o automático' chama a mutation com o id da conversa", () => {
+    renderHeader(baseConversation({ assigned_to_user_id: "u-1" }));
+    screen.getByTestId("pausar-o-automatico").click();
     expect(pausarMutate).toHaveBeenCalledWith({ conversation_id: "cv-1" });
   });
 });

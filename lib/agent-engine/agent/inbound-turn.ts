@@ -87,6 +87,7 @@ import {
   carregarConfig as carregarConfigSistemaEscolar,
   buscarAlunoPorTelefone,
   buscarCatalogoCursos,
+  selecionarAluno,
 } from '@/lib/integracoes/sistema-escolar';
 import { matchesHandoffKeyword } from './agent-config';
 import { msAteAJanelaAbrir } from './janela-de-atendimento';
@@ -298,9 +299,15 @@ export const AGENT_TOOL_DEFS = {
       '(faltas/presenças) e situação financeira (só o status — nunca peça ou repita boleto/PIX). Use ' +
       'para QUALQUER pergunta sobre a situação PESSOAL de um aluno já matriculado. Se não achar (aluno ' +
       'não cadastrado com este número), ou se vier mais de um cadastro para o mesmo número (ambíguo), ' +
-      'NÃO invente — peça o nome completo pra desambiguar, ou passe para search_knowledge se for ' +
-      'pergunta genérica (não sobre uma pessoa).',
-    inputSchema: z.object({}),
+      'NÃO invente — se a resposta pedir desambiguação, pergunte o nome completo e chame de novo ' +
+      'preenchendo nome_completo. Use search_knowledge apenas para pergunta genérica, não pessoal.',
+    inputSchema: z.object({
+      nome_completo: z
+        .string()
+        .min(2)
+        .optional()
+        .describe('nome completo informado pelo aluno; omita na primeira busca por telefone'),
+    }),
   },
   consultar_catalogo_cursos: {
     description:
@@ -1890,7 +1897,7 @@ async function executarTurnoDoAgente(
     }),
     consultar_aluno_sistema_escolar: tool({
       ...AGENT_TOOL_DEFS.consultar_aluno_sistema_escolar,
-      execute: async () => {
+      execute: async ({ nome_completo }) => {
         // Gate igual ao de search_knowledge: sem config pra esta org, a tool nem
         // deveria ter entrado no turno (ver bloco de montagem de tools abaixo) —
         // este branch é defesa em profundidade, não o caminho normal.
@@ -1909,7 +1916,32 @@ async function executarTurnoDoAgente(
         }
         try {
           const out = await buscarAlunoPorTelefone(sistemaEscolarConfig, telefone);
-          return { ok: true, ...out };
+          const selecao = selecionarAluno(out, nome_completo);
+          if (selecao.status === 'nao_encontrado') {
+            return {
+              ok: true,
+              encontrado: false,
+              message: 'nenhum aluno foi encontrado com o telefone desta conversa; não invente dados.',
+            };
+          }
+          if (selecao.status === 'ambiguo') {
+            return {
+              ok: true,
+              encontrado: true,
+              ambiguo: true,
+              quantidade: selecao.quantidade,
+              message: 'este telefone pertence a mais de um aluno; peça o nome completo e chame esta ferramenta novamente com nome_completo.',
+            };
+          }
+          if (selecao.status === 'nome_nao_encontrado') {
+            return {
+              ok: true,
+              encontrado: true,
+              ambiguo: true,
+              message: 'o nome informado não corresponde exatamente a nenhum aluno deste telefone; confira o nome completo, sem sugerir nomes.',
+            };
+          }
+          return { ok: true, encontrado: true, ambiguo: false, aluno: selecao.aluno };
         } catch (err) {
           runLog.warn('consulta ao sistema escolar (aluno) falhou', {
             error: err instanceof Error ? err.message : String(err),

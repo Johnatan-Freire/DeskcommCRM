@@ -11,6 +11,7 @@
  * nicho (e-commerce, clínica) isso nunca acontece: a tabela fica vazia.
  */
 import type pg from "pg";
+import { z } from "zod";
 
 import { byteaToBuffer, decryptKey } from "@/lib/crypto/aes_gcm";
 
@@ -69,10 +70,110 @@ async function chamar(config: ConfigSistemaEscolar, path: string): Promise<unkno
   }
 }
 
-export interface RespostaAlunoPorTelefone {
-  encontrado: boolean;
-  ambiguo?: boolean;
-  alunos: unknown[];
+const horarioSchema = z.object({
+  dia_semana: z.string(),
+  inicio: z.string(),
+  fim: z.string(),
+});
+
+const notaSchema = z.object({
+  modulo: z.string().nullable(),
+  nota: z.union([z.string(), z.number()]).nullable(),
+  status: z.string().nullable(),
+});
+
+const matriculaSchema = z.object({
+  status: z.string(),
+  curso_ou_pacote: z.string().nullable(),
+  tipo: z.enum(["curso", "pacote"]),
+  turma: z.string().nullable(),
+  modalidade: z.string().nullable(),
+  horarios: z.array(horarioSchema),
+  link_aula: z.string().nullable(),
+  data_matricula: z.string().nullable(),
+  notas: z.array(notaSchema),
+  frequencia: z.object({
+    total_registros: z.number().int().nonnegative(),
+    faltas: z.number().int().nonnegative(),
+    presencas: z.number().int().nonnegative(),
+  }),
+});
+
+const alunoSchema = z.object({
+  // O id faz parte do contrato Laravel, mas nunca é devolvido ao modelo: ele
+  // não ajuda a responder o aluno e identificador interno não deve vazar.
+  id: z.union([z.string(), z.number()]),
+  nome: z.string().min(1),
+  situacao_financeira: z.string(),
+  matriculas: z.array(matriculaSchema),
+});
+
+const respostaAlunoPorTelefoneSchema = z.object({
+  encontrado: z.boolean(),
+  ambiguo: z.boolean().optional(),
+  alunos: z.array(alunoSchema),
+});
+
+export type AlunoSistemaEscolar = Omit<z.infer<typeof alunoSchema>, "id">;
+export type RespostaAlunoPorTelefone = z.infer<typeof respostaAlunoPorTelefoneSchema>;
+
+export type ResultadoSelecaoAluno =
+  | { status: "nao_encontrado" }
+  | { status: "ambiguo"; quantidade: number }
+  | { status: "nome_nao_encontrado" }
+  | { status: "encontrado"; aluno: AlunoSistemaEscolar };
+
+function semIdentificadorInterno(
+  aluno: RespostaAlunoPorTelefone["alunos"][number],
+): AlunoSistemaEscolar {
+  const { id: _id, ...dadosPublicos } = aluno;
+  return dadosPublicos;
+}
+
+function normalizarNome(nome: string): string {
+  return nome
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/gu, "")
+    .trim()
+    .replace(/\s+/gu, " ")
+    .toLocaleLowerCase("pt-BR");
+}
+
+/**
+ * Resolve telefone compartilhado sem entregar ao modelo os dados completos de
+ * todos os alunos. Sem nome, só informa a quantidade; com nome, exige igualdade
+ * normalizada (acentos/caixa/espaços), nunca aproximação que possa escolher a
+ * pessoa errada.
+ */
+export function selecionarAluno(
+  resposta: RespostaAlunoPorTelefone,
+  nomeCompleto?: string,
+): ResultadoSelecaoAluno {
+  if (!resposta.encontrado || resposta.alunos.length === 0) {
+    return { status: "nao_encontrado" };
+  }
+
+  if (resposta.alunos.length === 1) {
+    const unico = resposta.alunos[0];
+    if (!unico) return { status: "nao_encontrado" };
+    return { status: "encontrado", aluno: semIdentificadorInterno(unico) };
+  }
+
+  if (!nomeCompleto?.trim()) {
+    return { status: "ambiguo", quantidade: resposta.alunos.length };
+  }
+
+  const procurado = normalizarNome(nomeCompleto);
+  const candidatos = resposta.alunos.filter((aluno) => normalizarNome(aluno.nome) === procurado);
+  if (candidatos.length !== 1) {
+    return candidatos.length === 0
+      ? { status: "nome_nao_encontrado" }
+      : { status: "ambiguo", quantidade: candidatos.length };
+  }
+
+  const unico = candidatos[0];
+  if (!unico) return { status: "nome_nao_encontrado" };
+  return { status: "encontrado", aluno: semIdentificadorInterno(unico) };
 }
 
 /** `telefone` vai cru (dígitos, com ou sem DDI) — a API do sistema escolar normaliza dos dois lados. */
@@ -81,15 +182,19 @@ export async function buscarAlunoPorTelefone(
   telefone: string,
 ): Promise<RespostaAlunoPorTelefone> {
   const out = await chamar(config, `/api/deskcomm/aluno?telefone=${encodeURIComponent(telefone)}`);
-  return out as RespostaAlunoPorTelefone;
+  return respostaAlunoPorTelefoneSchema.parse(out);
 }
 
-export interface RespostaCatalogoCursos {
-  cursos: unknown[];
-  pacotes: unknown[];
-}
+const respostaCatalogoCursosSchema = z.object({
+  cursos: z.array(z.record(z.string(), z.unknown())),
+  pacotes: z.array(z.record(z.string(), z.unknown())),
+});
 
-export async function buscarCatalogoCursos(config: ConfigSistemaEscolar): Promise<RespostaCatalogoCursos> {
+export type RespostaCatalogoCursos = z.infer<typeof respostaCatalogoCursosSchema>;
+
+export async function buscarCatalogoCursos(
+  config: ConfigSistemaEscolar,
+): Promise<RespostaCatalogoCursos> {
   const out = await chamar(config, "/api/deskcomm/cursos");
-  return out as RespostaCatalogoCursos;
+  return respostaCatalogoCursosSchema.parse(out);
 }

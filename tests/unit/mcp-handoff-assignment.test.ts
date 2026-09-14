@@ -11,7 +11,7 @@
  *  - sem elegível: fila — assignee_kind limpo + evento reason='handoff' from/to
  *    null + retorno { queued:true, position }.
  */
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { triggerHandoff } from "@/lib/ai/handoff/orchestrator";
 import { crmRequestHumanHandoff } from "@/lib/mcp/tools/handoff";
