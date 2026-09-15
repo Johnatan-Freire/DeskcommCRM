@@ -59,7 +59,15 @@ permissions:
 jobs:
   e2e:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # Medido em 2026-09-15 (commit 4cc8c428): setup ~4min, parte 1/2 (28 specs)
+    # 8m53s, parte 2/2 (39 specs) CANCELADA aos 16m42s sem terminar — a suíte
+    # (67 specs hoje) já passou do orçamento de 30min que foi calibrado quando
+    # ela era menor. `--workers=1` não é ajustável para ganhar paralelismo: os
+    # specs compartilham uma conta admin com MFA, e o TOTP é de uso único por
+    # janela de 30s (issue #80) — paralelizar de verdade pede uma segunda conta
+    # com MFA próprio, mudança maior que não cabe aqui. 45min dá a margem que
+    # o run real precisou mais folga para o crescimento orgânico de specs.
+    timeout-minutes: 45
     # ─────────────────────────────────────────────────────────────────────────
     # A COBERTURA DEIXA DE SER PROSA DIGITADA À MÃO.
     #
