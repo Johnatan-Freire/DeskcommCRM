@@ -33,7 +33,13 @@ jobs:
 
       - name: Sincronizar código, reaplicar schema e subir as imagens novas
         run: |
-          ssh -i ~/.ssh/deploy_key "${{ secrets.VPS_SSH_USER }}@${{ secrets.VPS_SSH_HOST }}" '
+          # O baseline.sql fica minutos em silêncio (a saída vai pra uma
+          # variável, não pro terminal) e a rede do runner derruba conexão
+          # SSH ociosa por tempo demais — medido: "client_loop: send
+          # disconnect: Broken pipe" bem no meio da reaplicação. O keepalive
+          # evita isso mandando um pacote a cada 15s.
+          ssh -o ServerAliveInterval=15 -o ServerAliveCountMax=12 \
+              -i ~/.ssh/deploy_key "${{ secrets.VPS_SSH_USER }}@${{ secrets.VPS_SSH_HOST }}" '
             set -euo pipefail
             cd /var/www/crm
 
@@ -66,7 +72,8 @@ jobs:
         run: |
           set -euo pipefail
           sleep 15
-          ssh -i ~/.ssh/deploy_key "${{ secrets.VPS_SSH_USER }}@${{ secrets.VPS_SSH_HOST }}" '
+          ssh -o ServerAliveInterval=15 -o ServerAliveCountMax=12 \
+              -i ~/.ssh/deploy_key "${{ secrets.VPS_SSH_USER }}@${{ secrets.VPS_SSH_HOST }}" '
             cd /var/www/crm
             docker compose -f docker-compose.prod.yml ps app worker scheduler
           '
