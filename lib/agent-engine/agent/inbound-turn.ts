@@ -3071,9 +3071,19 @@ async function executarTurnoDoAgente(
  * Duas condições, checadas ANTES de qualquer chamada de modelo:
  *   1. já existe mensagem mais nova (humana ou não) na mesma conversa depois
  *      da que originou o job → já foi resolvida por outra coisa, pula.
- *   2. sem mensagem mais nova, mas a mensagem já é velha demais (represada por
- *      tempo demais) → não finge que acabou de chegar; escala pra humano
- *      decidir em vez de soar como um bot que apareceu do nada.
+ *   2. sem mensagem mais nova, mas o JOB já está represado por tempo demais
+ *      (ver `jobCreatedAt` abaixo) → não finge que acabou de chegar; escala
+ *      pra humano decidir em vez de soar como um bot que apareceu do nada.
+ *
+ * A condição 2 mede a idade do JOB (`jobCreatedAt`, imutável desde o enqueue —
+ * um hold só adia `run_after`, nunca reescreve `created_at`), não a da
+ * MENSAGEM. As duas coincidem no caso que originou esta guarda (job nasce
+ * junto com a mensagem, fica retido, dispara horas depois), mas divergem de
+ * propósito no reengajamento por template: ali um job FRESCO é criado agora
+ * para responder a uma mensagem que é velha por natureza (é o que abre a
+ * janela de 24h fechada). Usar `sent_at` vetava esse turno legítimo com o
+ * mesmo motivo do incidente — medido em tests/invariants/agent-send-template-turn.test.ts,
+ * que existe desde antes desta guarda e parou de passar quando ela chegou.
  */
 export const INBOUND_TURN_STALENESS_MS = 4 * 60 * 60 * 1000; // 4h
 
@@ -3087,6 +3097,7 @@ export async function inboundMessageSuperseded(
   organizationId: string,
   conversationId: string,
   inboundMessageId: string,
+  jobCreatedAt: Date,
 ): Promise<InboundSupersededResult | null> {
   const { rows } = await pool.query<{ sent_at: Date; newer_count: string }>(
     `select m.sent_at,
@@ -3100,7 +3111,7 @@ export async function inboundMessageSuperseded(
   // mensagem sumiu (ex.: apagada) — segue o fluxo normal, deixa o erro aparecer adiante.
   if (row === undefined) return null;
   if (Number(row.newer_count) > 0) return { supersededBy: 'newer_message', ageMs: 0 };
-  const ageMs = Date.now() - new Date(row.sent_at).getTime();
+  const ageMs = Date.now() - jobCreatedAt.getTime();
   if (ageMs > INBOUND_TURN_STALENESS_MS) return { supersededBy: 'stale', ageMs };
   return null;
 }
@@ -3152,6 +3163,7 @@ export function createInboundTurnHandler(deps: InboundTurnDeps) {
       job.organization_id,
       payload.conversation_id,
       payload.inbound_message_id,
+      job.created_at,
     );
     if (superseded !== null) {
       const runLog = withFields(deps.log, {
