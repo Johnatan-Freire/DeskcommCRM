@@ -21,10 +21,36 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const ORIGINAL = { ...process.env };
 
+// `faltaParaConectarOGoogle()` passa por `configuracaoDoGoogle()`, que lê
+// `platform_google_oauth` ANTES do `.env` (migration 0201, banco primeiro —
+// ver o docstring do arquivo). Sem este dublê, os dois casos abaixo fazem uma
+// chamada de rede DE VERDADE contra `NEXT_PUBLIC_SUPABASE_URL` (o placeholder
+// `.invalid` do setup global) — em vez de nunca resolver, a chamada FALHA
+// devagar (DNS), e o teste mede a paciência da rede, não o código. Medido:
+// >15s sob carga, estourando o timeout padrão do vitest. A precedência banco
+// vs. `.env` já tem cerca própria em `agenda-google-credencial-do-banco.test.ts`
+// — aqui só precisa devolver "sem linha", que é o caminho que este arquivo testa.
+vi.mock("@/lib/supabase/admin", () => ({
+  createAdminClient: () => ({
+    from: () => ({
+      select: () => ({
+        eq: () => ({
+          maybeSingle: async () => ({ data: null, error: null }),
+        }),
+      }),
+    }),
+  }),
+}));
+
 async function importarComEnv(vars: Record<string, string>) {
   vi.resetModules();
   for (const [k, v] of Object.entries(vars)) process.env[k] = v;
-  return import("@/lib/agenda/google/config");
+  const mod = await import("@/lib/agenda/google/config");
+  // O memo mora no `globalThis` — `resetModules` não o limpa (ver o arquivo
+  // irmão). Sem isto o segundo caso de `faltaParaConectarOGoogle` leria o
+  // resultado memoizado do primeiro.
+  mod.invalidarCredencialDoGoogle();
+  return mod;
 }
 
 beforeEach(() => {

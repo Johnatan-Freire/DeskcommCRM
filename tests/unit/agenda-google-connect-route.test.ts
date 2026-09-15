@@ -17,6 +17,24 @@ import type { ActiveOrg, AuthUser } from "@/lib/auth/types";
 vi.mock("@/lib/auth/require-role", () => ({ requireRole: vi.fn() }));
 vi.mock("@/lib/audit", () => ({ audit: vi.fn(async () => undefined), isServiceRoleConfigured: vi.fn(() => true) }));
 
+// A rota resolve a config pelo banco ANTES do `.env` (migration 0201) — sem
+// este dublê, os dois primeiros casos fazem uma chamada de rede DE VERDADE
+// contra `NEXT_PUBLIC_SUPABASE_URL` (o placeholder `.invalid` do setup
+// global) e medem a paciência da rede (DNS lento) em vez do código. Medido:
+// >15s sob carga. Precedência banco vs. `.env` tem cerca própria em
+// `agenda-google-credencial-do-banco.test.ts` — aqui só "sem linha" importa.
+vi.mock("@/lib/supabase/admin", () => ({
+  createAdminClient: () => ({
+    from: () => ({
+      select: () => ({
+        eq: () => ({
+          maybeSingle: async () => ({ data: null, error: null }),
+        }),
+      }),
+    }),
+  }),
+}));
+
 const ORG = "22222222-2222-4222-8222-222222222222";
 const ANA = "11111111-1111-4111-8111-111111111111";
 
