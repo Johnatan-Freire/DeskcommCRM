@@ -73,32 +73,11 @@ describe("a tag nasce no CI, e nunca do GITHUB_TOKEN", () => {
     expect(escritas, "escrita pelo GITHUB_TOKEN: quem escreve aqui tem que ser o App").toEqual([]);
   });
 
-  it("o corte da tag prova que as imagens saíram — a falha aqui é silenciosa por natureza", () => {
-    const t = job(release, "cortar-tag");
-    expect(t).toContain("ghcr_status");
-    for (const img of ["deskcommcrm", "deskcomm-worker", "deskcomm-scheduler"]) {
-      expect(t, `a conferência não cobre ${img}`).toContain(img);
-    }
-    expect(t).toMatch(/::error::/);
-  });
-
-  it("a tag exige que o push tenha CONSUMIDO fragmentos, não só que haja versão nova no CHANGELOG", () => {
-    // Só a condição "o CHANGELOG anuncia versão sem tag" deixaria QUALQUER PR
-    // cortar a release: bastaria escrever `## [1.7.0]` à mão e a tag nasceria
-    // no merge dele, levando junto as três imagens e o canal `stable`.
-    // Medido em 2026-08-27: o PR #354 já trazia uma seção de versão escrita à
-    // mão. A segunda condição é a assinatura do corte — havia `.changes/*.md`
-    // antes e não há depois — e um PR comum não a produz: ele ACRESCENTA
-    // fragmento, nunca esvazia o diretório.
-    const t = job(release, "cortar-tag");
-    expect(t).toMatch(/git ls-tree[^\n]*HEAD\^[^\n]*\.changes\//);
-    expect(t).toMatch(/git ls-tree[^\n]*HEAD[^\n]*\.changes\//);
-    // O ramo que RECUSA precisa existir e cobrir os dois lados da assinatura.
-    expect(t).toMatch(/antes[^\n]*-eq 0[^\n]*depois[^\n]*-ne 0/);
-  });
-
-  it("a tag só é criada em push na main, nunca num dispatch de branch qualquer", () => {
-    expect(job(release, "cortar-tag")).toMatch(/if:\s*github\.event_name == 'push'/);
-    expect(release).toMatch(/push:\s*\n\s*branches:\s*\[main\]/);
-  });
+  // O job `cortar-tag` (corte automático de tag ao merge do PR de release) foi
+  // removido deste fork: exigia RELEASE_APP_ID/RELEASE_APP_PRIVATE_KEY, que
+  // este fork não tem, e falhava em TODO push na main. Aqui o deploy é a cada
+  // merge, direto pela imagem `latest` (`.github/workflows/deploy.yml`) — ver
+  // o cabeçalho de `release.yml`. Os três casos que vigiavam o conteúdo desse
+  // job saíram junto; os dois acima (token do App, sem escrita pelo
+  // GITHUB_TOKEN) continuam valendo para o job que restou.
 });
