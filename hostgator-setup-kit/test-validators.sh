@@ -830,6 +830,49 @@ else
   printf '  ✗ uma apagou a outra (drain=%s, agente=%s — esperava 1 de cada)\n' "$tem_drain" "$tem_agent"; fail=1
 fi
 
+# Numa VPS nova, root nunca teve crontab: `crontab -l` sai 1 ("no crontab for
+# root"). Sob `set -o pipefail` (a postura real do install.sh), isso derrubava
+# `( crontab -l | cron_merge ... ) | crontab -` INTEIRO, mesmo a escrita
+# (`crontab -`) tendo funcionado — e a instalação morria em silêncio logo após
+# "chave de cifra ativa no banco", sem a mensagem de sucesso e sem ativar a
+# segunda automação. Os testes de `cron_merge` acima não pegam isso: são a
+# função PURA, nunca o `crontab -l` real que a envolve.
+echo "cron: sobrevive a crontab -l sem crontab prévio (VPS nova)"
+(
+  set -eo pipefail   # a mesma postura do install.sh — sem isto o teste não reproduz o bug
+  TMP_CRON="$SUITE_TMP/crontab-vps-nova.txt"
+  rm -f "$TMP_CRON"
+  # Dublê mínimo: só os subcomandos que este par de funções usa (-l e -).
+  crontab() {
+    case "${1:-}" in
+      -l) [ -f "$TMP_CRON" ] || { printf 'no crontab for testuser\n' >&2; return 1; }
+          cat "$TMP_CRON" ;;
+      # Escrita ATÔMICA (temp + mv), como o dublê completo mais abaixo: o kit
+      # roda `crontab -l | ... | crontab -`, os dois lados do cano concorrentes,
+      # e um `cat > arquivo` ingênuo trunca o arquivo que o `-l` ainda lê —
+      # perdendo a linha da OUTRA automação já escrita (medido: sobrava só a
+      # última a rodar). `cat >` bastaria se as duas chamadas fossem em série.
+      -)  cat > "$TMP_CRON.novo" && mv "$TMP_CRON.novo" "$TMP_CRON" ;;
+    esac
+  }
+  # A higienização de eventos antigos (psql_run) é outro assunto — aqui isolamos
+  # só o bug do cron, sem exigir Postgres de verdade.
+  psql_run() { return 0; }
+  PROJECT_DIR=/root/instalacao-teste
+  INTERNAL_SECRET=segredo-de-teste
+  NEXT_PUBLIC_APP_URL=https://crm-teste.exemplo.com.br
+  setup_event_log_drain_cron
+  setup_update_agent_cron
+  grep -qF 'event-log-drain' "$TMP_CRON" && grep -qF 'agent.sh' "$TMP_CRON"
+) >"$SUITE_TMP/cron-vps-nova.out" 2>&1
+if [ $? -eq 0 ]; then
+  printf '  ✓ as duas automações sobrevivem à primeira ativação (sem crontab prévio)\n'
+else
+  printf '  ✗ regressão do pipefail: morreu com crontab vazio\n'
+  sed 's/^/     /' "$SUITE_TMP/cron-vps-nova.out"
+  fail=1
+fi
+
 echo "provisionamento do Supabase: senha do banco"
 # Dois testes distintos, porque o defeito e o contrato moram em lugares
 # diferentes — e o primeiro teste que escrevi aqui era VÁCUO por não separá-los.

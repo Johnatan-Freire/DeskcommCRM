@@ -691,8 +691,13 @@ setup_event_log_drain_cron() {
   local first_time=1
   if crontab -l 2>/dev/null | grep -qF -e "$url_drain"; then first_time=0; fi
 
+  # `|| true` no primeiro estágio, não só no `2>/dev/null`: numa VPS nova o
+  # root nunca teve crontab, `crontab -l` sai 1 ("no crontab for root"), e sob
+  # `set -o pipefail` (install.sh) isso derruba o `(...) | crontab -` inteiro
+  # SEM imprimir nada — a instalação morre logo após "chave de cifra ativa no
+  # banco", sem essa linha de sucesso, mesmo a linha já tendo sido escrita.
   local cron_line="* * * * * curl -fsS -H \"Authorization: Bearer ${secret}\" \"${url_drain}\" >/dev/null 2>&1 ${marcador}"
-  ( crontab -l 2>/dev/null | cron_merge "$marcador" "$url_drain" "$cron_line" ) | crontab -
+  ( { crontab -l 2>/dev/null || true; } | cron_merge "$marcador" "$url_drain" "$cron_line" ) | crontab -
   c_grn "✓ automações ativas (cron do event-log-drain, a cada minuto)"
 
   if [ "$first_time" = 1 ]; then
@@ -731,7 +736,9 @@ setup_update_agent_cron() {
   local legado="cd ${PROJECT_DIR} && bash hostgator-setup-kit/agent.sh"
   local marcador; marcador="$(cron_tag agent)"
   local cron_line="*/5 * * * * ${legado} >/dev/null 2>&1 ${marcador}"
-  ( crontab -l 2>/dev/null | cron_merge "$marcador" "$legado" "$cron_line" ) | crontab -
+  # Mesma razão do `|| true` em setup_event_log_drain_cron: sem crontab prévio
+  # (VPS nova), `crontab -l` sai 1 e `pipefail` mata o install.sh em silêncio.
+  ( { crontab -l 2>/dev/null || true; } | cron_merge "$marcador" "$legado" "$cron_line" ) | crontab -
   c_grn "✓ atualização pela tela ativa (agente a cada 5 minutos)"
 }
 
