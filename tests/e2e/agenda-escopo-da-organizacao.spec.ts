@@ -94,8 +94,16 @@ async function trocarPara(page: import("@playwright/test").Page, orgId: string, 
   await page.getByTestId("tenant-switcher").click();
   await page.getByTestId(`tenant-switcher-item-${orgId}`).click();
   if (nome) {
+    // O botão fica `disabled={isPending}` enquanto a Server Action (grava
+    // cookie + `revalidatePath("/app", "layout")`) está em voo — correto por
+    // design, mas sob carga real (esta spec roda como a 36ª de 39 numa
+    // sequência única, com muito mais dado acumulado que um ambiente fresco)
+    // a revalidação do layout pode legitimamente passar de 20s. Medido no CI:
+    // "5 × locator resolved to <button disabled ... data-testid=tenant-
+    // switcher>" ainda mostrando a org ANTERIOR — não é lógica quebrada, é o
+    // orçamento de espera curto demais pro sistema real sob esta carga.
     await expect(page.getByTestId("tenant-switcher"), `a troca para "${nome}" não pegou`).toContainText(nome, {
-      timeout: 20_000,
+      timeout: 45_000,
     });
   }
 }

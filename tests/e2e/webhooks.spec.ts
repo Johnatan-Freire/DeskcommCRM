@@ -215,8 +215,15 @@ test.describe("webhooks & automações — fluxo completo", () => {
       await page.getByRole("tab", { name: "Atividade" }).click();
       const runTitle = page.getByText(RULE_NAME, { exact: true }).first();
       const runCard = cardOf(runTitle);
+      // Falhou no CI (commit 4f4e1854, run 35064254199) junto com
+      // agenda-escopo-da-organizacao e automacao-diz-a-verdade — as três
+      // esperam um estado do backend refletir na tela, e as três estouraram
+      // seus orçamentos de espera na MESMA rodada (esta spec é a 20ª de 39
+      // numa sequência única). 12 tentativas (12s) bastava isolado; sob a
+      // carga real do sistema já tendo processado ~1/3 da sequência, não deu.
+      // 30 tentativas dá ~30s de folga.
       let found = false;
-      for (let attempt = 0; attempt < 12; attempt++) {
+      for (let attempt = 0; attempt < 30; attempt++) {
         if ((await runCard.count()) > 0 && (await runCard.getByText("Sucesso").count()) > 0) {
           found = true;
           break;
