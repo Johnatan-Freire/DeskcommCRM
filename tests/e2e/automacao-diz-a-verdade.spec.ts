@@ -246,21 +246,13 @@ test.describe("a automação conta o que aconteceu de verdade", () => {
       //
       // O WhatsApp está fora do ar neste ambiente, então a mensagem não saiu.
       // A tela tem que dizer isso — e NÃO pode dizer "Sucesso".
-      //
-      // Falhou no CI (commit 4f4e1854, run 35064254199): `toBeVisible()` no
-      // timeout DEFAULT (5s) — o card já existe (checagem de cima passou),
-      // mas o texto final "Falhou" ainda não tinha chegado. Mesmo padrão de
-      // `agenda-escopo-da-organizacao.spec.ts` (trocarPara): a run desta spec
-      // é a 29ª de 39 numa sequência única, e o refetch da aba sob essa carga
-      // pode legitimamente passar de 5s. Não reproduziu isolado — só sob
-      // carga real, o que é consistente com orçamento curto, não bug de lógica.
       await expect(cartao.getByText("Sucesso")).toHaveCount(0);
-      await expect(cartao.getByText("Falhou").first()).toBeVisible({ timeout: 30_000 });
+      await expect(cartao.getByText("Falhou").first()).toBeVisible();
 
       // E tem que dizer o QUE conferir, em português — não `waha_error`.
       await expect(
         cartao.getByText(/serviço de WhatsApp|não está conectado/i).first(),
-      ).toBeVisible({ timeout: 30_000 });
+      ).toBeVisible();
     } finally {
       if (ruleId) {
         await request
