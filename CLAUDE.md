@@ -73,21 +73,27 @@ DeskcommCRM é um sistema operacional de vendas open source com agentes de IA na
 ### Audit log
 - Toda mutação POST/PATCH/DELETE bem-sucedida → 1 entrada em `api_audit_log` (fire-and-forget, p99 ≤500ms)
 - **Rodada de cron que não fez nada NÃO é mutação e não audita** — e a que fez, audita. `routing-worker` (1×/min) e `attendant-heartbeat` (1×/5min) auditavam incondicionalmente: ~51.840 linhas/mês numa instalação que não atende ninguém, e numa VPS real **95% do audit log** era batida de cron vazia (`docs/testing/user-journey-map.md`, achado 17). A guarda certa é *auditar quando houve efeito*, nunca *parar de auditar* — as duas direções são medidas por `tests/unit/cron-audita-so-quando-ha-efeito.test.ts`, que varre o AST de **toda** rota de `app/api/v1/cron/`
-- Audit é append-only, e isso é do SCHEMA e não da prosa: nenhum papel tem GRANT de UPDATE/DELETE em `api_audit_log` — **nem `service_role`**. Para conferir na fonte em vez de acreditar nesta linha:
+- Audit é append-only, e isso é do SCHEMA e não da prosa: nenhum papel do PostgREST (`anon`, `authenticated`, `service_role`) tem `GRANT` de `UPDATE`, `DELETE` nem `TRUNCATE` em `api_audit_log` (migration 0277). Para conferir na fonte em vez de acreditar nesta linha:
 
   ```bash
   psql "$SUPABASE_DB_URL" -c "select grantee, privilege_type from information_schema.role_table_grants
     where table_name='api_audit_log' and privilege_type in ('DELETE','UPDATE','TRUNCATE');"
   ```
 
-  **`TRUNCATE` entra na consulta de propósito, e o resultado não é vazio.** Ele
-  está concedido a `anon`, `authenticated` e `service_role` — resíduo de o dump
-  enumerar os privilégios desta tabela (as demais recebem `GRANT ALL`, e quem as
-  protege é a RLS). Uma sonda que pergunte só por `DELETE`/`UPDATE` devolve zero
-  linhas e deixa quem leu concluindo que a tabela não pode ser esvaziada, quando
-  o privilégio que a esvazia INTEIRA está lá. Não é alcançável pela REST (o
-  PostgREST não emite `TRUNCATE`), então não é buraco de superfície — mas a
-  frase "append-only é do schema" só é inteira com esta ressalva escrita.
+  **Essa consulta sozinha, num Postgres cru, pode devolver vazio mesmo COM o
+  buraco aberto — e foi exatamente essa cegueira que deixou o buraco existir até
+  a 0277.** Todo projeto Supabase real grava, no bootstrap, um default ACL de
+  TABELAS em `public` (`anon=arwdDxt`, `authenticated=arwdDxt`,
+  `service_role=arwdDxt` — inclui update/delete/truncate) **antes** de qualquer
+  SQL nosso rodar; `api_audit_log` nasce com tudo isso, e o `GRANT` enumerado que
+  o dump emite (`SELECT,INSERT,REFERENCES,TRIGGER,TRUNCATE,MAINTAIN`) só
+  ACRESCENTA — não existe forma de um `GRANT` retirar privilégio. A consulta
+  acima só enxerga esse UPDATE/DELETE herdado se rodar contra um Postgres que já
+  tem esse default ACL — um Postgres puro/descartável (como o do `test:db`) não
+  tem, porque só o Supabase o grava. É por isso que `scripts/test-db.sh` sozinho
+  nunca provou este invariante: `tests/invariants/audit-log-sob-o-default-acl-do-supabase.test.ts`
+  simula o default ACL do Supabase antes de medir, dentro de uma transação
+  desfeita, exatamente para fechar essa lacuna.
 - **Retenção default de 5 anos, configurável, e agora EXECUTADA.** O expurgo é `public.fn_expurgar_auditoria_vencida` (`security definer`, **piso de 90 dias dentro do corpo**, revogada de anon/authenticated), chamada em lotes pelo cron `app/api/v1/cron/data-retention` (diário). O knob é `AUDIT_LOG_RETENTION_DAYS`. **Não há camada cold/S3** — o "hot 90 dias, cold (S3) o resto" que este arquivo afirmava por meses nunca existiu em código (auditoria de 2026-08-14: zero ocorrência de arquivamento), e um self-host não tem para onde arquivar: o Storage do cliente é a MESMA cota de 1 GB, já dividida com `whatsapp-media`. Para ver o que está em vigor: `grep -n "RETENCAO_AUDITORIA_DIAS" lib/retencao/politica.ts`
 - Por que uma `security definer` de expurgo não é porta de adulteração (o argumento inteiro está no cabeçalho da migration 0167): ela **não tem seletor de linha** — nenhum parâmetro de org, ator, ação ou id, e o único predicado é `created_at < now() - N dias`; o piso mora **no corpo**, não em quem chama; não é alcançável pela REST; não amplia o raio de quem já tem a service key; e **registra a própria erosão** (`retention.sweep_run`, com a contagem, numa linha nova demais para a chamada seguinte alcançar)
 - Falha de write em audit gera alerta Sentry, não bloqueia mutação principal

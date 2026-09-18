@@ -16991,6 +16991,39 @@ create trigger trg_ai_agent_versions_content_immutable
   before update on public.ai_agent_versions
   for each row execute function fn_ai_agent_version_content_immutable();
 
+-- ---- o audit log perde UPDATE, DELETE e TRUNCATE nos papéis do PostgREST (migration 0277) ----
+--
+-- Todo projeto Supabase nasce com um default ACL de tabelas em `public`
+-- (`anon=arwdDxt`, `authenticated=arwdDxt`, `service_role=arwdDxt`), gravado
+-- pelo bootstrap do Supabase antes de qualquer SQL nosso. `api_audit_log` nasce
+-- com tudo, e o `GRANT SELECT,INSERT,REFERENCES,TRIGGER,TRUNCATE,MAINTAIN` que o
+-- dump emite acima só ACRESCENTA. Resultado no Supabase real: `service_role` —
+-- que ignora RLS — apagava e reescrevia linha escolhida da auditoria pela REST,
+-- e os três papéis podiam esvaziá-la com TRUNCATE. `anon`/`authenticated` só não
+-- apagavam porque a RLS não tem policy de UPDATE/DELETE.
+--
+-- O prelude do `test:db` (`scripts/selfhost-prelude.sql`) não reproduz o default
+-- ACL de tabelas do Supabase, só o de funções; por isso o gate de grants ficava
+-- verde. O invariante `audit-log-sob-o-default-acl-do-supabase` reproduz o de
+-- tabela e reaplica ESTE bloco, extraído daqui pelo rótulo.
+--
+-- O expurgo legítimo não depende destes grants: `fn_expurgar_auditoria_vencida`
+-- (0167) é `security definer` de dono `postgres`. As FKs `on delete set null`
+-- desta tabela também não: a ação referencial roda como o dono da tabela.
+-- `public` entra por completude — um grant a PUBLIC seria herdado pelos três.
+--
+-- `revoke` do que já não existe não é erro: idempotente por natureza, e o
+-- `update.sh` de um clone pode reaplicar à vontade — inclusive depois do GRANT
+-- do corpo do dump, que reconcede TRUNCATE a cada passada e é revogado aqui.
+
+revoke update, delete, truncate on table public.api_audit_log
+  from public, anon, authenticated, service_role;
+
+comment on table public.api_audit_log is
+  'L-10: Append-only para os papéis do PostgREST — anon, authenticated e service_role não têm UPDATE, DELETE nem TRUNCATE (migration 0277; o default ACL do Supabase concedia os três). O único apagamento é fn_expurgar_auditoria_vencida (0167), security definer com piso de 90 dias no corpo. Retencao default 5 anos, configuravel em AUDIT_LOG_RETENTION_DAYS.';
+
+notify pgrst, 'reload schema';
+
 -- ---- VARREDURA anon: função nova nasce exposta em quem ATUALIZA (migration 0116) ----
 --
 -- ⚠️ ESTE BLOCO É, DE PROPÓSITO, O ÚLTIMO DO ARQUIVO. Apêndice novo entra ANTES
