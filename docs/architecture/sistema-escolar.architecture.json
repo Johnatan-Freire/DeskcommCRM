@@ -145,11 +145,22 @@
       ]
     },
     {
-      "dot": "amber",
-      "title": "Dívida operacional declarada",
+      "dot": "emerald",
+      "title": "Configuração pela tela — dívida paga",
       "items": [
-        "a configuração ainda não tem tela; hoje exige provisionamento no banco",
-        "isso viola a superfície de configuração do Sistema Vivo e é a próxima frente antes de chamar a integração de autossuficiente"
+        "/app/settings/tenant/sistema-escolar (admin edita, manager visualiza) substitui o provisionamento direto no banco",
+        "leitura e escrita passam pelo admin client no servidor com organization_id do JWT — a tabela mantém revoke select de authenticated/anon (migration 0169), nenhum caminho de browser lê api_key_encrypted/iv/tag",
+        "salvar fecha o laço de retorno na hora: com is_active=true, testa GET /api/deskcomm/cursos com a chave recém-salva e mostra o resultado ao operador, em vez de só quando um aluno perguntar algo"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Escopo por agente — quem pode consultar o quê (migration 0276)",
+      "items": [
+        "antes: org configurada bastava — QUALQUER agente publicado ganhava as duas tools juntas, sem distinção de papel",
+        "agora: ai_agent_versions.sistema_escolar_tool_ids escolhe, por agente, entre consultar dados de aluno matriculado e consultar catálogo de cursos — editável na aba Configuração do agente, só quando a org tem a integração ativa",
+        "gate em duas camadas (lib/agent-engine/agent/sistema-escolar-gate.ts): org desativada bloqueia sempre; sem agente publicado (fallback de playbook) as duas entram juntas, como antes deste escopo — não há onde marcar 'só uma' nesse caminho",
+        "agente novo nasce fechado (nenhuma tool); agentes que já existiam mantiveram o comportamento anterior via backfill da migration"
       ]
     }
   ]

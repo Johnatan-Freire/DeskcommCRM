@@ -82,6 +82,7 @@ import { loadPlaybook } from './playbook';
 import { DECLARACAO_INSTRUCTION, declaracaoDoTurnoSchema, promessasEmAberto, type DeclaracaoDoTurno } from './declaracao';
 import { projetarContexto, projetarRetornoDeTool, turnoProjeta, type ContextoProjetado } from './projecao';
 import { capacidadesEntreguesAoOperador, catalogoEntregueAoOperador } from './entrega-de-capacidade';
+import { toolsDoSistemaEscolarNoTurno } from './sistema-escolar-gate';
 import { composeSystemPrompt, loadOrgMemory, renderOrgMemory } from './org-memory';
 import {
   carregarConfig as carregarConfigSistemaEscolar,
@@ -2534,12 +2535,18 @@ async function executarTurnoDoAgente(
     delete rawTools.search_knowledge;
   }
 
-  // Tools do sistema escolar só entram quando a ORG tem a integração
-  // configurada (org_sistema_escolar_config) — de resto, todo self-host que
-  // não é a Capital Code nunca vê essas duas tools no prompt.
-  if (sistemaEscolarConfig === null) {
-    delete rawTools.consultar_aluno_sistema_escolar;
-    delete rawTools.consultar_catalogo_cursos;
+  // Tools do sistema escolar: org configurada E o agente marcou a tool na tela
+  // (ver sistema-escolar-gate.ts). Sem isto um agente de vendas ("Interessados")
+  // podia puxar nota de aluno sabendo só o telefone, e um de suporte ("Alunos")
+  // cotar preço de curso — as duas tools chegavam juntas a QUALQUER agente
+  // publicado numa org configurada, sem distinção de papel.
+  {
+    const gate = toolsDoSistemaEscolarNoTurno({
+      orgConfigurada: sistemaEscolarConfig !== null,
+      agentToolIds: agentConfig === null ? null : agentConfig.sistemaEscolarToolIds,
+    });
+    if (!gate.aluno) delete rawTools.consultar_aluno_sistema_escolar;
+    if (!gate.catalogo) delete rawTools.consultar_catalogo_cursos;
   }
 
   // A ferramenta de template só entra em canal que EXIGE template fora da janela.

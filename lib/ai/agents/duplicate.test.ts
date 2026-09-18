@@ -48,6 +48,7 @@ const VERSAO_PUBLICADA = {
   split_messages: true,
   split_max_chars: 240,
   followup: { enabled: true, flow_pointer_ids: ["pointer-1"] },
+  sistema_escolar_tool_ids: ["consultar_aluno_sistema_escolar"],
   status: "published",
   published_at: "2026-07-31T00:00:00Z",
   superseded_at: null,
@@ -115,6 +116,11 @@ describe("duplicateAgentWithVersion", () => {
     expect(versao!.row.split_messages).toBe(true);
     expect(versao!.row.split_max_chars).toBe(240);
     expect(versao!.row.followup).toEqual(VERSAO_PUBLICADA.followup);
+    // Escopo por-agente do sistema escolar: mesma classe de bug de pipeline_ids/
+    // knowledge_source_ids — coluna no SELECT sem entrada em `versionPayloadFrom`
+    // faz o clone nascer com as duas tools desligadas mesmo copiando um agente
+    // "Alunos" que as tinha marcadas.
+    expect(versao!.row.sistema_escolar_tool_ids).toEqual(VERSAO_PUBLICADA.sistema_escolar_tool_ids);
     expect(versao!.row.credential_id).toBe("cred-1");
     expect(versao!.row.channel_session_id).toBe("chan-1");
     expect(versao!.row.system_prompt).toBe("prompt da versao");

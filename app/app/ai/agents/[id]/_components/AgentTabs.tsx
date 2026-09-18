@@ -23,6 +23,8 @@ interface Props {
   cobertura?: CoberturaPorFunil;
   /** O acervo da organização, para a seção "o que ele consulta" (0181). */
   materiais?: MaterialDoAcervo[];
+  /** A org tem `org_sistema_escolar_config` ativa? Ver `AgentForm`. */
+  sistemaEscolarConfigurado?: boolean;
   agent: AgentRow;
   draft: AgentVersionRow | null;
   published: AgentVersionRow | null;
@@ -76,6 +78,7 @@ export function AgentTabs(props: Props) {
           funis={props.funis}
           cobertura={props.cobertura}
           materiais={props.materiais}
+          sistemaEscolarConfigurado={props.sistemaEscolarConfigurado}
           routerMembership={props.routerMembership}
           readOnly={props.readOnly}
         />

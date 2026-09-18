@@ -1,4 +1,4 @@
--- 0202: channel_knobs.number_activated_at aceita NULL — a coluna nasceu
+-- 0275: channel_knobs.number_activated_at aceita NULL — a coluna nasceu
 -- `not null default now()` (migration 0050), mas a camada de aplicação
 -- (lib/ai/pacing-knobs.ts, AntiBanSheet.tsx, lib/agent-engine/pacing/engine.ts)
 -- sempre tratou `null` como um estado válido e DISTINTO de "ativado agora":
