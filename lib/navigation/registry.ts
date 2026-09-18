@@ -17,6 +17,7 @@ import {
   FlowArrow,
   Funnel,
   Gauge,
+  GraduationCap,
   Inbox,
   Kanban,
   Key,
@@ -233,6 +234,20 @@ export const NAV_DESTINATIONS: NavDestination[] = [
     // tem hub, e se chega às telas dele por "Configurações". Eu tinha posto
     // `sidebar: true` e a cerca reprovou dizendo "a tela existe e não tem porta
     // na navegação" — a porta existia, era outra.
+  },
+  {
+    // Fecha a dívida declarada em `docs/architecture/sistema-escolar.architecture.json`:
+    // `org_sistema_escolar_config` só existia via provisionamento direto no
+    // banco — não havia tela. A tabela nasceu com `revoke select ... from
+    // authenticated, anon` (migration 0169) de propósito: sem tela, nenhum
+    // caminho de browser precisava lê-la.
+    href: "/app/settings/tenant/sistema-escolar",
+    label: "Sistema escolar",
+    description: "URL e chave da API que os agentes usam para consultar matrícula e notas.",
+    icon: GraduationCap,
+    group: "organizacao",
+    section: "Sua empresa",
+    // SEM `sidebar`, mesmo padrão da entrada de Agenda acima.
   },
   {
     // Estava enterrado em Configurações e ninguém sabia que existia — o achado

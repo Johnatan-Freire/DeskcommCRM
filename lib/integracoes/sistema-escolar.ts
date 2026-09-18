@@ -53,7 +53,7 @@ export async function carregarConfig(
 
 const TIMEOUT_MS = 8_000;
 
-async function chamar(config: ConfigSistemaEscolar, path: string): Promise<unknown> {
+export async function chamar(config: ConfigSistemaEscolar, path: string): Promise<unknown> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), TIMEOUT_MS);
   try {

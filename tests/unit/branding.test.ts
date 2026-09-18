@@ -251,6 +251,18 @@ const MARCA_CONGELADA: Record<string, EntradaDeMarca> = {
       "é a guarda do contrato acima: prova que o client chama exatamente /api/deskcomm/aluno e /api/deskcomm/cursos. Trocar a string aqui para 'limpar a marca' desarmaria a única proteção que o contrato tem",
     marcas: ["deskcomm", "deskcomm", "deskcomm"],
   },
+  "lib/integracoes/sistema-escolar-config.ts": {
+    categoria: "PROTOCOLO",
+    motivo:
+      "mesmo path /api/deskcomm/cursos do sistema escolar Laravel, usado aqui como ping de teste de conexão logo após salvar a configuração pela tela. É a MESMA rota externa de `sistema-escolar.ts`, não uma nova — trocar quebraria o teste de conexão em silêncio",
+    marcas: ["deskcomm"],
+  },
+  "lib/integracoes/sistema-escolar-config.test.ts": {
+    categoria: "PROTOCOLO",
+    motivo:
+      "guarda do teste de conexão acima: prova que testarConexao chama exatamente /api/deskcomm/cursos",
+    marcas: ["deskcomm", "deskcomm"],
+  },
   "lib/nuvemshop/config.ts": {
     categoria: "PROTOCOLO",
     motivo:
