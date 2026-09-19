@@ -57,6 +57,7 @@ export const AUDIT_ACTIONS = [
   "contact.merge_pending",
   "contact.merged",
   "lgpd.anonymize_executed",
+  "lgpd.anonymize_catchup",
   "member.invited",
   "member.accepted",
   "member.role_changed",

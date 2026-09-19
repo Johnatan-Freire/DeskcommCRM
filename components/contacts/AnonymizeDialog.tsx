@@ -43,6 +43,11 @@ export function AnonymizeDialog({ contactId, open, onOpenChange }: Props) {
       });
       if (res.data.action === "already_anonymized") {
         toast.info("Contato já estava anonimizado.");
+      } else if (res.data.action === "resumed") {
+        // O contato já estava anonimizado, mas leads/atividades pendentes
+        // foram completados agora — nunca "já estava", que é a frase que
+        // descreve o próprio defeito que este desfecho existe para corrigir.
+        toast.success("Anonimização retomada: dados pendentes foram removidos.");
       } else {
         toast.success("Contato anonimizado.");
       }
