@@ -29,7 +29,7 @@ import { seedPlatformPlaybook } from '@/lib/agent-engine/agent/playbook-seed';
 import { runCronLoop } from '@/lib/agent-engine/cron/scheduler';
 import { createPool } from '@/lib/agent-engine/db/pool';
 import { runDrainLoop } from '@/lib/agent-engine/edge/crm/drain';
-import { runEventLogDrainLoop } from '@/lib/event-log/drain-loop';
+import { runEventLogDrainLoop, prontidaoDoLacoDeEventLog } from '@/lib/event-log/drain-loop';
 import { crmEdgeConfigFromEnv } from '@/lib/agent-engine/edge/crm/mcp-client';
 import { enforceHolds, sessionHealthMetrics } from '@/lib/agent-engine/edge/crm/session-watchdog';
 import { runSessionWatchdogLoop } from '@/lib/agent-engine/edge/crm/session-reconciler';
@@ -156,10 +156,27 @@ export function createHealthzServer(pool: pg.Pool, log: Logger, metricsWindowMs:
         if (row.status in queue) queue[row.status as keyof typeof queue] = row.n;
       }
       const sessions = await sessionHealthMetrics(pool);
-      respond(res, 200, { status: 'ok', db: 'ok', queue, sessions, uptime_s });
+      // `event_log_drain` vai nos DOIS ramos, 200 e 503, de propósito — a
+      // prontidão do laço não pode depender de o banco estar de pé, porque é
+      // justamente quando o banco cai que alguém olha o /healthz.
+      respond(res, 200, {
+        status: 'ok',
+        db: 'ok',
+        queue,
+        sessions,
+        uptime_s,
+        event_log_drain: prontidaoDoLacoDeEventLog(),
+      });
     } catch (err) {
       log.error('healthz: banco indisponível', { error: errMsg(err) });
-      respond(res, 503, { status: 'degraded', db: 'error', queue: null, sessions: null, uptime_s });
+      respond(res, 503, {
+        status: 'degraded',
+        db: 'error',
+        queue: null,
+        sessions: null,
+        uptime_s,
+        event_log_drain: prontidaoDoLacoDeEventLog(),
+      });
     }
   };
   return http.createServer((req, res) => void handle(req, res));

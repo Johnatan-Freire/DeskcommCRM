@@ -67,9 +67,31 @@ interface Deps {
 }
 
 /**
+ * Estado do laço, visível de fora do módulo (o `/healthz` do worker publica
+ * isto). `env` já foi validado antes de `startWorker` ser chamado (main.ts
+ * resolve `Env` primeiro) — então uma falha AQUI nunca é "faltou configurar",
+ * é bug: import quebrado, `createAdminClient` mudou de forma, etc. A #648 do
+ * upstream (melgarafael/DeskcommCRM) foi exatamente isso — um import que só
+ * estourava sob `tsx` — e o laço ficou parado 10 dias com o `/healthz`
+ * respondendo saudável, porque nada publicava este estado.
+ */
+export interface ProntidaoDoLacoDeEventLog {
+  carregado: boolean;
+  motivo: string | null;
+}
+
+let prontidao: ProntidaoDoLacoDeEventLog = { carregado: false, motivo: 'ainda não iniciado' };
+
+export function prontidaoDoLacoDeEventLog(): ProntidaoDoLacoDeEventLog {
+  return prontidao;
+}
+
+/**
  * Carrega a cadeia do drain sem deixar que ela derrube o worker.
  *
- * `null` = o laço não roda (e o porquê já foi para o log). Nunca lança.
+ * `null` = o laço não roda. Nunca lança — mas, ao contrário de um `warn`
+ * comum, isto É um incidente (ver `ProntidaoDoLacoDeEventLog` acima), e o
+ * `/healthz` deixa de ficar em silêncio sobre isso.
  */
 async function carregarDeps(log: Logger): Promise<Deps | null> {
   try {
@@ -77,11 +99,14 @@ async function carregarDeps(log: Logger): Promise<Deps | null> {
     const { ensureHandlersRegistered } = await import('@/lib/event-log/register-handlers');
     const { createAdminClient } = await import('@/lib/supabase/admin');
     ensureHandlersRegistered();
+    prontidao = { carregado: true, motivo: null };
     return { drainEventLog, admin: createAdminClient() };
   } catch (err) {
-    log.warn(
+    const motivo = (err instanceof Error ? err.message : String(err)).slice(0, 300);
+    prontidao = { carregado: false, motivo };
+    log.error(
       'event-log drain OFF — não consegui montar o admin client; os handlers seguem só pelo cron event-log-drain',
-      { error: (err instanceof Error ? err.message : String(err)).slice(0, 300) },
+      { error: motivo },
     );
     return null;
   }
