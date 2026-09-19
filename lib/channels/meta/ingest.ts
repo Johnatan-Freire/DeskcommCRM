@@ -182,9 +182,17 @@ export async function ingestMetaInbound(
       body: e.type === "contact" ? (e.sharedContact?.name ?? e.text) : e.text,
       external_id: e.externalId,
       media_mime: e.media?.mime ?? null,
+      // O aviso da Meta traz um ID, não o arquivo — quem baixa é
+      // `media.persist_requested` (emitido abaixo), pelo MESMO pipeline
+      // provider-agnóstico do outro canal (`workers/media-persist-worker.ts`
+      // + `metaCloudAdapter.fetchInboundMedia`). `media_url` é o campo que
+      // esse worker olha para decidir "há mídia para baixar" — cada canal
+      // decide o que pôr aqui, e o nosso é o media_id que a Cloud API usa
+      // para resolver a URL de download de verdade.
+      media_url: e.media?.id ?? null,
       sent_at: e.sentAt.toISOString(),
       metadata: {
-        ...(e.media ? { meta_media_id: e.media.id, voice: e.media.voice } : {}),
+        ...(e.media?.voice ? { voice: true } : {}),
         ...(e.sharedContact ? { shared_contact: e.sharedContact } : {}),
       },
     })
@@ -209,6 +217,26 @@ export async function ingestMetaInbound(
   } as never);
 
   const messageId = (inserida as { id: string } | null)?.id ?? "";
+
+  // Sem isto o áudio/foto/vídeo/documento chegava como mensagem SEM arquivo:
+  // o media_id ficava gravado (media_url acima) e nada nunca pedia o download.
+  // Mesmo evento, mesmo formato de payload do outro canal — quem drena é o
+  // mesmo `media_persist_v1` (workers/media-persist-worker.ts), provider-agnóstico.
+  if (messageId && e.media) {
+    admin
+      .rpc("emit_event" as never, {
+        p_event_type: "media.persist_requested",
+        p_entity_kind: "message",
+        p_entity_id: messageId,
+        p_payload: { message_id: messageId, conversation_id: conversationId },
+        p_metadata: { source: "meta_webhook" },
+        p_organization_id: orgId,
+      } as never)
+      .then(({ error }) => {
+        if (error) console.error("[meta.ingest] emit media.persist_requested failed", error.message);
+      });
+  }
+
   await aplicarEfeitosPosEntrada(admin, {
     organizationId: orgId,
     contactId: contactId as string,

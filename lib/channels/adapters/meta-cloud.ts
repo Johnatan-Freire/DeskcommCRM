@@ -22,6 +22,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { metaContactsPayload } from "@/lib/channels/meta/contact-card";
 import { resolveMetaCreds } from "../meta/credentials";
+import type { FetchedMedia } from "@/lib/messaging/media/types";
 import type {
   ChannelAdapter,
   ChannelHealth,
@@ -177,6 +178,63 @@ export const metaCloudAdapter: ChannelAdapter = {
       const detail = err instanceof Error ? err.message : "erro_desconhecido";
       return { reachable: false, status: null, detail: detail.slice(0, 200) };
     }
+  },
+
+  /**
+   * Baixa o anexo que o cliente mandou.
+   *
+   * O aviso da Cloud API NUNCA traz o arquivo — traz um `media_id` (é o que
+   * `ingestMetaInbound` grava em `media_url`, campo genérico do worker de
+   * persistência). Baixar exige DOIS saltos, os dois com o MESMO Bearer:
+   *
+   *   1. GET /{media_id} → metadados, entre eles a `url` de download REAL,
+   *      que expira e é de uso único por token;
+   *   2. GET nessa url → os bytes.
+   *
+   * Sem SSRF a checar aqui como no canal intermediado (`adapters/zernio.ts`):
+   * lá a URL vem do PAYLOAD do webhook (controlável por quem manda a
+   * mensagem) e é buscada direto. Aqui só o `media_id` vem do payload — a
+   * URL de download real vem da RESPOSTA da própria Graph API, que só serve
+   * domínio da Meta. Não há host externo para um payload malicioso escolher.
+   */
+  async fetchInboundMedia(input: ChannelTenantScope & {
+    sessionRef: string;
+    url: string;
+    hintMime?: string | null;
+  }): Promise<FetchedMedia> {
+    const creds = await resolveMetaCreds(createAdminClient(), {
+      organizationId: input.organizationId,
+      phoneNumberId: input.sessionRef,
+    });
+    if (!creds) throw new Error("meta_not_configured: sem credencial para baixar a mídia.");
+
+    const auth = { Authorization: `Bearer ${creds.token}` };
+    const mediaId = input.url;
+
+    const metaRes = await fetch(`https://graph.facebook.com/${creds.graphVersion}/${mediaId}`, {
+      headers: auth,
+      signal: AbortSignal.timeout(15_000),
+    });
+    const meta = (await metaRes.json().catch(() => ({}))) as {
+      url?: string;
+      mime_type?: string;
+      error?: { message?: string; code?: number };
+    };
+    if (!metaRes.ok || meta.error || !meta.url) {
+      // 404/400 é comum aqui: a Meta mantém a mídia por poucos dias. Sem
+      // arquivo pra baixar não é bug nosso — mas precisa dizer isso, não
+      // fingir sucesso.
+      throw new Error(
+        `meta_media_${meta.error?.code ?? metaRes.status}: ${meta.error?.message ?? "sem url de download"}`,
+      );
+    }
+
+    const binRes = await fetch(meta.url, { headers: auth, signal: AbortSignal.timeout(30_000) });
+    if (!binRes.ok) {
+      throw new Error(`meta_media_download_${binRes.status}`);
+    }
+    const buffer = Buffer.from(await binRes.arrayBuffer());
+    return { buffer, mime: meta.mime_type ?? input.hintMime ?? "application/octet-stream" };
   },
 
   codes: {

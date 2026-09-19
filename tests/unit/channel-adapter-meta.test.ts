@@ -243,3 +243,102 @@ describe("credencial por sessão — o que destrava multi-tenant", () => {
     expect((init.headers as Record<string, string>).Authorization).toBe("Bearer tok");
   });
 });
+
+/**
+ * O aviso da Cloud API NUNCA traz o arquivo — só um `media_id`. Baixar exige
+ * DOIS saltos: metadados (que trazem a URL de download real) e o binário.
+ * Sem isto, áudio/foto/vídeo/documento recebidos pelo canal oficial chegavam
+ * como mensagem SEM anexo — `metadata.meta_media_id` era gravado e nunca
+ * consumido por ninguém.
+ */
+describe("adapter meta_cloud — baixar mídia recebida (fetchInboundMedia)", () => {
+  function stubFetchSequence(respostas: Array<{ ok?: boolean; status?: number; json?: unknown; arrayBuffer?: ArrayBuffer }>) {
+    const spy = vi.fn();
+    for (const r of respostas) {
+      spy.mockResolvedValueOnce({
+        ok: r.ok ?? true,
+        status: r.status ?? 200,
+        json: async () => r.json ?? {},
+        arrayBuffer: async () => r.arrayBuffer ?? new ArrayBuffer(0),
+      });
+    }
+    vi.stubGlobal("fetch", spy);
+    return spy;
+  }
+
+  it("⭐ resolve a URL real pelo media_id e baixa o binário com o MESMO Bearer nos dois saltos", async () => {
+    configurar();
+    sessaoNoBanco.token = null; // cai no env
+    const bytes = new TextEncoder().encode("conteudo-fake").buffer;
+    const spy = stubFetchSequence([
+      { json: { url: "https://lookaside.fbsbx.com/whatsapp_business/attachments/xyz", mime_type: "image/jpeg" } },
+      { arrayBuffer: bytes },
+    ]);
+
+    const media = await a().fetchInboundMedia!({
+      organizationId: ORG,
+      sessionRef: "sessao-pn",
+      url: "1234567890",
+    });
+
+    expect(media.mime).toBe("image/jpeg");
+    expect(Buffer.from(media.buffer).toString()).toBe("conteudo-fake");
+
+    const [primeiraUrl, primeiroInit] = spy.mock.calls[0]!;
+    expect(String(primeiraUrl)).toBe("https://graph.facebook.com/v22.0/1234567890");
+    expect((primeiroInit.headers as Record<string, string>).Authorization).toBe("Bearer tok");
+
+    const [segundaUrl, segundoInit] = spy.mock.calls[1]!;
+    expect(segundaUrl).toBe("https://lookaside.fbsbx.com/whatsapp_business/attachments/xyz");
+    expect((segundoInit.headers as Record<string, string>).Authorization).toBe("Bearer tok");
+  });
+
+  it("sem credencial recusa antes de qualquer fetch", async () => {
+    // Nem configurar() nem sessão: nenhuma credencial existe.
+    await expect(
+      a().fetchInboundMedia!({ organizationId: ORG, sessionRef: "sessao-pn", url: "123" }),
+    ).rejects.toThrow(/meta_not_configured/);
+  });
+
+  it("mídia expirada na Meta (404) lança com o motivo, não finge sucesso", async () => {
+    configurar();
+    sessaoNoBanco.token = null;
+    stubFetchSequence([
+      { ok: false, status: 404, json: { error: { code: 404, message: "Unsupported get request." } } },
+    ]);
+
+    await expect(
+      a().fetchInboundMedia!({ organizationId: ORG, sessionRef: "sessao-pn", url: "expirado" }),
+    ).rejects.toThrow(/meta_media_404/);
+  });
+
+  it("segundo salto (download do binário) falhando lança com o status", async () => {
+    configurar();
+    sessaoNoBanco.token = null;
+    stubFetchSequence([
+      { json: { url: "https://lookaside.fbsbx.com/x", mime_type: "video/mp4" } },
+      { ok: false, status: 410 },
+    ]);
+
+    await expect(
+      a().fetchInboundMedia!({ organizationId: ORG, sessionRef: "sessao-pn", url: "999" }),
+    ).rejects.toThrow(/meta_media_download_410/);
+  });
+
+  it("sem mime_type na resposta, usa o hintMime do webhook", async () => {
+    configurar();
+    sessaoNoBanco.token = null;
+    stubFetchSequence([
+      { json: { url: "https://lookaside.fbsbx.com/x" } },
+      { arrayBuffer: new ArrayBuffer(4) },
+    ]);
+
+    const media = await a().fetchInboundMedia!({
+      organizationId: ORG,
+      sessionRef: "sessao-pn",
+      url: "1",
+      hintMime: "audio/ogg",
+    });
+    expect(media.mime).toBe("audio/ogg");
+  });
+});
