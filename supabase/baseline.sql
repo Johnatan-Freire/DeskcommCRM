@@ -17024,6 +17024,61 @@ comment on table public.api_audit_log is
 
 notify pgrst, 'reload schema';
 
+-- ---- guarda contra replay de 5xx do gateway do Supabase (migration 0278) ----
+--
+-- O gateway do Supabase reexecuta resposta 5xx sem limite. Uma função que
+-- recuse com um SQLSTATE da classe 40 (transaction_rollback) vira HTTP 500 no
+-- PostgREST, e uma reexecução perpétua de poucas requisições pode esgotar o
+-- pool inteiro e derrubar o carregamento do schema cache — que derruba TODA
+-- rota, não só a que originou o erro. Este hook responde 409 (que não é
+-- reexecutado) a requisição cujo sb-request-id (UUIDv7) já foi aceito pelo
+-- gateway há mais de 5 minutos, cortando o laço na origem.
+
+create or replace function public.fn_pgrst_recusar_replay_do_gateway()
+returns void
+language plpgsql
+stable
+set search_path = ''
+as $$
+declare
+  rid text;
+  aceito_ha interval;
+begin
+  rid := coalesce(nullif(current_setting('request.headers', true), '')::jsonb ->> 'sb-request-id', '');
+  if rid !~ '^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-' then
+    return;
+  end if;
+  aceito_ha := now() - to_timestamp((('x' || replace(left(rid, 13), '-', ''))::bit(48)::bigint) / 1000.0);
+  if aceito_ha > interval '5 minutes' then
+    raise exception 'gateway_replay'
+      using errcode = 'PT409',
+            detail  = format('sb-request-id %s foi aceito pelo gateway há %s', rid, aceito_ha),
+            hint    = 'A requisição original já expirou; esta é uma reexecução do gateway de uma resposta 5xx antiga.';
+  end if;
+exception
+  when sqlstate 'PT409' then
+    raise;
+  when others then
+    return;
+end;
+$$;
+
+comment on function public.fn_pgrst_recusar_replay_do_gateway() is
+  'pgrst.db_pre_request: responde 409 a requisição que o gateway do Supabase reexecuta há >5 min (sb-request-id UUIDv7 velho), para não alimentar o loop de retry de 5xx que esgota o pool do PostgREST.';
+
+revoke all on function public.fn_pgrst_recusar_replay_do_gateway() from public, anon;
+grant execute on function public.fn_pgrst_recusar_replay_do_gateway() to anon, authenticated, service_role;
+
+do $$
+begin
+  if to_regrole('authenticator') is not null then
+    execute $c$alter role authenticator set pgrst.db_pre_request = 'public.fn_pgrst_recusar_replay_do_gateway'$c$;
+  end if;
+end $$;
+
+notify pgrst, 'reload config';
+notify pgrst, 'reload schema';
+
 -- ---- VARREDURA anon: função nova nasce exposta em quem ATUALIZA (migration 0116) ----
 --
 -- ⚠️ ESTE BLOCO É, DE PROPÓSITO, O ÚLTIMO DO ARQUIVO. Apêndice novo entra ANTES
