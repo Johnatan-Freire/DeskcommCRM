@@ -73,6 +73,18 @@ export interface ParametrosDaConsulta {
   ate: Date;
   /** INJETADO, como em `horariosLivres`. Relógio lido aqui dentro é o defeito que `janela-do-canal.ts` documenta. */
   agora: Date;
+  /**
+   * O agendamento sendo REMARCADO, para a coleta de ocupação não vê-lo como
+   * conflito contra si mesmo. Ausente = criação nova (nada a excluir).
+   *
+   * Sem isto, remarcar um compromisso para um horário que se sobrepõe ao seu
+   * PRÓPRIO horário atual (a linha antiga ainda não foi atualizada no banco no
+   * momento desta checagem) era recusado por conflito — inclusive movê-lo para
+   * logo depois do próprio fim, quando o intervalo antes/depois do tipo
+   * (`buffer_before_minutes`) alarga a janela de coleta e passa a alcançar o
+   * próprio compromisso de saída.
+   */
+  ignorarAgendamentoId?: string | null;
 }
 
 export type ResultadoDaConsulta =
@@ -199,6 +211,18 @@ export async function horariosLivresDaOrg(
     };
   }
 
+  // O intervalo antes/depois do tipo é regra de OFERTA — quem o aplica é o
+  // motor (`horariosLivres`), inflando cada candidato. A COLETA de ocupação,
+  // porém, precisa ENXERGAR o que esse intervalo alcança: um compromisso
+  // vizinho que termina dentro do buffer não cruza a janela crua [de, ate) e
+  // ficava invisível — a oferta escondia o horário e a escrita (que consulta
+  // esta mesma função com de/ate = exatamente o slot pedido) o aceitava.
+  // Alargar só a COLETA põe as duas pontas na mesma régua sem duplicar regra.
+  const bufferAntesMs = (tipo.buffer_before_minutes ?? 0) * 60_000;
+  const bufferDepoisMs = (tipo.buffer_after_minutes ?? 0) * 60_000;
+  const coletaDe = new Date(params.de.getTime() - bufferAntesMs).toISOString();
+  const coletaAte = new Date(params.ate.getTime() + bufferDepoisMs).toISOString();
+
   const [{ data: excecoesRaw, error: erroExc }, { data: agendaRaw, error: erroAg }] =
     await Promise.all([
       supabase
@@ -208,13 +232,20 @@ export async function horariosLivresDaOrg(
         .eq("user_id", donoId)
         .gte("exception_date", diaISO(params.de))
         .lte("exception_date", diaISO(params.ate)),
-      supabase
-        .from("calendar_appointments")
-        .select("starts_at, ends_at, status")
-        .eq("organization_id", organizationId)
-        .eq("owner_user_id", donoId)
-        .lt("starts_at", params.ate.toISOString())
-        .gt("ends_at", params.de.toISOString()),
+      (() => {
+        let q = supabase
+          .from("calendar_appointments")
+          .select("starts_at, ends_at, status")
+          .eq("organization_id", organizationId)
+          .eq("owner_user_id", donoId)
+          .lt("starts_at", coletaAte)
+          .gt("ends_at", coletaDe);
+        // O PRÓPRIO COMPROMISSO OCUPA O HORÁRIO DELE. Remarcando-o, a linha
+        // antiga (ainda com o horário de origem) não pode contar como
+        // conflito contra o horário de destino.
+        if (params.ignorarAgendamentoId) q = q.neq("id", params.ignorarAgendamentoId);
+        return q;
+      })(),
     ]);
 
   const erroDeColeta = erroExc ?? erroAg;
@@ -244,8 +275,8 @@ export async function horariosLivresDaOrg(
     .select("starts_at, ends_at, transparency, status, calendar_connections!inner(user_id, status)")
     .eq("organization_id", organizationId)
     .eq("calendar_connections.user_id", donoId)
-    .lt("starts_at", params.ate.toISOString())
-    .gt("ends_at", params.de.toISOString());
+    .lt("starts_at", coletaAte)
+    .gt("ends_at", coletaDe);
   if (erroExt) {
     return {
       ok: false,

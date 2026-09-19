@@ -262,6 +262,7 @@ export async function alterarAgendamentoHandler(
         donoId: atual.owner_user_id as string,
         inicio: novoInicio,
         fim: novoFim,
+        ignorarAgendamentoId: atual.id as string,
       });
       mudanca.starts_at = novoInicio.toISOString();
       mudanca.ends_at = novoFim.toISOString();
@@ -414,7 +415,14 @@ async function exigeAgendamento(
 async function exigeHorarioLivre(
   supabase: SB,
   ctx: HandlerCtx,
-  args: { eventTypeId: string; donoId: string; inicio: Date; fim: Date },
+  args: {
+    eventTypeId: string;
+    donoId: string;
+    inicio: Date;
+    fim: Date;
+    /** O agendamento sendo remarcado — não conta como conflito contra si mesmo. */
+    ignorarAgendamentoId?: string;
+  },
 ): Promise<{ fusoDaRegra: string }> {
   const consulta = await horariosLivresDaOrg(supabase, ctx.organization_id, {
     eventTypeId: args.eventTypeId,
@@ -422,6 +430,7 @@ async function exigeHorarioLivre(
     de: args.inicio,
     ate: args.fim,
     agora: new Date(),
+    ignorarAgendamentoId: args.ignorarAgendamentoId,
   });
 
   if (!consulta.ok) {
