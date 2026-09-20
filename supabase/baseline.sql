@@ -17079,6 +17079,79 @@ end $$;
 notify pgrst, 'reload config';
 notify pgrst, 'reload schema';
 
+-- ---- o nome do compromisso pessoal do Google deixa de ser gravado (migration 0279) ----
+--
+-- `calendar_external_events` é lida por qualquer pessoa da organização de
+-- propósito (a ocupação precisa aparecer na agenda de quem não conectou o
+-- Google), mas o worker também gravava o `title` do evento — o nome do
+-- compromisso PESSOAL de um colega, sem consumidor nenhum no produto. Limpa
+-- o que já foi sincronizado por uma versão anterior do worker; o worker atual
+-- já grava sempre `null` nesse campo.
+update public.calendar_external_events
+   set title = null
+ where title is not null;
+
+-- ---- lead do ingest não duplica em mensagens simultâneas (migration 0280) ----
+--
+-- check-then-act em `lib/leads/nascimento-do-lead.ts`: sem nada serializando
+-- entre o select e o insert, duas mensagens que chegam juntas do mesmo
+-- contato nascem dois cards. `fn_nascer_lead_da_conversa` serializa por
+-- (organização, contato) com `pg_advisory_xact_lock`, transaction-scoped, e
+-- devolve NULL quando já existe um aberto. Só decide isso — funil, etapa,
+-- título, tags e origem continuam vindo prontos do TypeScript.
+--
+-- ⚠️ FICA ANTES da varredura de anon logo abaixo, de propósito — ela é
+-- security invoker, mas o instrumento (tests/unit/varredura-anon-e-o-ultimo-
+-- bloco.test.ts) reprova QUALQUER `create function` depois daquele bloco,
+-- sem distinguir invoker de definer: a ordem é uma regra do ARQUIVO, para
+-- ninguém precisar lembrar caso a caso.
+create or replace function public.fn_nascer_lead_da_conversa(
+  p_org uuid,
+  p_contact uuid,
+  p_pipeline uuid,
+  p_stage uuid,
+  p_title text,
+  p_source text,
+  p_source_metadata jsonb default '{}'::jsonb,
+  p_tags text[] default '{}'::text[]
+)
+returns uuid
+language plpgsql
+security invoker
+set search_path = public
+as $$
+declare
+  v_id uuid;
+begin
+  perform pg_advisory_xact_lock(hashtextextended(p_org::text || ':' || p_contact::text, 0));
+
+  select id into v_id
+    from public.crm_leads
+   where organization_id = p_org
+     and contact_id = p_contact
+     and status = 'open'
+   limit 1;
+
+  if v_id is not null then
+    return null;
+  end if;
+
+  insert into public.crm_leads
+    (organization_id, pipeline_id, stage_id, contact_id, title, source, source_metadata, tags)
+  values
+    (p_org, p_pipeline, p_stage, p_contact, p_title, p_source, coalesce(p_source_metadata, '{}'::jsonb), coalesce(p_tags, '{}'::text[]))
+  returning id into v_id;
+
+  return v_id;
+end;
+$$;
+
+revoke execute on function public.fn_nascer_lead_da_conversa(uuid, uuid, uuid, uuid, text, text, jsonb, text[]) from public, anon;
+revoke execute on function public.fn_nascer_lead_da_conversa(uuid, uuid, uuid, uuid, text, text, jsonb, text[]) from authenticated;
+grant  execute on function public.fn_nascer_lead_da_conversa(uuid, uuid, uuid, uuid, text, text, jsonb, text[]) to service_role;
+
+notify pgrst, 'reload schema';
+
 -- ---- VARREDURA anon: função nova nasce exposta em quem ATUALIZA (migration 0116) ----
 --
 -- ⚠️ ESTE BLOCO É, DE PROPÓSITO, O ÚLTIMO DO ARQUIVO. Apêndice novo entra ANTES
@@ -17201,15 +17274,3 @@ create policy tenant_isolation_org_sistema_escolar_config_write on public.org_si
 revoke select on public.org_sistema_escolar_config from authenticated, anon;
 
 notify pgrst, 'reload schema';
-
--- ---- o nome do compromisso pessoal do Google deixa de ser gravado (migration 0279) ----
---
--- `calendar_external_events` é lida por qualquer pessoa da organização de
--- propósito (a ocupação precisa aparecer na agenda de quem não conectou o
--- Google), mas o worker também gravava o `title` do evento — o nome do
--- compromisso PESSOAL de um colega, sem consumidor nenhum no produto. Limpa
--- o que já foi sincronizado por uma versão anterior do worker; o worker atual
--- já grava sempre `null` nesse campo.
-update public.calendar_external_events
-   set title = null
- where title is not null;

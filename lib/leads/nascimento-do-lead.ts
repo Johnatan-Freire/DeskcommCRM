@@ -204,27 +204,40 @@ export async function garantirLeadDaConversa(
   // isso reescreva a origem deste.
   const rotuloDeAnuncio = contato?.source ? ROTULO_DE_ANUNCIO[contato.source] : undefined;
 
-  const { data: lead, error } = await db
-    .from("crm_leads")
-    .insert({
-      organization_id: organizationId,
-      pipeline_id: destino.pipelineId,
-      stage_id: destino.stageId,
-      contact_id: contactId,
-      title: titulo,
-      source: rotuloDeAnuncio ? contato!.source : "whatsapp",
-      source_metadata: rotuloDeAnuncio ? (contato!.source_metadata ?? {}) : {},
-      // O ponto ao lado do título só acende se a organização cadastrar este
-      // rótulo em `crm_pipelines.settings.canonical_tags` (Configurações do
-      // funil) — a tag sempre entra; o destaque visual é opt-in do operador.
-      tags: rotuloDeAnuncio ? [rotuloDeAnuncio] : [],
-    })
-    .select("id")
-    .single();
+  // ⚠️ PELA RPC, E NÃO POR INSERT DIRETO — a checagem do passo 2 sozinha não
+  // basta. Entre aquele `select` e este insert não há nada, e duas mensagens
+  // que chegam juntas do mesmo contato passam as duas pela checagem antes de
+  // qualquer insert concluir — medido em produção (upstream): três mensagens
+  // seguidas ("oi", "tudo bem?", "queria marcar") viraram três cards, no
+  // mesmo funil e na mesma etapa.
+  //
+  // `fn_nascer_lead_da_conversa` (migration 0280) serializa por (organização,
+  // contato) com advisory lock e devolve NULL quando já existe um aberto. O
+  // passo 2 fica onde está: evita a ida ao banco no caso comum, que é a
+  // mensagem número dez de uma conversa que já tem card.
+  const { data: novoId, error } = await db.rpc("fn_nascer_lead_da_conversa", {
+    p_org: organizationId,
+    p_contact: contactId,
+    p_pipeline: destino.pipelineId,
+    p_stage: destino.stageId,
+    p_title: titulo,
+    p_source: rotuloDeAnuncio ? contato!.source : "whatsapp",
+    p_source_metadata: rotuloDeAnuncio ? (contato!.source_metadata ?? {}) : {},
+    // O ponto ao lado do título só acende se a organização cadastrar este
+    // rótulo em `crm_pipelines.settings.canonical_tags` (Configurações do
+    // funil) — a tag sempre entra; o destaque visual é opt-in do operador.
+    p_tags: rotuloDeAnuncio ? [rotuloDeAnuncio] : [],
+  });
 
-  if (error || !lead) {
-    return { criado: false, motivo: "erro", detalhe: error?.message.slice(0, 120) };
+  if (error) {
+    return { criado: false, motivo: "erro", detalhe: error.message.slice(0, 120) };
   }
+  // NULL não é falha: é a segunda mensagem encontrando o card que a primeira
+  // criou — mesmo desfecho do passo 2, e o mesmo motivo.
+  if (!novoId) {
+    return { criado: false, motivo: "ja_existe" };
+  }
+  const lead = { id: novoId as string };
 
   // 5 · o registro, pelo EMISSOR CANÔNICO — não por insert cru.
   //

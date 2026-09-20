@@ -282,6 +282,43 @@ describe("UM lead por DEMANDA, não um por mensagem", () => {
     expect(rows[0]!.n, "um contato, um card").toBe("1");
   });
 
+  it("TRÊS MENSAGENS SIMULTÂNEAS do mesmo contato viram UM card, não três", async () => {
+    // O defeito medido em produção (upstream, v1.24.0): "oi", "tudo bem?",
+    // "queria marcar" chegam juntas, as três passam pelo `select` de "já
+    // existe?" antes de qualquer `insert` concluir, e nascem três cards. Sem
+    // `fn_nascer_lead_da_conversa` (advisory lock por organização+contato),
+    // este teste cria 3 — é ele que prova que o lock é o que resolve, não a
+    // ordem de execução do teste.
+    const contato = await criarContato(ORG_VIVA, "Simultâneo Rocha");
+    const dados = {
+      organizationId: ORG_VIVA,
+      contactId: contato,
+      conversationId: CONVERSA,
+      nomeDoContato: "Simultâneo Rocha",
+    };
+
+    const resultados = await Promise.all([
+      garantirLeadDaConversa(db, dados),
+      garantirLeadDaConversa(db, dados),
+      garantirLeadDaConversa(db, dados),
+    ]);
+
+    const criados = resultados.filter((r) => r.criado);
+    expect(criados, "exatamente um dos três venceu a corrida").toHaveLength(1);
+    const jaExistia = resultados.filter((r) => !r.criado);
+    expect(jaExistia, "os outros dois encontram o card que o vencedor criou").toHaveLength(2);
+    for (const r of jaExistia) {
+      if (r.criado) continue;
+      expect(r.motivo).toBe("ja_existe");
+    }
+
+    const { rows } = await pool.query<{ n: string }>(
+      "select count(*) as n from crm_leads where contact_id = $1",
+      [contato],
+    );
+    expect(rows[0]!.n, "um contato, um card — mesmo com três mensagens ao mesmo tempo").toBe("1");
+  });
+
   it("depois de FECHADO, quem volta a escrever abre demanda nova", async () => {
     const contato = await criarContato(ORG_VIVA, "Voltou Pereira");
     const dados = {
