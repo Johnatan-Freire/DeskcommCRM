@@ -133,6 +133,20 @@ describe("sincronizarAgendasDoGoogle", () => {
     });
   });
 
+  it("o título real do compromisso do Google NUNCA é gravado — sem consumidor, sem exposição", async () => {
+    // calendar_external_events é lida por QUALQUER pessoa da organização (a
+    // ocupação precisa aparecer na agenda de quem não conectou o Google) —
+    // gravar o nome do compromisso PESSOAL de um colega ali o exporia a todo
+    // mundo, sem que ninguém no produto sequer leia esse campo depois.
+    vi.mocked(fetch).mockResolvedValue(pagina({ items: [eventoDeTerceiro], nextSyncToken: "T1" }));
+
+    const r = await sincronizarAgendasDoGoogle(admin(), { agora: AGORA, calendarios: [calendario()] });
+
+    expect(r.gravados).toBe(1);
+    expect(eventoDeTerceiro.summary).toBe("Reunião do condomínio"); // controle: o Google MANDOU um título
+    expect(gravados[0]).toMatchObject({ external_event_id: "evt-alheio", title: null });
+  });
+
   it("calendário SEM fuso cai no fuso da ORGANIZAÇÃO, nunca em UTC", async () => {
     // O defeito que este caso fecha: `cal.fuso` era cravado em `null` no mapeamento da
     // rota, e o fallback `|| "UTC"` disparava SEMPRE. Em `America/Sao_Paulo` um evento de

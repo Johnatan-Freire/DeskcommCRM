@@ -17201,3 +17201,15 @@ create policy tenant_isolation_org_sistema_escolar_config_write on public.org_si
 revoke select on public.org_sistema_escolar_config from authenticated, anon;
 
 notify pgrst, 'reload schema';
+
+-- ---- o nome do compromisso pessoal do Google deixa de ser gravado (migration 0279) ----
+--
+-- `calendar_external_events` é lida por qualquer pessoa da organização de
+-- propósito (a ocupação precisa aparecer na agenda de quem não conectou o
+-- Google), mas o worker também gravava o `title` do evento — o nome do
+-- compromisso PESSOAL de um colega, sem consumidor nenhum no produto. Limpa
+-- o que já foi sincronizado por uma versão anterior do worker; o worker atual
+-- já grava sempre `null` nesse campo.
+update public.calendar_external_events
+   set title = null
+ where title is not null;

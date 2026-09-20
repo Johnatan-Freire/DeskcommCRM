@@ -216,13 +216,22 @@ export async function sincronizarAgendasDoGoogle(
         continue;
       }
 
+      // ⚠️ NUNCA `lido.evento.title`. `calendar_external_events` é lida por
+      // qualquer pessoa da organização (`calendar_external_events_select`,
+      // "leitura de todos" — precisa ser assim para a ocupação aparecer na
+      // agenda de quem NÃO conectou o Google, ver `lib/agenda/consulta.ts`), e
+      // nenhuma tela ou rota deste produto jamais leu esse título — é o nome de
+      // um compromisso PESSOAL da agenda de alguém, sincronizado sem que a
+      // pessoa tenha pedido para expô-lo aos colegas. `doEventoDoGoogle` ainda
+      // o extrai (é tradutor genérico, puro, e não decide persistência); quem
+      // decide não gravar é aqui, no único lugar que grava a linha.
       const { error } = await admin.from("calendar_external_events").upsert(
         {
           organization_id: cal.organization_id,
           connection_id: cal.connection_id,
           external_calendar_id: cal.external_calendar_id,
           external_event_id: lido.evento.external_event_id,
-          title: lido.evento.title,
+          title: null,
           starts_at: lido.evento.starts_at,
           ends_at: lido.evento.ends_at,
           is_all_day: lido.evento.is_all_day,
