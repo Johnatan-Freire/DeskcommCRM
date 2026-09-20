@@ -78,26 +78,52 @@ Da tier "bug/segurança", em ordem:
     `baseline.sql`) limpa o que já estava gravado. Teste novo em
     `tests/unit/agenda-google-sync-worker.test.ts`. `pnpm test:db` rodado
     (schema tocado). Commit `a1f929718`.
+13. **Três mensagens seguidas deixam de virar três negócios.**
+    `lib/leads/nascimento-do-lead.ts` fazia check-then-act (select de lead
+    aberto, depois insert) sem nada serializando entre os dois — mensagens
+    simultâneas do mesmo contato nasciam dois ou três cards duplicados no
+    funil. Commit upstream: `c712744ad` (v1.24.0) — mediu em produção: três
+    mensagens seguidas ("oi", "tudo bem?", "queria marcar") viraram três
+    negócios, no mesmo funil e na mesma etapa. **Achado curioso:** o arquivo
+    já existia neste fork com o MESMO nome, a MESMA forma e o MESMO defeito —
+    linhagem comum antes de os dois forks divergirem
+    (`docs/research/reference-synthesis.md`). Não é índice único (um cliente
+    pode legitimamente ter dois negócios abertos ao mesmo tempo, criados à
+    mão) — `fn_nascer_lead_da_conversa` (migration `0280`) serializa por
+    `(organization_id, contact_id)` com `pg_advisory_xact_lock`,
+    transaction-scoped, devolve `NULL` quando já existe aberto; funil/etapa/
+    título/tags continuam decididos em TypeScript. **Pegadinha encontrada ao
+    rodar os gates:** o apêndice novo no `baseline.sql` tem que entrar ANTES
+    do bloco "VARREDURA anon" (migration 0116) — esse bloco é, de propósito,
+    o último do arquivo, e `tests/unit/varredura-anon-e-o-ultimo-bloco.test.ts`
+    reprova qualquer `create function` depois dele. Só apareceu ao rodar
+    `pnpm test:unit` completo (não pega em `test:db` nem em lint). Teste novo
+    em `tests/invariants/nascimento-do-lead.test.ts` (3 chamadas concorrentes
+    via `Promise.all`, Postgres real, pool de 3 conexões). Commit `40f0b346a`.
 
 Cada commit tem, na própria mensagem, o commit do upstream que originou a
 correção e o resultado dos testes rodados.
 
 ## Próximo item (não iniciado)
 
-Ainda não localizado — a varredura do changelog do upstream parou no item 12
-(por volta da linha 2216, seção "O provisionamento do Supabase..." — a de
-imediato ANTES do item 12 já foi lida e descartada por não ser bug/segurança
-relevante aqui: instalação via Management API, texto solto sobre `## [1.28.0]`
-em diante ainda não varrido). Próximo passo ao retomar: continuar lendo
-`/tmp/upstream-changelog.md` (ou buscar de novo com `git fetch upstream &&
-git show upstream/main:CHANGELOG.md > /tmp/upstream-changelog.md` se o
-arquivo não existir mais nesta sessão) a partir da seção `## [1.28.0]` —
-"O nome do compromisso pessoal..." foi a última entrada lida ali — buscando o
-PRÓXIMO item da tier "bug/segurança" ainda não triado. Candidatos vistos mas
-NÃO avaliados ainda (aparecem entre as linhas ~2246 e ~2470 da versão lida em
-2026-09-20): bugs de chamada de voz (áudio mudo em múltiplas abas, pareamento
-que não liga, número sem nono dígito) — checar primeiro se o módulo de
-chamada de voz existe neste fork antes de investir tempo.
+Ainda não localizado — a varredura do changelog do upstream parou no item 13
+(a leitura ficou nas seções `## [1.26.0]` a `## [1.24.0]`, linhas ~2334 a
+~2571 da versão lida em 2026-09-20 do `/tmp/upstream-changelog.md`; o
+arquivo não existe mais em toda sessão nova — buscar de novo com
+`git fetch upstream && git show upstream/main:CHANGELOG.md >
+/tmp/upstream-changelog.md`). Candidatos vistos nessa faixa mas NÃO
+avaliados ainda (não parecem bug/segurança, mas não foram checados a fundo):
+"Integração com token de servidor volta a conseguir escrever" (token de
+servidor era tratado como pessoa logada, escrita falhava com "erro interno"
+— v1.25.1) e "O acompanhamento que já encerrou deixa de derrubar o banco"
+(**JÁ AVALIADO E DESCARTADO** — não temos `followup_stale`/CAS por revision
+no nosso `lib/followup/`, e o item 6 já trazido — migration 0278, guarda
+contra replay classe-40 — cobre essa CATEGORIA de incidente de forma
+genérica). Bugs de chamada de voz (linhas ~2251-2333, seções 1.27.x):
+**módulo de chamada de voz não existe neste fork** (confirmado por grep) —
+pular todos sem ler. Próximo passo ao retomar: continuar a leitura a partir
+da seção `## [1.23.0]` (linha ~2623) buscando o próximo item da tier
+"bug/segurança" ainda não triado.
 
 ## Processo para cada item (repetir)
 
