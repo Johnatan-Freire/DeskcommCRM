@@ -38,6 +38,24 @@ const QUEUED_MSG = "bbbbbbbb-0000-4000-8000-000000000005";
 const WAHA_SESSION_NAME = "watchdog-proof-session";
 const NOWEB_ID = "3EB0WATCHDOGPROOF";
 
+// Fixtures do #196 (upstream) — reconexão/eco duplicava a resposta da IA.
+const NOWEB_ECHO_CONTACT = "bbbbbbbb-0000-4000-8000-000000000007";
+const NOWEB_ECHO_CONV = "bbbbbbbb-0000-4000-8000-000000000008";
+const NOWEB_ECHO_QUEUED_MSG = "bbbbbbbb-0000-4000-8000-000000000009";
+const NOWEB_ECHO_ROW = "bbbbbbbb-0000-4000-8000-00000000000a";
+const NOWEB_ECHO_PHONE = "+5511900000098";
+const NOWEB_ECHO_CHAT_ID = "5511900000098@c.us";
+const NOWEB_ECHO_BARE_ID = "3EB0NOWEBECHOPROOF";
+const NOWEB_ECHO_COMPOSITE_ID = `true_${NOWEB_ECHO_CHAT_ID}_${NOWEB_ECHO_BARE_ID}`;
+
+const WEBJS_ECHO_CONTACT = "bbbbbbbb-0000-4000-8000-00000000000b";
+const WEBJS_ECHO_CONV = "bbbbbbbb-0000-4000-8000-00000000000c";
+const WEBJS_ECHO_QUEUED_MSG = "bbbbbbbb-0000-4000-8000-00000000000d";
+const WEBJS_ECHO_ROW = "bbbbbbbb-0000-4000-8000-00000000000e";
+const WEBJS_ECHO_PHONE = "+5511900000099";
+const WEBJS_ECHO_CHAT_ID = "5511900000099@c.us";
+const WEBJS_ECHO_FULL_ID = `true_${WEBJS_ECHO_CHAT_ID}_3EB0WEBJSECHOPROOF`;
+
 let wahaMock: http.Server;
 let wahaPort = 0;
 const sendTextCalls: Array<{ session: string; chatId: string; text: string }> = [];
@@ -45,6 +63,10 @@ const startCalls: string[] = [];
 const wahaStatusByName: Record<string, string> = { [WAHA_SESSION_NAME]: "WORKING" };
 const STOPPED_SESSION = "bbbbbbbb-0000-4000-8000-000000000006";
 const STOPPED_NAME = "watchdog-stopped-session";
+// Resposta do /api/sendText por chatId — permite cada teste escolher o shape
+// (NOWEB bare vs. WEBJS _serialized) sem tocar no comportamento default dos
+// testes já existentes, que caem no fallback NOWEB_ID.
+const sendTextResponseByChatId: Record<string, unknown> = {};
 
 function watchdogCfg(): WatchdogConfig {
   return {
@@ -83,9 +105,11 @@ beforeAll(async () => {
       let body = "";
       req.on("data", (c) => (body += c));
       req.on("end", () => {
-        sendTextCalls.push(JSON.parse(body) as (typeof sendTextCalls)[number]);
+        const parsed = JSON.parse(body) as (typeof sendTextCalls)[number];
+        sendTextCalls.push(parsed);
         res.writeHead(201, { "content-type": "application/json" });
-        res.end(JSON.stringify({ id: { id: NOWEB_ID }, timestamp: 1 }));
+        const custom = sendTextResponseByChatId[parsed.chatId];
+        res.end(JSON.stringify(custom ?? { id: { id: NOWEB_ID }, timestamp: 1 }));
       });
       return;
     }
@@ -134,6 +158,7 @@ beforeAll(async () => {
     `delete from messages where status = 'queued' and sent_via = 'ai' and organization_id <> $1`,
     [ORG],
   );
+
 });
 
 afterAll(async () => {
@@ -194,5 +219,103 @@ describe("4A-2 — watchdog reconcilia o espelho e reenvia queued", () => {
     const redriven = await redriveQueued(pool, watchdogCfg(), log);
     expect(redriven).toBe(0);
     expect(sendTextCalls).toHaveLength(1); // nenhum sendText novo
+  });
+});
+
+/**
+ * #196 (upstream) — a IA duplicava resposta depois de o WhatsApp reconectar, e
+ * no motor WEBJS a mensagem ficava presa em `queued` e era reenviada ao
+ * cliente a cada tick. As duas fixtures simulam o webhook do ECO chegando
+ * ANTES de o redrive terminar — a corrida real por trás do bug: NOWEB grava o
+ * eco com o id COMPOSTO (diferente do bare que o redrive grava), então a
+ * frase ficava duas vezes na conversa; WEBJS grava o eco com o MESMO
+ * `_serialized` que o reenvio tentaria gravar, e o unique
+ * `(organization_id, external_id)` recusava o UPDATE — a recusa caía no catch
+ * como erro transiente e a mensagem nunca saía de `queued`.
+ */
+describe("#196 — eco do reenvio não duplica a frase nem trava em queued", () => {
+  beforeAll(async () => {
+    await pool.query(
+      `insert into contacts (id, organization_id, name, phone_number)
+       values ($1, $2, 'Eco NOWEB', $3), ($4, $2, 'Eco WEBJS', $5)
+       on conflict (id) do nothing`,
+      [NOWEB_ECHO_CONTACT, ORG, NOWEB_ECHO_PHONE, WEBJS_ECHO_CONTACT, WEBJS_ECHO_PHONE],
+    );
+    await pool.query(
+      `insert into conversations (id, organization_id, contact_id, channel_session_id, status, is_group)
+       values ($1, $2, $3, $4, 'open', false), ($5, $2, $6, $4, 'open', false)
+       on conflict (id) do nothing`,
+      [NOWEB_ECHO_CONV, ORG, NOWEB_ECHO_CONTACT, SESSION, WEBJS_ECHO_CONV, WEBJS_ECHO_CONTACT],
+    );
+    await pool.query(
+      `insert into messages (id, organization_id, conversation_id, channel_session_id, contact_id,
+                             type, direction, status, body, sent_via, sent_at, metadata)
+       values
+         ($1, $2, $3, $4, $5, 'text', 'outbound', 'queued', 'resposta presa — eco noweb', 'ai', now(), '{}'),
+         ($6, $2, $7, $4, $8, 'text', 'outbound', 'queued', 'resposta presa — eco webjs', 'ai', now(), '{}')
+       on conflict (id) do nothing`,
+      [
+        NOWEB_ECHO_QUEUED_MSG, ORG, NOWEB_ECHO_CONV, SESSION, NOWEB_ECHO_CONTACT,
+        WEBJS_ECHO_QUEUED_MSG, WEBJS_ECHO_CONV, WEBJS_ECHO_CONTACT,
+      ],
+    );
+    // O eco: igual ao que `lib/waha/ingest.ts` grava de verdade (direction
+    // inbound, status delivered, sent_via external_device) — já presente
+    // ANTES de o redrive rodar.
+    await pool.query(
+      `insert into messages (id, organization_id, conversation_id, channel_session_id, contact_id,
+                             external_id, type, direction, status, body, sent_via, sent_at, metadata)
+       values
+         ($1, $2, $3, $4, $5, $6, 'text', 'inbound', 'delivered', 'resposta presa — eco noweb', 'external_device', now(), '{}'),
+         ($7, $2, $8, $4, $9, $10, 'text', 'inbound', 'delivered', 'resposta presa — eco webjs', 'external_device', now(), '{}')
+       on conflict (id) do nothing`,
+      [
+        NOWEB_ECHO_ROW, ORG, NOWEB_ECHO_CONV, SESSION, NOWEB_ECHO_CONTACT, NOWEB_ECHO_COMPOSITE_ID,
+        WEBJS_ECHO_ROW, WEBJS_ECHO_CONV, WEBJS_ECHO_CONTACT, WEBJS_ECHO_FULL_ID,
+      ],
+    );
+    sendTextResponseByChatId[NOWEB_ECHO_CHAT_ID] = { id: { id: NOWEB_ECHO_BARE_ID }, timestamp: 1 };
+    sendTextResponseByChatId[WEBJS_ECHO_CHAT_ID] = { id: { _serialized: WEBJS_ECHO_FULL_ID }, timestamp: 1 };
+  });
+
+  it("reenvia as duas, apaga os dois ecos e resolve o 23505 do WEBJS", async () => {
+    const redriven = await redriveQueued(pool, watchdogCfg(), log);
+    expect(redriven).toBeGreaterThanOrEqual(2);
+
+    // NOWEB: sai sent com o id BARE (o que o mock devolveu), e o eco —
+    // gravado com o id COMPOSTO — foi apagado, sem segunda linha na conversa.
+    const { rows: nowebMsg } = await pool.query(
+      "select status, external_id from messages where id = $1",
+      [NOWEB_ECHO_QUEUED_MSG],
+    );
+    expect(nowebMsg[0]).toMatchObject({ status: "sent", external_id: NOWEB_ECHO_BARE_ID });
+    const { rows: nowebEcho } = await pool.query("select id from messages where id = $1", [
+      NOWEB_ECHO_ROW,
+    ]);
+    expect(nowebEcho).toHaveLength(0);
+    const { rows: nowebConv } = await pool.query(
+      "select count(*)::int as n from messages where conversation_id = $1 and body = 'resposta presa — eco noweb'",
+      [NOWEB_ECHO_CONV],
+    );
+    expect(nowebConv[0]!.n).toBe(1); // a frase aparece uma vez só, não duas
+
+    // WEBJS: o primeiro UPDATE bateu no unique (o eco já ocupava o id) —
+    // ainda assim sai `sent`, o eco é apagado e o id certo é gravado depois.
+    const { rows: webjsMsg } = await pool.query(
+      "select status, external_id from messages where id = $1",
+      [WEBJS_ECHO_QUEUED_MSG],
+    );
+    expect(webjsMsg[0]).toMatchObject({ status: "sent", external_id: WEBJS_ECHO_FULL_ID });
+    const { rows: webjsEcho } = await pool.query("select id from messages where id = $1", [
+      WEBJS_ECHO_ROW,
+    ]);
+    expect(webjsEcho).toHaveLength(0);
+  });
+
+  it("idempotência: sem a mensagem presa em queued, o próximo tick não reenvia (o loop do #196)", async () => {
+    const before = sendTextCalls.length;
+    const redriven = await redriveQueued(pool, watchdogCfg(), log);
+    expect(redriven).toBe(0);
+    expect(sendTextCalls).toHaveLength(before); // nenhum sendText novo — sem reenvio a cada tick
   });
 });
