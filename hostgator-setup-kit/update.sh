@@ -111,9 +111,20 @@ if [ -z "$SKIP_BACKUP" ]; then
   if bash "$(dirname "$0")/backup.sh"; then
     c_grn "✓ backup feito — se algo der errado, dá pra restaurar (restore.sh)."
   else
+    # Backup falho + segue em frente era o pior dos dois mundos: quem estava
+    # olhando a tela tinha 8 segundos pra reagir a um aviso que passa rápido, e
+    # quem não estava olhando (o agente da tela de Atualização, atualizando
+    # sozinho) nunca via aviso nenhum — o `sleep` corria no log e a atualização
+    # seguia, com ou sem backup, sem ninguém decidir. Agora ela PARA: sem
+    # terminal interativo (agente do host, cron) recusa sozinha; com terminal,
+    # pergunta e só segue com confirmação explícita.
+    if [ -n "${DESKCOMM_AGENT_REPORT:-}" ] || [ ! -t 0 ]; then
+      die "O backup preventivo falhou. Atualização automática interrompida para proteger os dados."
+    fi
     c_ylw "⚠ o backup falhou. A atualização NÃO apaga dados (só reorganiza os contatos),"
-    c_ylw "  mas o ideal é ter backup. Ctrl+C pra parar e investigar; continuo em 8s…"
-    sleep 8
+    c_ylw "  mas o ideal é ter backup."
+    read -r -p "Deseja continuar MESMO SEM BACKUP? Digite 'CONTINUAR': " conf
+    [ "$conf" = "CONTINUAR" ] || die "Atualização cancelada pelo operador para investigar a falha do backup."
   fi
 fi
 # Avisa o agente do host (se for ele quem está dirigindo) — é o que faz a tela

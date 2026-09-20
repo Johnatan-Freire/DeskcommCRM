@@ -22,6 +22,9 @@
 #      agent.sh que podem acendê-lo (CONTIDA=2 vindo do `is_already_in_head`,
 #      e o fallback de "nenhuma tag conhecida + fetch falhou") — casos 8 e 9
 #      isolam cada uma, provado por sabotagem cirúrgica de cada linha.
+#   7. Backup preventivo que falha PARA a atualização (achado ao triar o
+#      CHANGELOG do upstream) — antes disso esperava 8s escondida no log e
+#      seguia com ou sem backup, sem ninguém decidir. Caso 4c.
 set -uo pipefail
 
 # Capturado ANTES de qualquer `cd`: o script muda de diretório várias vezes, e
@@ -126,6 +129,7 @@ cp "$REPO_ROOT/hostgator-setup-kit/_common.sh" "$REPO_ROOT/hostgator-setup-kit/u
 BACKUP_MARK="$WORK/backup-rodou"
 cat > "$PROJ/hostgator-setup-kit/backup.sh" <<STUB
 #!/usr/bin/env bash
+[ -f "$WORK/backup-deve-falhar" ] && exit 1
 touch "$BACKUP_MARK"
 STUB
 # shellcheck disable=SC2016  # o ${APP_IMAGE} é literal DENTRO do compose
@@ -224,6 +228,54 @@ check "o scheduler herda a política da tag imutável" \
   grep -q '^SCHEDULER_PULL_POLICY=missing$' .env
 check "nenhuma das chaves novas duplicou" \
   test "$(grep -cE '^(WORKER|SCHEDULER)_(IMAGE|PULL_POLICY)=' .env)" -eq 4
+
+echo "── 4c. Backup falho: a atualização PARA, sem esperar 8s escondida no log"
+# Achado ao triar o CHANGELOG do upstream: antes disto, um backup que falhasse
+# só avisava e esperava 8s — quem não estava com os olhos na tela (o agente do
+# host, atualizando sozinho às 3h) nunca via o aviso, e a atualização seguia,
+# com ou sem backup, sem ninguém decidir.
+# HEAD está detached em v1.1.0 (fim do caso 4b) — a nova tag precisa nascer
+# NUM COMMIT À FRENTE dele, senão o `git commit` aqui move o próprio HEAD para
+# lá e todo "NÃO chegou a trocar de versão" abaixo passaria por vacuidade.
+git checkout --quiet main 2>/dev/null || git checkout --quiet master
+echo mais > mais.txt; git add -A; git commit --quiet -m "v1.2.0"; git tag v1.2.0
+git checkout --quiet v1.1.0
+touch "$WORK/backup-deve-falhar"
+
+DESKCOMM_AGENT_REPORT=1 run_update --to v1.2.0 < /dev/null
+check "modo agente: aborta em vez de seguir sem backup" test "$RC" -ne 0
+check "modo agente: explica que foi para proteger os dados" \
+  grep -q "backup preventivo falhou" "$OUTFILE"
+check "modo agente: NÃO chegou a trocar de versão" \
+  test "$(git describe --tags --exact-match HEAD 2>/dev/null)" != "v1.2.0"
+
+run_update --to v1.2.0 < /dev/null
+check "sem terminal (pipe/cron), mesmo sem o wrapper do agente: também aborta" test "$RC" -ne 0
+check "sem terminal: NÃO chegou a trocar de versão" \
+  test "$(git describe --tags --exact-match HEAD 2>/dev/null)" != "v1.2.0"
+
+if command -v script >/dev/null 2>&1; then
+  # Terminal DE VERDADE (pty via `script`, não pipe): só aqui o script pergunta
+  # em vez de recusar sozinho — e só aqui "CONTINUAR" tem como ser digitado.
+  run_interativo() {  # run_interativo <resposta> — saída em $OUTFILE, status em $RC
+    rm -f "$BACKUP_MARK"
+    printf '%s\n' "$1" | script -qec "bash hostgator-setup-kit/update.sh --to v1.2.0" "$OUTFILE" >/dev/null 2>&1
+    RC=$?
+  }
+  run_interativo "não era isso"
+  check "terminal de verdade: resposta errada cancela" test "$RC" -ne 0
+  check "terminal de verdade: NÃO chegou a trocar de versão" \
+    test "$(git describe --tags --exact-match HEAD 2>/dev/null)" != "v1.2.0"
+
+  run_interativo "CONTINUAR"
+  check "terminal de verdade: 'CONTINUAR' segue mesmo sem backup" test "$RC" -eq 0
+  check "terminal de verdade: chegou a trocar de versão" \
+    test "$(git describe --tags --exact-match HEAD 2>/dev/null)" = "v1.2.0"
+else
+  echo "  (pulado: comando 'script' indisponível neste ambiente — prompt interativo não exercitado)"
+fi
+
+rm -f "$WORK/backup-deve-falhar"
 
 # ── Clone RASO: a topologia que o install.sh realmente entrega ───────────────
 # `install.sh` instala com `git clone --depth 1`. Num repositório raso o

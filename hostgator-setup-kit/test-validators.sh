@@ -2207,6 +2207,23 @@ TMP_DDL_C="$(mktemp -d)"
 printf '%s\n' "$*" >> "$DOCKER_LOG"
 case "$1" in
   compose) case "$*" in *" exec "*) printf 'healthy\n{"data":{"status":"healthy"}}\n' ;; esac; exit 0 ;;
+  run)
+    # backup.sh empacota as sessões do WhatsApp com um `tar` DENTRO de um
+    # contêiner de verdade. O dublê não sobe container nenhum — sem criar o
+    # arquivo aqui, o `ls "$BACKUP_DIR"/waha-*.tgz` que vem depois, dentro do
+    # próprio backup.sh, não acha nada, e (com `set -o pipefail`) o `ls` sem
+    # match derruba o backup inteiro. Antes disso não aparecia: o update.sh
+    # ignorava a falha do backup e seguia em frente de qualquer jeito; agora
+    # que ele PARA quando o backup falha (o achado desta rodada de triagem),
+    # um dublê incompleto quebra um teste que não tem nada a ver com backup.
+    case "$*" in
+      *" tar czf "*)
+        alvo="$(printf '%s\n' "$*" | sed -E 's/.* tar czf ([^ ]+) .*/\1/')"
+        fora="$(printf '%s\n' "$*" | sed -E 's/.*-v ([^ ]+):\/out .*/\1/')"
+        case "$alvo" in /out/*) [ -n "$fora" ] && : > "$fora/$(basename "$alvo")" ;; esac
+        ;;
+    esac
+    ;;
 esac
 exit 0
 STUB
