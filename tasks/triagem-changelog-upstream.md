@@ -64,20 +64,40 @@ Da tier "bug/segurança", em ordem:
     WAHA). Testes novos em `tests/invariants/agent-watchdog.test.ts`
     (fixtures NOWEB + WEBJS) e `tests/unit/waha-message-id.test.ts`. Commit
     `c1188d9a4`.
+12. **O nome do compromisso pessoal da agenda do Google deixa de ficar ao
+    alcance dos colegas.** `calendar_external_events.title` era lido por
+    QUALQUER pessoa da organização (inclusive `viewer`) via API REST com o
+    próprio login — a policy de SELECT dessa tabela é "leitura de todos" DE
+    PROPÓSITO (a ocupação precisa aparecer na agenda de quem não conectou o
+    Google), mas o `title` não tinha consumidor nenhum no produto (nenhuma
+    tela, nenhuma rota jamais o lia). Commit upstream: não localizado (só o
+    changelog, v1.28.0) — a correção deles foi de PERMISSÃO (fechar a leitura
+    mantendo o dado); aqui a correção foi NA ORIGEM (doutrina DIRC): o worker
+    (`app/api/v1/cron/agenda-google-sync/route.ts`) para de gravar o valor
+    real, sempre grava `null`. Migration `0279` (+ apêndice no
+    `baseline.sql`) limpa o que já estava gravado. Teste novo em
+    `tests/unit/agenda-google-sync-worker.test.ts`. `pnpm test:db` rodado
+    (schema tocado). Commit `a1f929718`.
 
 Cada commit tem, na própria mensagem, o commit do upstream que originou a
 correção e o resultado dos testes rodados.
 
 ## Próximo item (não iniciado)
 
-Ainda não localizado — a varredura do changelog do upstream parou no item 11.
-Próximo passo ao retomar: continuar lendo `/tmp/upstream-changelog.md` (ou
-buscar de novo com `git fetch upstream && git show
-upstream/main:CHANGELOG.md > /tmp/upstream-changelog.md` se o arquivo não
-existir mais nesta sessão) a partir de onde o item 11 foi encontrado (por
-volta da linha 2204 na versão lida em 2026-09-20 — o arquivo cresce e a
-numeração de linha desloca entre sessões, então buscar por texto, não por
-número), em busca do PRÓXIMO item da tier "bug/segurança" ainda não triado.
+Ainda não localizado — a varredura do changelog do upstream parou no item 12
+(por volta da linha 2216, seção "O provisionamento do Supabase..." — a de
+imediato ANTES do item 12 já foi lida e descartada por não ser bug/segurança
+relevante aqui: instalação via Management API, texto solto sobre `## [1.28.0]`
+em diante ainda não varrido). Próximo passo ao retomar: continuar lendo
+`/tmp/upstream-changelog.md` (ou buscar de novo com `git fetch upstream &&
+git show upstream/main:CHANGELOG.md > /tmp/upstream-changelog.md` se o
+arquivo não existir mais nesta sessão) a partir da seção `## [1.28.0]` —
+"O nome do compromisso pessoal..." foi a última entrada lida ali — buscando o
+PRÓXIMO item da tier "bug/segurança" ainda não triado. Candidatos vistos mas
+NÃO avaliados ainda (aparecem entre as linhas ~2246 e ~2470 da versão lida em
+2026-09-20): bugs de chamada de voz (áudio mudo em múltiplas abas, pareamento
+que não liga, número sem nono dígito) — checar primeiro se o módulo de
+chamada de voz existe neste fork antes de investir tempo.
 
 ## Processo para cada item (repetir)
 
