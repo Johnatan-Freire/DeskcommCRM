@@ -59,7 +59,14 @@ export type SkipReason =
    * rodam na mesma mensagem: o engine responde de verdade e este aqui gasta
    * token à toa e deixa uma linha presa para sempre no inbox de quem instalou.
    */
-  | "engine_owns_reply";
+  | "engine_owns_reply"
+  /**
+   * `messages.sent_at` (horário REAL do WhatsApp) é anterior a
+   * `channel_sessions.first_connected_at` — mensagem sincronizada pelo WAHA no
+   * pareamento, não turno de atendimento. Migration 0281; mesma trava do lado
+   * do engine em `lib/agent-engine/edge/crm/drain.ts`.
+   */
+  | "message_before_connection";
 
 export interface BotContext {
   organization_id: string;

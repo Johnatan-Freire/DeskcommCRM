@@ -17152,6 +17152,51 @@ grant  execute on function public.fn_nascer_lead_da_conversa(uuid, uuid, uuid, u
 
 notify pgrst, 'reload schema';
 
+-- ---- o despacho do agente não pode responder mensagem de antes de conectar (migration 0281) ----
+--
+-- WAHA/NOWEB sincroniza histórico do WhatsApp ao parear uma sessão nova: o
+-- mesmo webhook que entrega mensagem NOVA entrega a ANTIGA também, sem nada
+-- que distinga as duas. `first_connected_at` grava, uma ÚNICA vez por sessão
+-- (coalesce protege de reconexão empurrar a data), o instante em que ela
+-- ficou WORKING pela PRIMEIRA vez — é o corte que `lib/agent-engine/edge/crm/
+-- drain.ts` e `workers/ai-response-worker.ts` comparam contra `messages.sent_at`
+-- (o horário REAL do WhatsApp) para nunca despachar o agente numa mensagem
+-- sincronizada de antes da conexão. NULL (sessão que já estava WORKING antes
+-- desta migration) não corta nada, de propósito: sem corte é o mesmo
+-- comportamento de sempre para quem já atende hoje.
+alter table public.channel_sessions
+  add column if not exists first_connected_at timestamptz;
+
+comment on column public.channel_sessions.first_connected_at is
+  'Instante em que esta sessão ficou WORKING pela PRIMEIRA vez — gravado uma única vez (coalesce protege de reconexão empurrar a data). NULL em sessão que já estava WORKING antes da migration 0281: sem corte, mesmo comportamento de sempre. É o corte que lib/agent-engine/edge/crm/drain.ts e workers/ai-response-worker.ts usam para nunca despachar o agente numa mensagem sincronizada de antes da conexão.';
+
+create or replace function public.fn_marcar_primeira_conexao()
+returns trigger
+language plpgsql
+set search_path = public, pg_temp
+as $$
+begin
+  if new.status = 'WORKING' then
+    new.first_connected_at := coalesce(new.first_connected_at, now());
+  end if;
+  return new;
+end;
+$$;
+
+revoke execute on function public.fn_marcar_primeira_conexao() from public, anon, authenticated;
+grant  execute on function public.fn_marcar_primeira_conexao() to service_role;
+
+drop trigger if exists trg_channel_sessions_primeira_conexao on public.channel_sessions;
+create trigger trg_channel_sessions_primeira_conexao
+  before insert or update on public.channel_sessions
+  for each row
+  execute function public.fn_marcar_primeira_conexao();
+
+comment on function public.fn_marcar_primeira_conexao() is
+  'BEFORE INSERT OR UPDATE em channel_sessions: quando status vira WORKING, grava first_connected_at UMA vez (coalesce). Existe para dar ao TypeScript um corte estável contra o qual comparar messages.sent_at, sem depender de nenhuma rota específica lembrar de gravar a data — toda rota que já escreve status=WORKING (webhook do WAHA, onboarding, reconnect, cron de saúde) passa por aqui automaticamente.';
+
+notify pgrst, 'reload schema';
+
 -- ---- VARREDURA anon: função nova nasce exposta em quem ATUALIZA (migration 0116) ----
 --
 -- ⚠️ ESTE BLOCO É, DE PROPÓSITO, O ÚLTIMO DO ARQUIVO. Apêndice novo entra ANTES
