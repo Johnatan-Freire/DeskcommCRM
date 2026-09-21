@@ -39,6 +39,16 @@ describe("montarRequisicaoDeProva", () => {
     expect(anthropic!.body).toMatchObject({ max_tokens: 1 });
   });
 
+  it("openai manda max_completion_tokens, nunca max_tokens — modelo novo recusa o nome antigo", () => {
+    // Medido numa instalação real: o catálogo de modelos (migration 0104) marca
+    // um modelo da família gpt-5.x como default do provider openai, e essa
+    // família responde 400 "Unsupported parameter: 'max_tokens'" — a prova de
+    // crédito da própria instalação quebrava ao testar a própria chave padrão.
+    const openai = montarRequisicaoDeProva("openai", "k", "gpt-5.6-terra");
+    expect(openai!.body).toMatchObject({ max_completion_tokens: 1 });
+    expect(openai!.body).not.toHaveProperty("max_tokens");
+  });
+
   it("provedor desconhecido não recebe 'ok' por omissão", () => {
     expect(montarRequisicaoDeProva("inventado", "k", "m")).toBeNull();
   });

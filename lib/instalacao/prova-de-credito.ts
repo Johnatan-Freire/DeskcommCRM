@@ -41,8 +41,11 @@ interface Requisicao {
 }
 
 /**
- * A menor geração possível em cada provedor. `max_tokens: 1` porque o objetivo
- * é atravessar a cobrança, não obter texto.
+ * A menor geração possível em cada provedor — um único token, porque o
+ * objetivo é atravessar a cobrança, não obter texto. O nome do parâmetro de
+ * teto varia por provedor (`max_tokens` na Anthropic e no OpenRouter,
+ * `max_completion_tokens` na OpenAI, `maxOutputTokens` no Google) — ver o
+ * comentário no caso `openai` para o porquê daquele ser diferente dos outros.
  */
 export function montarRequisicaoDeProva(
   provider: string,
@@ -63,10 +66,18 @@ export function montarRequisicaoDeProva(
         body: { model: modelo, max_tokens: 1, messages: msg },
       };
     case "openai":
+      // ⚠️ `max_completion_tokens`, NUNCA `max_tokens`. A família de modelos mais
+      // nova da OpenAI (gpt-5.x, o1, o3...) RECUSA `max_tokens` com 400
+      // "Unsupported parameter" — e o catálogo de modelos (migration 0104) já
+      // marca um modelo dessa família como default do provider `openai`, então
+      // toda instalação nova batia nesse erro ao testar a própria chave.
+      // `max_completion_tokens` é o substituto que a OpenAI documenta para
+      // TODOS os modelos da Chat Completions API, não só os novos — não há
+      // motivo para manter os dois nomes por modelo.
       return {
         url: "https://api.openai.com/v1/chat/completions",
         headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
-        body: { model: modelo, max_tokens: 1, messages: msg },
+        body: { model: modelo, max_completion_tokens: 1, messages: msg },
       };
     case "openrouter":
       return {
