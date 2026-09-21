@@ -122,26 +122,42 @@ Da tier "bug/segurança", em ordem:
     `tests/invariants/envio-nao-alcanca-conversa-de-outro-tenant.test.ts`
     (ataque real contra Postgres, service-role, sem RLS — mede o 404 E a
     ausência da linha gravada). Commit `71b5450ef`.
+15. **A varredura estática que teria achado o item 14 sozinha.** Commit
+    upstream `3224d7a65` (issue #834) — não é fix pontual, é MECANISMO:
+    `tests/unit/admin-client-exige-filtro-de-tenant.test.ts` escaneia TODO
+    chamador de `createAdminClient()` sob `app/`, `lib/`, `workers/` e
+    reprova qualquer cadeia `.from("<tabela com organization_id>")` que (R1)
+    insira/upsert sem carregar o tenant, ou (R2) leia/atualize/apague sem
+    filtro nenhum. A lista de tabelas tenant-aware sai do próprio schema
+    (regex sobre `baseline.sql` + migrations), não é declarada à mão.
+    **Resultado ao rodar contra este fork: limpo**, com uma única exceção
+    real (`lib/notifications/web_push.ts:28`, builder que devolve a cadeia
+    crua e cujos dois chamadores reais filtram por cima — o MESMO padrão que
+    o upstream também precisou declarar). Nenhuma outra instância do
+    anti-pattern 10 além da que o item 14 já corrigiu. Provado com
+    sabotagem real (revertida): R1 pegou `workers/ai-response-worker.ts`;
+    R2 pegou `workers/lgpd-redact-worker.ts`; e uma tentativa deliberada em
+    `lib/followup/engine.ts` ficou VERDE — confirma o blind spot declarado
+    (cliente admin recebido por PARÂMETRO, o mesmo tipo de caminho por onde
+    o item 14 nasceu; essa é a varredura SEGUINTE, ainda não construída).
+    Extraído para `tests/unit/helpers/cliente-admin.ts` +
+    `caminhoRelativo` em `tests/unit/helpers/varrer-codigo.ts`. Sem
+    fragmento de release (só `tests/`). Commit `85b6652b2`.
 
 Cada commit tem, na própria mensagem, o commit do upstream que originou a
 correção e o resultado dos testes rodados.
 
-## Pendência maior a avaliar (não é "bug/segurança" pontual — é infraestrutura de teste)
+## Pendência menor (não decidida) — a varredura SEGUINTE
 
-Ao investigar o item 14, achei o commit upstream `3224d7a65` — "test(invariantes):
-o cliente de serviço passa a responder ao tenant (#834)" — que NÃO é um fix
-pontual: é uma VARREDURA ESTÁTICA (`tests/unit/admin-client-exige-filtro-de-
-tenant.test.ts`) que escaneia TODO chamador de `createAdminClient()` no repo
-e reprova qualquer cadeia `.from("<tabela com organization_id>")` que (R1)
-insira/upsert sem carregar o tenant, ou (R2) leia/atualize/apague sem filtro
-nenhum — exatamente o anti-pattern 10 do CLAUDE.md, mas como MECANISMO, não
-como doutrina em prosa. Foi essa varredura que achou o vazamento do item 14
-no upstream. Não portei ainda — é trabalho substancial (escanear ~250+
-arquivos, adaptar às exceções legítimas de plataforma) e vale uma decisão
-própria com o usuário antes de começar: dado que já achei e corrigi UMA
-instância real do mesmo anti-pattern sem essa varredura, quantas outras
-existem sem ela? Ver o commit upstream para o desenho completo (R1/R2,
-resolvedor de identificador-raiz, lista de exceções declaradas).
+O item 15 tem um blind spot DECLARADO: cliente admin recebido por PARÂMETRO
+(o `supabase`/`admin` que chega como argumento de função, não um
+`createAdminClient()` local) — foi exatamente por esse caminho que o item 14
+nasceu (`sendMessageHandler` recebe o client de `lib/mcp/server.ts`). O
+upstream não tinha essa varredura seguinte pronta no commit que investiguei;
+não sei se eles a construíram depois. Atravessar chamadas entre arquivos
+para resolver "este parâmetro, neste call site, é sempre admin?" é
+substancialmente mais complexo (precisa de análise de tipo ou de seguir
+call sites) — vale decidir com o usuário se compensa antes de tentar.
 
 ## Próximo item (não iniciado)
 
