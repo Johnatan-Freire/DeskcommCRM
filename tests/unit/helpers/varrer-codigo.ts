@@ -40,3 +40,15 @@ function varrer(dir: string): string[] {
 export function arquivosDeCodigo(raizes: readonly string[]): string[] {
   return raizes.flatMap((r) => varrer(path.join(RAIZ_DO_REPO, r)));
 }
+
+/**
+ * O caminho de um arquivo varrido, relativo à raiz e em barra normal.
+ *
+ * A varredura devolve ABSOLUTO e quem compara com uma lista declarada
+ * precisa dele relativo. Barra normal sempre — no Windows, `path.relative`
+ * devolve `app\api\v1\...`, e uma lista escrita com `/` (como toda allowlist
+ * deste repo) nunca bateria com o que a varredura achou.
+ */
+export function caminhoRelativo(absoluto: string): string {
+  return path.relative(RAIZ_DO_REPO, absoluto).split(path.sep).join("/");
+}
