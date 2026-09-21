@@ -100,30 +100,81 @@ Da tier "bug/segurança", em ordem:
     `pnpm test:unit` completo (não pega em `test:db` nem em lint). Teste novo
     em `tests/invariants/nascimento-do-lead.test.ts` (3 chamadas concorrentes
     via `Promise.all`, Postgres real, pool de 3 conexões). Commit `40f0b346a`.
+14. **O envio de mensagem por agente de IA não alcança mais a conversa de
+    outra empresa.** `sendMessageHandler` (a única porta de saída de mensagem
+    do produto) lia a conversa filtrando SÓ por `id`. Quem chama pela tela
+    está protegido pela RLS; quem chama com `createAdminClient()` — o
+    servidor MCP (`lib/mcp/server.ts`) — não tinha proteção nenhuma: um
+    agente de IA da org A com `conversation_id` da org B alcançava a
+    conversa da vítima. Anti-pattern 10 do CLAUDE.md em estado puro. Commit
+    upstream: `28fdd7166` (v1.23.0). Conserto: filtro explícito por
+    `ctx.organization_id` nos dois ramos da consulta tolerante a
+    `archived_at`, em `app/api/v1/messages/_handler.ts`. **Nosso fork NÃO
+    tinha o segundo vetor que o upstream corrigiu no mesmo commit** (rota
+    REST de envio com `Authorization: Bearer` — não existe dual auth nessa
+    rota aqui, só sessão). Exigiu portar suporte a embed to-one do PostgREST
+    (`alias:coluna_fk(colunas)`) para `tests/pg-como-supabase.ts`, sem o
+    qual o select da conversa (dois embeds) estourava no adaptador de teste.
+    **Efeito colateral ao rodar test:unit:** 6 arquivos de teste mockavam
+    `conversations` com UM `.eq()` só e quebraram com o segundo filtro —
+    trocados pelo padrão de cadeia autorreferente já usado para
+    `contacts`/`meta_templates` nos mesmos arquivos. Teste novo:
+    `tests/invariants/envio-nao-alcanca-conversa-de-outro-tenant.test.ts`
+    (ataque real contra Postgres, service-role, sem RLS — mede o 404 E a
+    ausência da linha gravada). Commit `71b5450ef`.
 
 Cada commit tem, na própria mensagem, o commit do upstream que originou a
 correção e o resultado dos testes rodados.
 
+## Pendência maior a avaliar (não é "bug/segurança" pontual — é infraestrutura de teste)
+
+Ao investigar o item 14, achei o commit upstream `3224d7a65` — "test(invariantes):
+o cliente de serviço passa a responder ao tenant (#834)" — que NÃO é um fix
+pontual: é uma VARREDURA ESTÁTICA (`tests/unit/admin-client-exige-filtro-de-
+tenant.test.ts`) que escaneia TODO chamador de `createAdminClient()` no repo
+e reprova qualquer cadeia `.from("<tabela com organization_id>")` que (R1)
+insira/upsert sem carregar o tenant, ou (R2) leia/atualize/apague sem filtro
+nenhum — exatamente o anti-pattern 10 do CLAUDE.md, mas como MECANISMO, não
+como doutrina em prosa. Foi essa varredura que achou o vazamento do item 14
+no upstream. Não portei ainda — é trabalho substancial (escanear ~250+
+arquivos, adaptar às exceções legítimas de plataforma) e vale uma decisão
+própria com o usuário antes de começar: dado que já achei e corrigi UMA
+instância real do mesmo anti-pattern sem essa varredura, quantas outras
+existem sem ela? Ver o commit upstream para o desenho completo (R1/R2,
+resolvedor de identificador-raiz, lista de exceções declaradas).
+
 ## Próximo item (não iniciado)
 
-Ainda não localizado — a varredura do changelog do upstream parou no item 13
-(a leitura ficou nas seções `## [1.26.0]` a `## [1.24.0]`, linhas ~2334 a
-~2571 da versão lida em 2026-09-20 do `/tmp/upstream-changelog.md`; o
-arquivo não existe mais em toda sessão nova — buscar de novo com
-`git fetch upstream && git show upstream/main:CHANGELOG.md >
-/tmp/upstream-changelog.md`). Candidatos vistos nessa faixa mas NÃO
-avaliados ainda (não parecem bug/segurança, mas não foram checados a fundo):
-"Integração com token de servidor volta a conseguir escrever" (token de
-servidor era tratado como pessoa logada, escrita falhava com "erro interno"
-— v1.25.1) e "O acompanhamento que já encerrou deixa de derrubar o banco"
-(**JÁ AVALIADO E DESCARTADO** — não temos `followup_stale`/CAS por revision
-no nosso `lib/followup/`, e o item 6 já trazido — migration 0278, guarda
-contra replay classe-40 — cobre essa CATEGORIA de incidente de forma
-genérica). Bugs de chamada de voz (linhas ~2251-2333, seções 1.27.x):
-**módulo de chamada de voz não existe neste fork** (confirmado por grep) —
-pular todos sem ler. Próximo passo ao retomar: continuar a leitura a partir
-da seção `## [1.23.0]` (linha ~2623) buscando o próximo item da tier
-"bug/segurança" ainda não triado.
+Ainda não localizado — a varredura do changelog do upstream parou no item 14
+(seção `## [1.23.0]`, linha ~2623 da versão lida em 2026-09-20 do
+`/tmp/upstream-changelog.md`; o arquivo não existe mais em toda sessão nova —
+buscar de novo com `git fetch upstream && git show
+upstream/main:CHANGELOG.md > /tmp/upstream-changelog.md`). Candidatos vistos
+nessa seção mas NÃO avaliados ainda:
+
+- "subir imagem para cabeçalho de modelo do WhatsApp agora confere o
+  conteúdo do arquivo, não o rótulo que o navegador mandou (um SVG renomeado
+  para `.png` entrava e agora é recusado)" — validação de tipo de arquivo por
+  magic bytes em vez de mimetype declarado. Checar se temos upload de imagem
+  de cabeçalho de template WhatsApp e como valida hoje.
+- "as rotas internas de manutenção comparam a senha de acesso em tempo
+  constante" — timing attack em comparação de senha de rotas internas.
+  Checar se existem rotas de manutenção com senha comparada por `===`.
+- "Integração com token de servidor volta a conseguir escrever" (v1.25.1,
+  linha ~2496) — token de servidor tratado como pessoa logada, escrita
+  falhava com "erro interno". Ainda não avaliado.
+
+Já avaliados e descartados (não reabrir sem motivo novo): "O acompanhamento
+que já encerrou deixa de derrubar o banco" (não temos `followup_stale`/CAS
+por revision; item 6 já cobre a categoria). Chamada de voz (linhas
+~2251-2333, seções 1.27.x): módulo não existe neste fork, confirmado por
+grep — pular todos sem ler. "limite de 69 caracteres no nome de sessão WAHA"
+(seção 1.23.0, "O identificador da conexão de WhatsApp..."): já descartado
+em sessão anterior.
+
+Próximo passo ao retomar: ler o restante da seção `## [1.23.0]` (o
+"Adicionado" já foi lido; o "Corrigido" tem mais 2 itens não avaliados acima)
+e continuar para `## [1.22.0]` (linha ~2796) em diante.
 
 ## Processo para cada item (repetir)
 
