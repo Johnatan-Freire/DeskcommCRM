@@ -270,9 +270,35 @@ export async function sendMessageHandler(
   // consulta certa (ver lib/channels/archived).
   const convSelect = (comArchived: boolean) =>
     `id, organization_id, contact_id, channel_session_id, is_group, group_chat_id, bot_silenced_until, provider_conversation_id, contacts:contact_id(phone_number, wa_identity, wa_lid, is_blocked), channel_sessions:channel_session_id(${CHANNEL_SESSION_REF_COLUMNS}, status${comArchived ? `, ${ARCHIVED_AT}` : ""})`;
+  //
+  // O filtro por `organization_id` NÃO é redundância com a RLS — é a única
+  // proteção que existe na metade dos chamadores. Este handler é a porta de
+  // saída de TODOS eles, e eles se dividem em dois mundos:
+  //
+  //   - rota REST com sessão de navegador (app/api/v1/messages/route.ts) →
+  //     client de RLS, a policy basta;
+  //   - servidor MCP (lib/mcp/server.ts) → `createAdminClient()`, SERVICE
+  //     ROLE, que bypassa RLS. Aqui não há policy nenhuma no caminho.
+  //
+  // Sem o filtro, um chamador de service-role com a org A passa um
+  // `conversation_id` da org B e a linha VEM — e daí em diante todo o resto
+  // usa `c.organization_id`, a org da VÍTIMA: a mensagem seria inserida na
+  // conversa dela e enviada pelo canal dela. Anti-pattern 10 do CLAUDE.md.
   const { data: conv, error: convErr } = await queryTolerantToMissingArchived(
-    () => supabase.from("conversations").select(convSelect(true)).eq("id", input.conversation_id).maybeSingle(),
-    () => supabase.from("conversations").select(convSelect(false)).eq("id", input.conversation_id).maybeSingle(),
+    () =>
+      supabase
+        .from("conversations")
+        .select(convSelect(true))
+        .eq("id", input.conversation_id)
+        .eq("organization_id", ctx.organization_id)
+        .maybeSingle(),
+    () =>
+      supabase
+        .from("conversations")
+        .select(convSelect(false))
+        .eq("id", input.conversation_id)
+        .eq("organization_id", ctx.organization_id)
+        .maybeSingle(),
   );
 
   if (convErr) {

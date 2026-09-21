@@ -98,8 +98,10 @@ function makeSupabase(
     from(table: string) {
       if (table === 'conversations') {
         return {
-          select: (cols?: string) => ({
-            eq: () => ({
+          select: (cols?: string) => {
+            // Encadeável sem limite, mesmo motivo do `meta_templates` abaixo.
+            const cadeia: Record<string, unknown> = {
+              eq: () => cadeia,
               maybeSingle: async () =>
                 opts.semColunaArquivada === true && (cols ?? '').includes('archived_at')
                   ? {
@@ -110,8 +112,9 @@ function makeSupabase(
                       },
                     }
                   : { data: conversation, error: null },
-            }),
-          }),
+            };
+            return cadeia;
+          },
           update: () => ({ eq: async () => ({ error: null }) }),
         };
       }

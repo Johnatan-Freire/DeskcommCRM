@@ -176,11 +176,15 @@ function makeSupabase(linhaCompleta: Row) {
         return {
           select: (cols: string) => {
             estado.selects.push(cols);
-            return {
-              eq: () => ({
-                maybeSingle: async () => ({ data: projetar(linhaCompleta, cols), error: null }),
-              }),
+            // Encadeável sem limite (mesmo padrão do `meta_templates` abaixo):
+            // um dublê que fixa a quantidade de `.eq()` quebra quando a
+            // consulta ganha um filtro novo, com um erro que não fala do
+            // comportamento sob teste.
+            const cadeia: Record<string, unknown> = {
+              eq: () => cadeia,
+              maybeSingle: async () => ({ data: projetar(linhaCompleta, cols), error: null }),
             };
+            return cadeia;
           },
           update: () => ({ eq: async () => ({ error: null }) }),
         };

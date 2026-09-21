@@ -37,12 +37,13 @@ function makeSupabase(conversation: Record<string, unknown>) {
   const client = {
     from(table: string) {
       if (table === "conversations") {
+        // Encadeável sem limite — a consulta filtra por id E por organização.
+        const cadeiaConversations: Record<string, unknown> = {
+          eq: () => cadeiaConversations,
+          maybeSingle: async () => ({ data: conversation, error: null }),
+        };
         return {
-          select: () => ({
-            eq: () => ({
-              maybeSingle: async () => ({ data: conversation, error: null }),
-            }),
-          }),
+          select: () => cadeiaConversations,
           update: (patch: Record<string, unknown>) => {
             conversationPatch = patch;
             return { eq: async () => ({ error: null }) };
