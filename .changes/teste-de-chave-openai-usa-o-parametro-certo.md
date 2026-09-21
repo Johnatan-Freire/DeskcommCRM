@@ -13,3 +13,9 @@ modelos é o padrão de instalações novas com esse provedor.
 Agora o teste usa o parâmetro que a OpenAI recomenda para toda a API de
 conversação, que os modelos antigos também aceitam. Quem já usa um modelo
 mais antigo não percebe diferença nenhuma.
+
+Um segundo problema apareceu ao provar o primeiro conserto contra uma conta
+real: pedir só 1 token de resposta fazia o modelo gastar tudo em raciocínio
+interno e devolver erro ou uma resposta vazia — de novo parecendo "chave
+ruim" sem ser. O teste agora pede um pouco mais de espaço, o suficiente para
+uma resposta completa.

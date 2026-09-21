@@ -41,11 +41,12 @@ interface Requisicao {
 }
 
 /**
- * A menor geração possível em cada provedor — um único token, porque o
- * objetivo é atravessar a cobrança, não obter texto. O nome do parâmetro de
- * teto varia por provedor (`max_tokens` na Anthropic e no OpenRouter,
- * `max_completion_tokens` na OpenAI, `maxOutputTokens` no Google) — ver o
- * comentário no caso `openai` para o porquê daquele ser diferente dos outros.
+ * A menor geração possível em cada provedor — na maioria, um único token,
+ * porque o objetivo é atravessar a cobrança, não obter texto. O nome do
+ * parâmetro de teto varia por provedor (`max_tokens` na Anthropic e no
+ * OpenRouter, `max_completion_tokens` na OpenAI, `maxOutputTokens` no
+ * Google) — e a OpenAI também é a exceção ao "um único token": ver o
+ * comentário no caso `openai`.
  */
 export function montarRequisicaoDeProva(
   provider: string,
@@ -74,10 +75,21 @@ export function montarRequisicaoDeProva(
       // `max_completion_tokens` é o substituto que a OpenAI documenta para
       // TODOS os modelos da Chat Completions API, não só os novos — não há
       // motivo para manter os dois nomes por modelo.
+      //
+      // ⚠️ E não pode ser `1`. Nos modelos de raciocínio o teto é dividido com
+      // os `reasoning_tokens` internos (nem sempre visíveis, e variam de
+      // chamada para chamada) — medido contra a chave real de uma instalação:
+      // 1 e 4 tokens devolvem 400/200-com-conteúdo-vazio antes de sobrar
+      // espaço pra qualquer palavra, e os dois desfechos são diferentes de
+      // "chave ruim" mas caem no balde genérico de erro em `normalizarErro`,
+      // o mesmo "selo verde mentiroso" que o cabeçalho deste arquivo existe
+      // para evitar. 32 sobrou espaço de sobra nos testes (resposta completa
+      // com 9 tokens, folga pro raciocínio variar) sem deixar de ser uma
+      // geração mínima.
       return {
         url: "https://api.openai.com/v1/chat/completions",
         headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
-        body: { model: modelo, max_completion_tokens: 1, messages: msg },
+        body: { model: modelo, max_completion_tokens: 32, messages: msg },
       };
     case "openrouter":
       return {

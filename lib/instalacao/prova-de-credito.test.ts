@@ -45,8 +45,19 @@ describe("montarRequisicaoDeProva", () => {
     // família responde 400 "Unsupported parameter: 'max_tokens'" — a prova de
     // crédito da própria instalação quebrava ao testar a própria chave padrão.
     const openai = montarRequisicaoDeProva("openai", "k", "gpt-5.6-terra");
-    expect(openai!.body).toMatchObject({ max_completion_tokens: 1 });
     expect(openai!.body).not.toHaveProperty("max_tokens");
+    expect(openai!.body).toHaveProperty("max_completion_tokens");
+  });
+
+  it("openai pede mais que 1 token — modelo de raciocínio some com o mínimo antes de sobrar texto", () => {
+    // Também medido contra a chave real: com 1 ou 4 tokens de teto, o modelo
+    // gasta tudo em `reasoning_tokens` (internos, nem sempre visíveis) e
+    // devolve 400 ou 200-com-conteúdo-vazio — os dois desfechos são "chave
+    // funciona, orçamento pequeno demais", não "chave ruim", mas caem no
+    // balde genérico de erro em `normalizarErro`. 1 token reproduzia esse
+    // falso negativo; o valor atual tem que ficar bem acima disso.
+    const openai = montarRequisicaoDeProva("openai", "k", "m") as { body: { max_completion_tokens: number } };
+    expect(openai.body.max_completion_tokens).toBeGreaterThan(4);
   });
 
   it("provedor desconhecido não recebe 'ok' por omissão", () => {
