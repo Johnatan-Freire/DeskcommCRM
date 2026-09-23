@@ -42,8 +42,9 @@ interface Requisicao {
 }
 
 /**
- * A menor geração possível em cada provedor. `max_tokens: 1` porque o objetivo
- * é atravessar a cobrança, não obter texto.
+ * A menor geração possível em cada provedor — na maioria, um único token,
+ * porque o objetivo é atravessar a cobrança, não obter texto. A OpenAI é
+ * exceção a esse "um único token": ver o comentário no caso `openai`.
  */
 export function montarRequisicaoDeProva(
   provider: string,
@@ -72,10 +73,21 @@ export function montarRequisicaoDeProva(
       // cai nessa família. `max_completion_tokens` é aceito em toda a família
       // de chat completions, raciocínio ou não, então não há motivo para
       // ramificar por modelo aqui.
+      //
+      // ⚠️ E não pode ser `1`. Nos modelos de raciocínio o teto é dividido com
+      // os `reasoning_tokens` internos (nem sempre visíveis, e variam de
+      // chamada para chamada) — medido contra uma chave real: 1 e 4 tokens
+      // devolvem 400 ("Could not finish the message within the
+      // max_completion_tokens")/200-com-conteúdo-vazio antes de sobrar espaço
+      // pra qualquer palavra, e nenhum dos dois é "chave ruim" — mas o 400
+      // cai no balde genérico de erro em `normalizarErro`, o mesmo "selo
+      // verde mentiroso" que o cabeçalho deste arquivo existe para evitar. 32
+      // sobrou espaço de sobra na medição (resposta completa com 9 tokens)
+      // sem deixar de ser uma geração mínima.
       return {
         url: "https://api.openai.com/v1/chat/completions",
         headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
-        body: { model: modelo, max_completion_tokens: 1, messages: msg },
+        body: { model: modelo, max_completion_tokens: 32, messages: msg },
       };
     case "openrouter":
       return {
