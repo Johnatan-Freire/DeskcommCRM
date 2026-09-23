@@ -25303,6 +25303,16 @@ grant select on public.calendar_selected_external_events to authenticated, servi
 
 notify pgrst, 'reload schema';
 
+-- ---- título residual do compromisso pessoal do Google deixa de existir (migration 0388) ----
+--
+-- A 0261 (acima) fechou a LEITURA por login; o escritor grava `title=null`
+-- desde a 0225. O que sobrou: linhas sincronizadas por versões anteriores à
+-- v1.17.0 ainda têm o valor real como DADO na coluna — a 0261 deixou isso
+-- aberto por escrito, como decisão própria. Minimização de dado (DIRC): sem
+-- consumidor, não guarda. Idempotente — segunda aplicação não casa linha.
+update public.calendar_external_events
+   set title = null
+ where title is not null;
 
 -- ---- cliente pela agenda (migration 0262) ----
 --
