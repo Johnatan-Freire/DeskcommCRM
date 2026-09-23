@@ -1,5 +1,6 @@
 "use client";
 import { useCallback, useMemo, useState } from "react";
+import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useT } from "@/hooks/i18n/useT";
 import { useBoard } from "@/hooks/kanban/useBoard";
@@ -25,7 +26,7 @@ import { FilterBar } from "@/components/kanban/FilterBar";
 import { BulkActionBar } from "@/components/kanban/BulkActionBar";
 import { NewLeadDialog } from "@/components/kanban/NewLeadDialog";
 import { Button } from "@/components/ui/button";
-import { Plus } from "@/lib/ui/icons";
+import { CaretLeft, Plus } from "@/lib/ui/icons";
 import type { LeadFilters } from "@/lib/kanban/filters";
 import { applyFilters, filtersFromParams, filtersToParams } from "@/lib/kanban/filters";
 
@@ -92,9 +93,22 @@ export function PipelinePageClient({
           fora da viewport em telas estreitas. De `sm:` pra cima volta a ser
           uma linha só, como sempre foi. */}
       <header className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <h1 className="min-w-0 truncate text-2xl font-semibold tracking-tight">
-          {data?.pipeline.name ?? initialName}
-        </h1>
+        <div className="flex min-w-0 items-center gap-3">
+          {/* Sem isto, quem abre um board direto (link salvo, deep link) não
+              descobre que dá pra criar/renomear/arquivar outros funis — a
+              lista "Funis" (/app/kanban) fica sem porta de saída visível. */}
+          <Link
+            href="/app/kanban"
+            data-testid="pipeline-voltar-funis"
+            className="flex shrink-0 items-center gap-1 text-sm text-text-muted hover:text-accent"
+          >
+            <CaretLeft size={16} /> {t("Funis")}
+          </Link>
+          <span className="shrink-0 text-border">/</span>
+          <h1 className="min-w-0 truncate text-2xl font-semibold tracking-tight">
+            {data?.pipeline.name ?? initialName}
+          </h1>
+        </div>
         <Button onClick={() => setNewOpen(true)} disabled={!data} className="shrink-0">
           <Plus size={16} className="mr-2" /> {t("Novo Lead")}
         </Button>
