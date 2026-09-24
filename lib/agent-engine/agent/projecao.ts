@@ -54,7 +54,14 @@ export function turnoProjeta(toolNamesDoCatalogo: readonly string[]): boolean {
 
 /** Uma mensagem como o Conversador a lê — sem endereço interno de nada. */
 export interface MensagemProjetada {
-  de: 'cliente' | 'nós';
+  // 'atendente' é um humano da equipe digitando pelo celular — DIFERENTE de
+  // 'nós' (o próprio agente). Sem separar os dois, uma mensagem pessoal que
+  // um humano mandou no meio da conversa chega ao modelo como se ELE MESMO
+  // tivesse dito aquilo, e "eu já disse algo estranho" pesa mais que
+  // qualquer instrução de prompt — caso real: o dono respondeu "Te amo"
+  // manualmente numa conversa de teste, e o agente passou pra humano sozinho,
+  // turno após turno, achando que tinha sido ele.
+  de: 'cliente' | 'nós' | 'atendente';
   texto: string;
   quando: string;
   /** marcador legível quando houve mídia ("[imagem]"); nunca o caminho dela. */
@@ -100,8 +107,11 @@ export function projetarContexto(ctx: LeadContext): ContextoProjetado {
     mensagens: ctx.messages.map((m) => {
       const base: MensagemProjetada = {
         // 'inbound'/'outbound' é vocabulário de sistema e já apareceu parafraseado
-        // em resposta de modelo. Quem fala com uma pessoa pensa "ela disse" / "eu disse".
-        de: m.direction === 'inbound' ? 'cliente' : 'nós',
+        // em resposta de modelo. Quem fala com uma pessoa pensa "ela disse" / "eu disse"
+        // — mas só quando "eu" é de verdade o agente. sender_kind distingue: um
+        // humano que respondeu manualmente pelo celular não é "nós" do ponto de
+        // vista do modelo, é um terceiro que também atende esse número.
+        de: m.direction === 'inbound' ? 'cliente' : m.sender_kind === 'human_agent' ? 'atendente' : 'nós',
         // O corpo passa INTACTO — e isto é decisão, não omissão. A tradução de
         // erro é calibrada para texto que o SISTEMA produziu; aplicá-la à fala
         // reescreveria o cliente. "Meu site tem um webhook quebrado" é frase

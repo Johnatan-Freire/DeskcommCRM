@@ -38,6 +38,17 @@ export interface LeadContextKnobs {
 /** Uma mensagem do histórico, já curada. */
 export interface LeadContextMessage {
   direction: 'inbound' | 'outbound';
+  /**
+   * QUEM mandou o lado outbound — `undefined` em inbound (não se aplica).
+   * Sem isto, uma mensagem que um atendente digitou manualmente do celular
+   * chega ao modelo indistinguível de algo que ELE MESMO teria dito antes:
+   * caso real desta VPS, o dono respondeu pessoalmente "Te amo" numa
+   * conversa de teste, e o agente — lendo isso como fala própria — decidiu
+   * sozinho passar o atendimento pra um humano, turno após turno, porque
+   * "eu já disse algo estranho aqui" é sinal forte demais pra qualquer
+   * instrução de prompt sobrepor.
+   */
+  sender_kind?: 'ai' | 'human_agent';
   /** Corpo textual; mídia usa o derivado (transcrição/visão/pdf) ou marcador [tipo]. */
   body: string;
   /**
@@ -174,6 +185,7 @@ interface HistoryRow {
   media_mime: string | null;
   media_derived_text: string | null;
   sent_at: Date;
+  sent_via: string | null;
 }
 
 export async function getLeadContext(
@@ -231,7 +243,7 @@ export async function getLeadContext(
     ? (
         await db.query<HistoryRow>(
           `select direction, type, body, media_url, media_storage_path, media_mime,
-                  media_derived_text, sent_at
+                  media_derived_text, sent_at, sent_via
            from messages
            where organization_id = $1 and conversation_id = $2
              and direction in ('inbound', 'outbound')
@@ -353,6 +365,13 @@ function fitToBudget(
     const body = corpoDaMensagem(m);
     return {
       direction: m.direction,
+      // inbound não tem sender_kind (é sempre o lead); outbound é 'ai' só
+      // quando o próprio agente mandou — qualquer outro valor de sent_via
+      // (external_device, crm, user, automation, system) foi um humano/outro
+      // emissor, não o modelo.
+      ...(m.direction === 'outbound'
+        ? { sender_kind: m.sent_via === 'ai' ? ('ai' as const) : ('human_agent' as const) }
+        : {}),
       body,
       // Hora de PAREDE do tenant, não UTC cru — ver o comentário de `sent_at` na
       // interface acima e o cabeçalho de `isoLocalComOffset`.

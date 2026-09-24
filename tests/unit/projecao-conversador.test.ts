@@ -123,6 +123,34 @@ describe("projeção — o que o Conversador pode ver", () => {
       expect(JSON.stringify(p)).not.toContain("inbound");
     });
 
+    it("outbound com sender_kind 'human_agent' vira 'atendente', não 'nós' — não é o modelo falando", () => {
+      // F: sem esta distinção, uma mensagem que um humano digitou manualmente
+      // pelo celular chega ao modelo como se ELE MESMO tivesse dito aquilo —
+      // caso real: o dono respondeu "Te amo" numa conversa de teste, e o
+      // agente, lendo isso como fala própria, passou o atendimento pra um
+      // humano sozinho, turno após turno.
+      const comHumano: LeadContext = {
+        ...cru,
+        messages: [
+          { direction: "inbound", body: "oi, quero remarcar", sent_at: "2026-08-05T10:00:00Z" },
+          {
+            direction: "outbound",
+            body: "Te amo",
+            sent_at: "2026-08-05T10:01:00Z",
+            sender_kind: "human_agent",
+          },
+          {
+            direction: "outbound",
+            body: "claro, vamos remarcar!",
+            sent_at: "2026-08-05T10:02:00Z",
+            sender_kind: "ai",
+          },
+        ],
+      };
+      const p = projetarContexto(comHumano);
+      expect(p.mensagens.map((m) => m.de)).toEqual(["cliente", "atendente", "nós"]);
+    });
+
     it("is_blocked não vaza — quando é true o turno nem chega ao modelo", () => {
       expect(JSON.stringify(projetarContexto(cru))).not.toContain("is_blocked");
     });
