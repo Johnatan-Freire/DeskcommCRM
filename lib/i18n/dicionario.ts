@@ -1166,6 +1166,16 @@ export const DICIONARIO: Traducoes = {
   "Buscar telas": { es: "Buscar pantallas" },
   "Buscar telas do sistema…": { es: "Buscar pantallas del sistema…" },
   Telas: { es: "Pantallas" },
+  "Buscar por nome, objetivo ou função (ex: leads, agenda, prompt, whatsapp)...": {
+    es: "Buscar por nombre, objetivo o función (ej.: leads, agenda, prompt, whatsapp)...",
+  },
+  "Tente buscar por outro termo ou selecione 'Todas' nas categorias.": {
+    es: "Prueba con otro término o selecciona 'Todas' en las categorías.",
+  },
+  ferramenta: { es: "herramienta" },
+  ferramentas: { es: "herramientas" },
+  "Use as setas ↑↓ e Enter para navegar": { es: "Usa las flechas ↑↓ y Enter para navegar" },
+  "ESC para fechar": { es: "ESC para cerrar" },
   // O gatilho da busca no topo mostra RETICENCIA ASCII desde antes do i18n
   // (`Buscar...`). A chave e o byte que a tela ja mostrava: trocar por "…"
   // aqui mudaria a tela de quem usa em portugues — que e o unico jeito de
