@@ -1070,6 +1070,7 @@ jobs:
         marca-logo.spec.ts
         suporte-temporario.spec.ts
         olhar-telas-do-epico.spec.ts
+        buffer-ssr-caixa-orfa.spec.ts
 
       # ─── FORA_DO_CI — as duas que ficaram, e o motivo continua onde sempre ───
       #
