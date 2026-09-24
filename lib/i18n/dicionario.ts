@@ -6904,6 +6904,8 @@ export const DICIONARIO: Traducoes = {
     es: "Esta acción no se puede deshacer: el embudo y sus etapas desaparecen. Si ya recibió negocios, no se puede eliminar y sigue archivado.",
   },
   "Novo Lead": { es: "Nuevo Lead" },
+  "Rolar estágios para a esquerda": { es: "Desplazar etapas hacia la izquierda" },
+  "Rolar estágios para a direita": { es: "Desplazar etapas hacia la derecha" },
   "Não consegui carregar este funil:": { es: "No pude cargar este embudo:" },
   "sem responsável.": { es: "sin responsable." },
   "atribuído.": { es: "asignado." },
