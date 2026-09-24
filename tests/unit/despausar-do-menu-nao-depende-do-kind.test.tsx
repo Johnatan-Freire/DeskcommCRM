@@ -46,6 +46,7 @@
  * código como defesa, e o menu do arquivado (que mostra "Pausar") continua
  * bloqueado, é o que o caso CONTROLE mede.
  */
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -113,10 +114,13 @@ function estaBloqueado(item: HTMLElement): boolean {
 
 async function abrirMenu(over: Partial<AgentRow>) {
   const user = userEvent.setup();
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
-    <IdiomaProvider locale="pt-BR">
-      <AgentRowMenu agent={{ ...AGENTE, ...over } as AgentRow} />
-    </IdiomaProvider>,
+    <QueryClientProvider client={client}>
+      <IdiomaProvider locale="pt-BR">
+        <AgentRowMenu agent={{ ...AGENTE, ...over } as AgentRow} />
+      </IdiomaProvider>
+    </QueryClientProvider>,
   );
   await user.click(screen.getByRole("button", { name: "Menu de ações" }));
   return user;
