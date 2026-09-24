@@ -20,6 +20,7 @@ import { evaluateConditions, type RuleCondition } from "@/lib/automation/conditi
 import { getAction } from "@/lib/automation/actions";
 import type { ActionResultDetail } from "@/lib/automation/types";
 import { audit } from "@/lib/audit";
+import { mensagemAnteriorAConexao } from "@/lib/channels/corte-de-conexao";
 import { regraDoEvento } from "@/lib/automation/gatilho-de-data-do-funil";
 import { ENTIDADE_ESPERADA_POR_GATILHO } from "@/lib/schemas/webhooks";
 import { logger } from "@/lib/logger";
@@ -165,8 +166,21 @@ export async function runAutomationForEvent(
 
   const expectedKind = EXPECTED_ENTITY_KIND[row.event_type];
   if (expectedKind && row.entity_kind !== expectedKind) {
-  
+
     return { consumer_key: AUTOMATION_CONSUMER_KEY, status: "skipped", detail: "entity_kind_mismatch" };
+  }
+
+  // Corte de conexão (migration 0398): WAHA/NOWEB sincroniza histórico do
+  // WhatsApp ao parear um número novo, e o mesmo `message.received` que uma
+  // mensagem nova emite também nasce de uma mensagem sincronizada de dias ou
+  // semanas atrás. Uma regra do usuário com gatilho `message.received` (ex.:
+  // "responder automaticamente quem escreve") não pode disparar sobre
+  // histórico — ver `lib/channels/corte-de-conexao.ts`.
+  if (row.event_type === "message.received") {
+    const messageId = (row.payload?.["message_id"] as string | undefined) ?? row.entity_id ?? null;
+    if (await mensagemAnteriorAConexao(admin, row.organization_id, messageId)) {
+      return { consumer_key: AUTOMATION_CONSUMER_KEY, status: "skipped", detail: "message_before_connection" };
+    }
   }
 
   const { data: rules, error } = await admin

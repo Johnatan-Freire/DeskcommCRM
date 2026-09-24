@@ -58,6 +58,7 @@ import type { EnrollmentPatch } from "./engine";
 import { triggerConfigSchema } from "./api-schemas";
 import type { EnrollmentOutcome, EnrollmentStatus } from "./node-handlers";
 import { idsDoContatoEGemeos } from "@/lib/channels/contato-por-telefone";
+import { mensagemAnteriorAConexao as mensagemAnteriorAConexaoDb } from "@/lib/channels/corte-de-conexao";
 
 /** Grace pós-resume (spec §4: "grace configurável, default 30min, knob"). */
 export const RESUME_GRACE_MS = 30 * 60_000;
@@ -124,6 +125,14 @@ export interface ReactivityAdminClient {
     idempotency_key: string;
   }): Promise<{ inserted: boolean }>;
   updateEnrollment(id: string, orgId: string, patch: EnrollmentPatch): Promise<void>;
+  /**
+   * Corte de conexão (migration 0398): `true` quando a mensagem já foi
+   * sincronizada pelo WAHA de ANTES de a sessão conectar — ver
+   * `lib/channels/corte-de-conexao.ts`. `messageId` ausente devolve `false`
+   * (não é o que este guard existe para vetar — o guard de idempotência do
+   * dispatcher já cobre evento sem entidade resolvível).
+   */
+  mensagemAnteriorAConexao(orgId: string, messageId: string | null): Promise<boolean>;
   /**
    * O relógio do BANCO (`fn_agora()`, migration 0147).
    *
@@ -303,6 +312,15 @@ async function acordarPorInbound(
   // kick sintético ainda precisa acordar a espera que já existia.
   const enviadaEm = strOrNull(row.payload.sent_at) ?? row.created_at ?? null;
   if (enviadaEm && e.updated_at && !inboundEhDestaPergunta(enviadaEm, e.updated_at)) {
+    return false;
+  }
+  // Corte de conexão (migration 0398): mensagem sincronizada pelo WAHA de
+  // ANTES do pareamento não é a resposta do lead — acordar o enrollment por
+  // causa dela reabriria uma campanha esperando algo que nunca aconteceu
+  // "agora". `cancel_on_reply` (o outro ramo do chamador) continua correndo
+  // normalmente: cancelar é sempre seguro, nunca envia nada.
+  const messageId = strOrNull(row.payload.message_id) ?? row.entity_id;
+  if (messageId && (await db.mensagemAnteriorAConexao(row.organization_id, messageId))) {
     return false;
   }
   const wakeKey = `${e.current_node_id}:${e.steps_taken}:wake`;
@@ -510,6 +528,9 @@ export function createSupabaseReactivityClient(admin: SupabaseClient): Reactivit
     async updateEnrollment(id, orgId, patch) {
       const { error } = await admin.from("followup_enrollments").update(patch).eq("id", id).eq("organization_id", orgId);
       if (error) throw new Error(error.message);
+    },
+    async mensagemAnteriorAConexao(orgId, messageId) {
+      return mensagemAnteriorAConexaoDb(admin, orgId, messageId);
     },
     async agoraNoBanco() {
       const { data, error } = await admin.rpc("fn_agora" as never);

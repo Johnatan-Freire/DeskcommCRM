@@ -707,7 +707,7 @@ async function buildContext(input: BuildContextInput): Promise<GuardDecision> {
   // Inbound message body (the trigger payload doesn't carry it).
   const { data: msg, error: msgErr } = await admin
     .from("messages")
-    .select("id, body, direction, organization_id")
+    .select("id, body, direction, organization_id, sent_at")
     .eq("id", input.messageId)
     .eq("organization_id", input.organizationId)
     .maybeSingle();
@@ -716,6 +716,25 @@ async function buildContext(input: BuildContextInput): Promise<GuardDecision> {
   if (msg.direction !== "inbound") return skip("duplicate_outbound");
   const inbound_body = (msg.body ?? "").trim();
   if (!inbound_body) return skip("empty_inbound_body");
+
+  // Corte de conexão (migration 0398) — mesma trava do lado do engine em
+  // `lib/agent-engine/edge/crm/drain.ts`: WAHA/NOWEB sincroniza histórico do
+  // WhatsApp ao parear uma sessão nova, sem nada no payload que distinga
+  // mensagem nova de mensagem antiga. `sent_at` é o horário REAL do WhatsApp;
+  // `first_connected_at` NULL (sessão que já estava WORKING antes desta
+  // migration) não corta nada, de propósito — ver o comentário na migration.
+  const { data: sessao } = await admin
+    .from("channel_sessions")
+    .select("first_connected_at")
+    .eq("organization_id", input.organizationId)
+    .eq("id", c.channel_session_id)
+    .maybeSingle();
+  if (
+    sessao?.first_connected_at &&
+    new Date(msg.sent_at).getTime() < new Date(sessao.first_connected_at).getTime()
+  ) {
+    return skip("message_before_connection");
+  }
 
   // O agente legado desta organização.
   //

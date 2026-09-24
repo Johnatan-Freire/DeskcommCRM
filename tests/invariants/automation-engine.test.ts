@@ -357,4 +357,69 @@ describe("runAutomationForEvent — motor de regras (Task 8)", () => {
     expect(result).toEqual({ consumer_key: AUTOMATION_CONSUMER_KEY, status: "skipped", detail: "entity_kind_mismatch" });
     expect(runsCount()).toBe(before);
   });
+
+  describe("corte de conexão (migration 0398)", () => {
+    const SESSION_HIST = "dddddddd-2222-4000-8000-000000000001";
+    const CONTACT_HIST = "dddddddd-3333-4000-8000-000000000001";
+    const CONV_HIST = "dddddddd-4444-4000-8000-000000000001";
+    const MSG_ANTIGA = "dddddddd-5555-4000-8000-000000000001";
+    const MSG_NOVA = "dddddddd-5555-4000-8000-000000000002";
+    const R7 = "dddddddd-1111-4000-8000-000000000007";
+    const CONECTOU_EM = "2026-09-21T10:00:00Z";
+
+    beforeAll(() => {
+      sql(`
+        -- DO + exception (não ON CONFLICT): channel_sessions tem unique
+        -- DEFERRABLE (phone_per_org), que ON CONFLICT sem arbiter rejeita —
+        -- mesma razão documentada em seedGov() (gov-helpers.ts).
+        do $r7$ begin
+          insert into public.channel_sessions (id, organization_id, waha_session_name, webhook_secret_encrypted, first_connected_at)
+            values ('${SESSION_HIST}', '${GOV_ORG}', 'gov-inv-t8-r7', '\\x00'::bytea, '${CONECTOU_EM}');
+        exception when unique_violation then null; end $r7$;
+        insert into public.contacts (id, organization_id, display_name)
+          values ('${CONTACT_HIST}', '${GOV_ORG}', 'Gov Invariant Contact R7')
+          on conflict do nothing;
+        insert into public.conversations (id, organization_id, contact_id, channel_session_id, status)
+          values ('${CONV_HIST}', '${GOV_ORG}', '${CONTACT_HIST}', '${SESSION_HIST}', 'open')
+          on conflict do nothing;
+        -- messages tem messages_org_external_id_unique DEFERRABLE — ON
+        -- CONFLICT sem arbiter também rejeita aqui (mesma razão do channel_sessions
+        -- acima); "on conflict (id)" mira a PK, que não é deferrable.
+        insert into public.messages (id, organization_id, conversation_id, channel_session_id, contact_id, type, direction, status, body, sent_via, sent_at)
+          values ('${MSG_ANTIGA}', '${GOV_ORG}', '${CONV_HIST}', '${SESSION_HIST}', '${CONTACT_HIST}', 'text', 'inbound', 'delivered', 'mensagem antiga', 'external_device', '2026-09-01T10:00:00Z')
+          on conflict (id) do nothing;
+        insert into public.messages (id, organization_id, conversation_id, channel_session_id, contact_id, type, direction, status, body, sent_via, sent_at)
+          values ('${MSG_NOVA}', '${GOV_ORG}', '${CONV_HIST}', '${SESSION_HIST}', '${CONTACT_HIST}', 'text', 'inbound', 'delivered', 'mensagem nova', 'external_device', '2026-09-21T12:00:00Z')
+          on conflict (id) do nothing;
+        insert into public.automation_rules (id, organization_id, name, trigger_event, conditions, actions, is_active)
+          values ('${R7}', '${GOV_ORG}', 'R7', 'message.received', '[]'::jsonb, '[{"type":"fake_ok"}]'::jsonb, true)
+          on conflict do nothing;
+      `);
+    });
+
+    it("mensagem sincronizada de ANTES da conexão: skip 'message_before_connection', zero runs de R7", async () => {
+      const before = runsCount();
+      const eventId = emitRealEvent("message.received", "message", MSG_ANTIGA);
+      const row = baseRow({ id: eventId, event_type: "message.received", entity_kind: "message", entity_id: MSG_ANTIGA });
+
+      const result = await runAutomationForEvent(fakeAdminClient(), row);
+      expect(result).toEqual({
+        consumer_key: AUTOMATION_CONSUMER_KEY,
+        status: "skipped",
+        detail: "message_before_connection",
+      });
+      expect(runsCount()).toBe(before);
+      expect(runsForRule(R7).length).toBe(0);
+    });
+
+    it("mensagem DEPOIS da conexão: o corte não veta, R7 roda normalmente", async () => {
+      const eventId = emitRealEvent("message.received", "message", MSG_NOVA);
+      const row = baseRow({ id: eventId, event_type: "message.received", entity_kind: "message", entity_id: MSG_NOVA });
+
+      const result = await runAutomationForEvent(fakeAdminClient(), row);
+      expect(result).toEqual({ consumer_key: AUTOMATION_CONSUMER_KEY, status: "ok" });
+      expect(runsForRule(R7).length).toBe(1);
+      expect(runsForRule(R7)[0]!.status).toBe("success");
+    });
+  });
 });

@@ -24,6 +24,7 @@ import { DEFAULT_CLASSIFIER_MODEL, isAiGatewayConfigured } from "@/lib/ai/gatewa
 import { resolverModeloDoPonto } from "@/lib/ai/gateway-binding";
 import { logInvocation } from "@/lib/ai/log-invocation";
 import { SENTIMENT_SYSTEM_PROMPT } from "@/lib/ai/prompts/sentiment";
+import { mensagemAnteriorAConexao } from "@/lib/channels/corte-de-conexao";
 import type { EventRow } from "@/lib/event-log/dispatcher";
 import { createAdminClient } from "@/lib/supabase/admin";
 
@@ -118,6 +119,18 @@ export async function processSentiment(event: EventRow): Promise<SentimentResult
     const body = (message.body ?? "").trim();
     if (!body) {
       return { skipped: true, reason: "empty_body" };
+    }
+
+    // ── Corte de conexão (migration 0398) ──────────────────────────────────
+    // Mensagem sincronizada pelo WAHA de ANTES do pareamento não pode virar
+    // `ai.sentiment_alert` — esse evento dispara handoff automático
+    // (`workers/ai-handoff-from-sentiment.handler.ts`), que AVISA O LEAD por
+    // WhatsApp (`lib/ai/handoff/aviso-ao-lead.ts`) sem depender de agente
+    // publicado. Sem este corte, uma reclamação de meses atrás classificada
+    // como sentimento negativo mandaria "um atendente vai assumir a
+    // conversa" para um contato que não escreveu nada agora.
+    if (await mensagemAnteriorAConexao(admin, event.organization_id, messageId)) {
+      return { skipped: true, reason: "message_before_connection" };
     }
 
     // ── Guard: elegibilidade da IA ────────────────────────────────────────

@@ -72,7 +72,14 @@ export type SkipReason =
    * fail-closed, porque schema pela metade é exatamente quando não se quer a IA
    * solta.
    */
-  | "nao_elegivel_para_ia";
+  | "nao_elegivel_para_ia"
+  /**
+   * `messages.sent_at` (horário REAL do WhatsApp) é anterior a
+   * `channel_sessions.first_connected_at` — mensagem sincronizada pelo WAHA no
+   * pareamento, não turno de atendimento. Migration 0398; mesma trava do lado
+   * do engine em `lib/agent-engine/edge/crm/drain.ts`.
+   */
+  | "message_before_connection";
 
 export interface BotContext {
   serviceBoundary?: ServiceBoundary;

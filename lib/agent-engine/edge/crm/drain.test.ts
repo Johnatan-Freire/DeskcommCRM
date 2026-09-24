@@ -356,3 +356,87 @@ it("anti-backlog: ordena a última inbound por coalesce(sent_at, created_at), n�
   expect(consultaUltima).toContain('coalesce(sent_at, created_at) desc');
   expect(consultaUltima).not.toContain('nulls last');
 });
+
+/**
+ * Corte de conexão (migration 0398): WAHA/NOWEB sincroniza histórico do
+ * WhatsApp ao parear uma sessão nova, e o mesmo webhook que entrega mensagem
+ * NOVA entrega a ANTIGA também. `channel_sessions.first_connected_at` é o
+ * corte; mensagem com `sent_at` (horário REAL do WhatsApp) anterior a ele
+ * NUNCA pode virar turno — exigência do dono do produto antes de conectar um
+ * cliente real, para não responder pergunta de semanas atrás com o texto de
+ * hoje.
+ */
+function poolComCorte(
+  msgRow: {
+    type: string;
+    media_derived_status: string | null;
+    sent_at?: string;
+    first_connected_at?: string | null;
+  },
+  calls: string[],
+) {
+  const query = vi.fn().mockImplementation((sql: string) => {
+    calls.push(sql);
+    if (sql.includes('returning e.id')) return { rows: [event] };
+    if (sql.includes('ai_dispatch_mode')) return { rows: [{ mode: null }] };
+    if (sql.includes('is_group')) return { rows: [{ is_group: false }] };
+    if (sql.includes('tem_agente')) return { rows: [{ tem_agente: true, tem_roteador: false }] };
+    if (sql.includes('media_derived_status')) return { rows: [msgRow] };
+    return { rows: [] };
+  });
+  return { query } as unknown as pg.Pool;
+}
+
+const CONECTOU_EM = '2026-09-21T10:00:00.000Z';
+
+it('mensagem anterior à conexão (histórico sincronizado pelo WAHA): turno NÃO é enfileirado', async () => {
+  const calls: string[] = [];
+  await drainTick(
+    poolComCorte(
+      {
+        type: 'text',
+        media_derived_status: null,
+        sent_at: '2026-09-01T10:00:00.000Z', // 20 dias antes de conectar
+        first_connected_at: CONECTOU_EM,
+      },
+      calls,
+    ),
+    knobs, log,
+  );
+  expect(calls.some((s) => s.includes('job_queue'))).toBe(false);
+  expect(calls.some((s) => s.includes("status = 'done'"))).toBe(true);
+});
+
+it('mensagem posterior à conexão: turno segue normalmente', async () => {
+  const calls: string[] = [];
+  await drainTick(
+    poolComCorte(
+      {
+        type: 'text',
+        media_derived_status: null,
+        sent_at: '2026-09-21T12:00:00.000Z', // 2h depois de conectar
+        first_connected_at: CONECTOU_EM,
+      },
+      calls,
+    ),
+    knobs, log,
+  );
+  expect(calls.some((s) => s.includes('job_queue'))).toBe(true);
+});
+
+it('sessão sem first_connected_at (já conectada antes da migration 0398): nenhum corte, comportamento de sempre', async () => {
+  const calls: string[] = [];
+  await drainTick(
+    poolComCorte(
+      {
+        type: 'text',
+        media_derived_status: null,
+        sent_at: '2020-01-01T00:00:00.000Z', // bem antigo, mas sem corte para comparar
+        first_connected_at: null,
+      },
+      calls,
+    ),
+    knobs, log,
+  );
+  expect(calls.some((s) => s.includes('job_queue'))).toBe(true);
+});

@@ -6,6 +6,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { idsDoContatoEGemeos } from "@/lib/channels/contato-por-telefone";
+import { mensagemAnteriorAConexao } from "@/lib/channels/corte-de-conexao";
 
 import { enviarTextoFixoPendente } from "./enviar-texto-fixo";
 import {
@@ -57,7 +58,7 @@ export function inboundEhDestaPergunta(enviadaEm: string, esperaDesde: string): 
   return enviadaEm >= esperaDesde;
 }
 
-type InboundResolvido = { texto: string; enviadaEm: string | null };
+type InboundResolvido = { texto: string; enviadaEm: string | null; messageId: string | null };
 
 async function ultimoInboundDoContato(
   admin: SupabaseClient,
@@ -66,7 +67,7 @@ async function ultimoInboundDoContato(
 ): Promise<InboundResolvido> {
   const { data, error } = await admin
     .from("messages")
-    .select("body, sent_at")
+    .select("id, body, sent_at")
     .eq("organization_id", orgId)
     .in("contact_id", contactIds)
     .eq("direction", "inbound")
@@ -76,7 +77,8 @@ async function ultimoInboundDoContato(
   if (error) throw new Error(error.message);
   const texto = typeof data?.body === "string" ? data.body.trim() : "";
   const enviadaEm = typeof data?.sent_at === "string" ? data.sent_at : null;
-  return { texto, enviadaEm };
+  const messageId = typeof data?.id === "string" ? data.id : null;
+  return { texto, enviadaEm, messageId };
 }
 
 async function aplicarTextoAosEnrollmentsEmEspera(
@@ -145,7 +147,13 @@ export async function aplicarTextoNosFollowups(
   const ultimo = await ultimoInboundDoContato(admin, sinal.organizationId, contactIds);
   const texto = (sinal.texto?.trim() || ultimo.texto).trim();
   if (!texto) return;
-  const enviadaEm = ultimo.enviadaEm;
+  // Corte de conexão (migration 0398): mensagem sincronizada pelo WAHA de
+  // ANTES do pareamento não é "a resposta do lead" — tratá-la como
+  // `enviadaEm` ausente reusa o mesmo caminho fail-closed que
+  // `inboundEhDestaPergunta` já tem para quando o WAHA não manda timestamp
+  // (ver `aplicarTextoAosEnrollmentsEmEspera` abaixo).
+  const historica = await mensagemAnteriorAConexao(admin, sinal.organizationId, ultimo.messageId);
+  const enviadaEm = historica ? null : ultimo.enviadaEm;
   const deps = tickDepsDe(admin);
 
   // Apply dentro do loop (não numa 2ª passada cega): a mensagem que ENFILEIROU

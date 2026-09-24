@@ -409,20 +409,47 @@ async function processEvent(
     });
   }
 
+  const { rows: msgRows } = await pool.query<{
+    type: string;
+    media_derived_status: string | null;
+    sent_at: string;
+    first_connected_at: string | null;
+  }>(
+    `select m.type, m.media_derived_status, m.sent_at, cs.first_connected_at
+     from messages m
+     join channel_sessions cs on cs.id = m.channel_session_id
+     where m.organization_id = $1 and m.id = $2`,
+    [event.organization_id, p.inbound_message_id],
+  );
+  const msg = msgRows[0];
+
+  // Corte de conexão (migration 0398): WAHA/NOWEB sincroniza histórico do
+  // WhatsApp ao parear uma sessão nova, e o mesmo webhook que entrega mensagem
+  // NOVA entrega a ANTIGA também — sem nada no payload que distinga as duas.
+  // `first_connected_at` é gravado (uma vez, por trigger) no instante em que a
+  // sessão ficou WORKING pela PRIMEIRA vez; mensagem com `sent_at` (o horário
+  // REAL do WhatsApp) anterior a isso é histórico sincronizado, não turno de
+  // atendimento — o agente NUNCA pode responder por cima dela. NULL (sessão que
+  // já estava WORKING antes desta migration) não corta nada, de propósito: não
+  // dá para saber o instante real da conexão passada, e o comportamento de quem
+  // já atende hoje sem problema não pode mudar.
+  if (
+    msg !== undefined &&
+    msg.first_connected_at != null &&
+    new Date(msg.sent_at).getTime() < new Date(msg.first_connected_at).getTime()
+  ) {
+    log.info('drain: mensagem anterior à conexão do WhatsApp — turno pulado (sem gasto)', {
+      event_id: event.id,
+      channel_session_id: p.channel_session_id,
+    });
+    return 'processado';
+  }
+
   // Mídia ainda virando texto: ESPERAR. Sem isto o turno era despachado no mesmo
   // instante em que a mensagem chegava, enquanto o áudio ainda estava sendo
   // baixado e transcrito — e o cliente recebia "recebi seu áudio, mas não
   // consigo ouvi-lo" segundos ANTES de a transcrição ficar pronta. Medido nesta
   // VPS: dispatch às 20:24:22, derivação só pedida às 20:25:03.
-  const { rows: msgRows } = await pool.query<{
-    type: string;
-    media_derived_status: string | null;
-  }>(
-    `select type, media_derived_status from messages
-     where organization_id = $1 and id = $2`,
-    [event.organization_id, p.inbound_message_id],
-  );
-  const msg = msgRows[0];
   if (
     msg !== undefined &&
     TIPOS_DERIVAVEIS.has(msg.type) &&

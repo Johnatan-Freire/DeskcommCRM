@@ -118,6 +118,22 @@ function reactivityDb(): ReactivityAdminClient {
       const { rows } = await pool.query<{ agora: string }>(`select public.fn_agora() as agora`);
       return rows[0]!.agora;
     },
+    // Migration 0398: mesma régua de `lib/channels/corte-de-conexao.ts`
+    // (produção usa o helper via supabase-js; aqui é SQL direto contra o
+    // mesmo schema — não é lógica de negócio duplicada, é o mesmo join).
+    async mensagemAnteriorAConexao(orgId, messageId) {
+      if (!messageId) return false;
+      const { rows } = await pool.query<{ sent_at: string; first_connected_at: string | null }>(
+        `select m.sent_at, cs.first_connected_at
+         from messages m
+         join channel_sessions cs on cs.id = m.channel_session_id
+         where m.organization_id = $1 and m.id = $2`,
+        [orgId, messageId],
+      );
+      const row = rows[0];
+      if (!row || row.first_connected_at === null) return false;
+      return new Date(row.sent_at).getTime() < new Date(row.first_connected_at).getTime();
+    },
   };
 }
 
@@ -687,6 +703,139 @@ describe("applyReactivityEvent — inbound wake (waiting_reply, sem cancel_on_re
     const after = await getEnrollment(enrollmentId);
     expect(after.status).toBe("waiting_reply");
     expect(after.outcome).toBeNull();
+  });
+});
+
+// ---- corte de conexão (migration 0398): mensagem histórica não acorda enrollment ----
+
+describe("applyReactivityEvent — corte de conexão (migration 0398)", () => {
+  async function seedSessionConectada(org: string, firstConnectedAt: string | null): Promise<string> {
+    // status='WORKING' dispara `trg_channel_sessions_primeira_conexao`
+    // (migration 0398), que grava `coalesce(first_connected_at, now())` — ou
+    // seja, SEMPRE preenche a coluna quando o status é WORKING. Para simular
+    // uma sessão LEGADA (já conectada antes da 0398, coluna NULL de verdade),
+    // o status tem que ser outro — o guard só olha `first_connected_at`, nunca
+    // `status`, então isso não afeta o que o teste mede.
+    const status = firstConnectedAt === null ? "STARTING" : "WORKING";
+    const { rows } = await pool.query<{ id: string }>(
+      `insert into channel_sessions (organization_id, waha_session_name, status, webhook_secret_encrypted, first_connected_at)
+       values ($1, $2, $3, '\\x00'::bytea, $4) returning id`,
+      [org, `reactivity-corte-${Date.now()}-${Math.random()}`, status, firstConnectedAt],
+    );
+    return rows[0]!.id;
+  }
+
+  async function seedConversationEmSessao(org: string, contactId: string, sessionId: string): Promise<string> {
+    const { rows } = await pool.query<{ id: string }>(
+      `insert into conversations (organization_id, contact_id, channel_session_id, status, is_group)
+       values ($1, $2, $3, 'open', false) returning id`,
+      [org, contactId, sessionId],
+    );
+    return rows[0]!.id;
+  }
+
+  async function seedMensagem(params: {
+    org: string;
+    sessionId: string;
+    contactId: string;
+    conversationId: string;
+    sentAt: string;
+  }): Promise<string> {
+    const { rows } = await pool.query<{ id: string }>(
+      `insert into messages (organization_id, conversation_id, channel_session_id, contact_id, type, direction, status, body, sent_via, sent_at)
+       values ($1, $2, $3, $4, 'text', 'inbound', 'delivered', 'mensagem', 'external_device', $5)
+       returning id`,
+      [params.org, params.conversationId, params.sessionId, params.contactId, params.sentAt],
+    );
+    return rows[0]!.id;
+  }
+
+  it("mensagem sincronizada de ANTES da conexão: NÃO acorda o enrollment waiting_reply", async () => {
+    const org = nextOrgId();
+    await seedOrg(org);
+    const contactId = await seedContact(org);
+    const sessionId = await seedSessionConectada(org, "2026-09-21T10:00:00Z");
+    const conversationId = await seedConversationEmSessao(org, contactId, sessionId);
+    const { pointerId, versionId } = await seedFlow(org, CLASSIFY_GRAPH);
+    const enrollmentId = await seedEnrollment({ org, pointerId, versionId, contactId, currentNodeId: "ac1", status: "waiting_reply" });
+    const messageId = await seedMensagem({
+      org,
+      sessionId,
+      contactId,
+      conversationId,
+      sentAt: "2026-09-01T10:00:00Z", // 20 dias antes de conectar
+    });
+
+    const row = eventRow({
+      organization_id: org,
+      event_type: "message.received",
+      entity_id: messageId,
+      payload: { contact_id: contactId, message_id: messageId },
+    });
+    const summary = await applyReactivityEvent(reactivityDb(), () => new Date(), row);
+    expect(summary).toEqual({ matched: true, reacted: 0 });
+
+    const after = await getEnrollment(enrollmentId);
+    expect(after.status).toBe("waiting_reply"); // não acordou
+    expect(await getEvents(enrollmentId)).toHaveLength(0); // nenhum wake marker gravado
+  });
+
+  it("mensagem DEPOIS da conexão: o corte não veta, acorda normalmente", async () => {
+    const org = nextOrgId();
+    await seedOrg(org);
+    const contactId = await seedContact(org);
+    const sessionId = await seedSessionConectada(org, "2026-09-21T10:00:00Z");
+    const conversationId = await seedConversationEmSessao(org, contactId, sessionId);
+    const { pointerId, versionId } = await seedFlow(org, CLASSIFY_GRAPH);
+    const enrollmentId = await seedEnrollment({ org, pointerId, versionId, contactId, currentNodeId: "ac1", status: "waiting_reply" });
+    const messageId = await seedMensagem({
+      org,
+      sessionId,
+      contactId,
+      conversationId,
+      sentAt: "2026-09-21T12:00:00Z", // 2h depois de conectar
+    });
+
+    const row = eventRow({
+      organization_id: org,
+      event_type: "message.received",
+      entity_id: messageId,
+      payload: { contact_id: contactId, message_id: messageId },
+    });
+    const summary = await applyReactivityEvent(reactivityDb(), () => new Date(), row);
+    expect(summary).toEqual({ matched: true, reacted: 1 });
+
+    const after = await getEnrollment(enrollmentId);
+    expect(new Date(after.next_eval_at as string).getTime()).toBeLessThanOrEqual(Date.now() + 2_000);
+  });
+
+  it("sessão sem first_connected_at (já conectada antes da migration 0398): nenhum corte, acorda normalmente", async () => {
+    const org = nextOrgId();
+    await seedOrg(org);
+    const contactId = await seedContact(org);
+    const sessionId = await seedSessionConectada(org, null);
+    const conversationId = await seedConversationEmSessao(org, contactId, sessionId);
+    const { pointerId, versionId } = await seedFlow(org, CLASSIFY_GRAPH);
+    const enrollmentId = await seedEnrollment({ org, pointerId, versionId, contactId, currentNodeId: "ac1", status: "waiting_reply" });
+    const messageId = await seedMensagem({
+      org,
+      sessionId,
+      contactId,
+      conversationId,
+      sentAt: "2020-01-01T00:00:00Z", // bem antiga, mas sem corte para comparar
+    });
+
+    const row = eventRow({
+      organization_id: org,
+      event_type: "message.received",
+      entity_id: messageId,
+      payload: { contact_id: contactId, message_id: messageId },
+    });
+    const summary = await applyReactivityEvent(reactivityDb(), () => new Date(), row);
+    expect(summary).toEqual({ matched: true, reacted: 1 });
+
+    const after = await getEnrollment(enrollmentId);
+    expect(new Date(after.next_eval_at as string).getTime()).toBeLessThanOrEqual(Date.now() + 2_000);
   });
 });
 
