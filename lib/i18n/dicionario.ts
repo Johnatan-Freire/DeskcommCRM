@@ -7386,6 +7386,12 @@ export const DICIONARIO: Traducoes = {
   "Quem atende (sem isto, não há horário para oferecer)": { es: "Quién atiende (sin esto, no hay horarios para ofrecer)" },
   "Definir depois": { es: "Definir después" },
   "Nenhum tipo de agendamento ainda. Crie o primeiro para que a Agenda tenha o que oferecer.": { es: "Todavía no hay tipos de cita. Crea el primero para que la Agenda tenga qué ofrecer." },
+  "Não consegui carregar os tipos de agendamento.": {
+    es: "No pude cargar los tipos de cita.",
+  },
+  "Isto é uma falha de leitura, não uma lista vazia — pode haver tipos cadastrados que não estão aparecendo. Recarregue a página; se continuar, avise quem cuida da instalação.": {
+    es: "Esto es un fallo de lectura, no una lista vacía — puede haber tipos registrados que no se están mostrando. Recarga la página; si continúa, avisa a quien cuida la instalación.",
+  },
   "sem responsável — não aparece para marcar": { es: "sin responsable — no aparece al agendar una cita" },
   "Duração": { es: "Duración" },
   "Quem atende": { es: "Quién atiende" },
