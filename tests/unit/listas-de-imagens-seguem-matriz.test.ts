@@ -6,7 +6,6 @@ import { describe, expect, it } from "vitest";
 const RAIZ = process.cwd();
 const publish = readFileSync(join(RAIZ, ".github/workflows/publish-image.yml"), "utf8");
 const common = readFileSync(join(RAIZ, "hostgator-setup-kit/_common.sh"), "utf8");
-const tagSoNasceDaMain = readFileSync(join(RAIZ, "tests/unit/tag-so-nasce-da-main.test.ts"), "utf8");
 const packaging = readFileSync(join(RAIZ, "tests/unit/packaging-artefato-do-cliente.test.ts"), "utf8");
 
 function job(yml: string, nome: string): string {
@@ -47,11 +46,6 @@ function imagensDoKit(): string[] {
   return palavrasDaLista(lista);
 }
 
-function imagensDoTesteDaTag(): string[] {
-  const lista = /for\s*\(const\s+img\s+of\s+\[([^\]]+)\]\)/.exec(tagSoNasceDaMain)?.[1] ?? "";
-  return stringsDoArray(lista);
-}
-
 function imagensDoTesteDePackaging(): string[] {
   const lista = /for\s*\(const\s+imagem\s+of\s+\[([^\]]+)\]\)/.exec(packaging)?.[1] ?? "";
   return stringsDoArray(lista);
@@ -73,12 +67,12 @@ describe("listas de imagens Docker seguem a matriz de publicação", () => {
     ).toEqual(IMAGENS);
   });
 
-  it("a guarda de criação de tag usa exatamente as imagens publicadas", () => {
-    expect(
-      imagensDoTesteDaTag(),
-      "tag-so-nasce-da-main ficou com uma cópia diferente da matriz de imagens",
-    ).toEqual(IMAGENS);
-  });
+  // "a guarda de criação de tag usa exatamente as imagens publicadas" foi
+  // removido deste fork: a lista que ela comparava vivia dentro do job
+  // `release.yml::cortar-tag`, removido (exige GitHub App que este fork não
+  // tem — ver o cabeçalho de `release.yml` e de `tag-so-nasce-da-main.test.ts`).
+  // Sem o job, `tag-so-nasce-da-main.test.ts` não tem lista de imagens
+  // nenhuma para divergir da matriz.
 
   it("a guarda do artefato do cliente usa exatamente as imagens publicadas", () => {
     expect(

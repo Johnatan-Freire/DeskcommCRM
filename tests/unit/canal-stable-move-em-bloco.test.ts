@@ -46,7 +46,6 @@ import { describe, expect, it } from "vitest";
  */
 const RAIZ = process.cwd();
 const publish = readFileSync(join(RAIZ, ".github/workflows/publish-image.yml"), "utf8");
-const release = readFileSync(join(RAIZ, ".github/workflows/release.yml"), "utf8");
 
 /**
  * O corpo de um job, do cabeçalho até o próximo job.
@@ -173,27 +172,10 @@ describe("o canal `stable` move em bloco", () => {
   });
 });
 
-describe("o corte da release confere o CANAL, não só a existência da versão", () => {
-  it("os dois laços da release cobrem exatamente as imagens da matriz", () => {
-    const lacos = imagensDosLacos(corpo(release, "cortar-tag"));
-    expect(
-      lacos,
-      "cortar-tag deve ter dois `for img in ...`: publicação da versão e conferência do stable",
-    ).toHaveLength(2);
-    for (const [i, imagens] of lacos.entries()) {
-      expect(
-        imagens,
-        `o laço de imagens #${i + 1} de cortar-tag divergiu da matriz build-and-push`,
-      ).toEqual(IMAGENS);
-    }
-  });
-
-  it("compara DIGEST — `stable` e a versão têm de ser o mesmo manifesto", () => {
-    const t = corpo(release, "cortar-tag");
-    expect(t, "a conferência não lê digest: `200` na tag `stable` é satisfeito desde a 1.11.0").toContain(
-      "docker-content-digest",
-    );
-    expect(t, "a conferência não olha o canal `stable`").toContain("stable");
-    expect(t).toMatch(/::error::/);
-  });
-});
+// O describe "o corte da release confere o CANAL" (job `release.yml::cortar-tag`)
+// foi removido deste fork: o job inteiro não existe aqui — exigia
+// RELEASE_APP_ID/RELEASE_APP_PRIVATE_KEY, GitHub App que este fork não tem
+// (ver o cabeçalho de `release.yml`). A garantia de FORMA que os testes acima
+// medem (build-and-push/promover-stable em publish-image.yml) continua
+// valendo — é só a conferência de EFEITO, que rodava dentro do cortar-tag
+// removido, que saiu junto.

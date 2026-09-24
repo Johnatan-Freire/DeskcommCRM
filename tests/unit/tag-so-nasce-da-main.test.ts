@@ -73,40 +73,12 @@ describe("a tag nasce no CI, e nunca do GITHUB_TOKEN", () => {
     expect(escritas, "escrita pelo GITHUB_TOKEN: quem escreve aqui tem que ser o App").toEqual([]);
   });
 
-  it("o corte da tag prova que as imagens saíram — a falha aqui é silenciosa por natureza", () => {
-    const t = job(release, "cortar-tag");
-    // A sonda prende o COMPORTAMENTO (consultar o manifesto no registro público),
-    // não o nome da função — que já mudou uma vez, quando a conferência passou a
-    // comparar digest em vez de código de status (issue #488).
-    expect(t, "o corte não consulta mais o registro").toMatch(/ghcr\.io\/v2\//);
-    for (const img of ["deskcommcrm", "deskcomm-worker", "deskcomm-scheduler", "deskcomm-voice-agent"]) {
-      expect(t, `a conferência não cobre ${img}`).toContain(img);
-    }
-    expect(t).toMatch(/::error::/);
-  });
-
-  it("a tag exige que o push tenha CONSUMIDO fragmentos, não só que haja versão nova no CHANGELOG", () => {
-    // Só a condição "o CHANGELOG anuncia versão sem tag" deixaria QUALQUER PR
-    // cortar a release: bastaria escrever `## [1.7.0]` à mão e a tag nasceria
-    // no merge dele, levando junto as três imagens e o canal `stable`.
-    // Medido em 2026-08-27: o PR #354 já trazia uma seção de versão escrita à
-    // mão. A segunda condição é a assinatura do corte: o commit REMOVEU
-    // fragmento — PR comum ACRESCENTA e nunca apaga.
-    const t = job(release, "cortar-tag");
-    // ⚠️ A assinatura MUDOU na migration desta guarda (issue #472): era "o
-    // diretório ficou vazio" (`antes>0 && depois==0`) e virou "este commit
-    // REMOVEU fragmento". A regra antiga recusava todo corte que corresse em
-    // paralelo com um merge comum — e merge comum é o estado normal de um repo
-    // vivo. Foi assim que a v1.11.1 nunca virou tag.
-    expect(t).toMatch(/git diff[^\n]*--diff-filter=D[^\n]*\.changes\//);
-    // O ramo que RECUSA precisa existir: zero removidos não é corte.
-    expect(t).toMatch(/removidos[^\n]*-eq 0/);
-    // E a condição que a guarda antiga NÃO tinha: só o App da release corta.
-    expect(t).toMatch(/deskcomm-release\[bot\]/);
-  });
-
-  it("a tag só é criada em push na main, nunca num dispatch de branch qualquer", () => {
-    expect(job(release, "cortar-tag")).toMatch(/if:\s*github\.event_name == 'push'/);
-    expect(release).toMatch(/push:\s*\n\s*branches:\s*\[main\]/);
-  });
+  // O job `cortar-tag` (corte automático de tag ao merge do PR de release,
+  // publicação da release, conferência de imagens/canal stable/vitrine da LP)
+  // foi removido deste fork: exigia RELEASE_APP_ID/RELEASE_APP_PRIVATE_KEY,
+  // que este fork não tem, e falhava em TODO push na main. Aqui o deploy é a
+  // cada merge, direto pela imagem `latest` (`.github/workflows/deploy.yml`)
+  // — ver o cabeçalho de `release.yml`. Os testes que vigiavam o conteúdo
+  // desse job saíram junto; os dois acima (token do App, sem escrita pelo
+  // GITHUB_TOKEN) continuam valendo para o job que restou.
 });

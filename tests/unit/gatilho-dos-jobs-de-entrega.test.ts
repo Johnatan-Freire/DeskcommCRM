@@ -65,20 +65,27 @@ const DIR = join(process.cwd(), ".github/workflows");
  */
 const GATILHO_ESPERADO: Record<string, { condicao: string | null; efeito: string }> = {
   // --- a cadeia que leva o conserto até a VPS ---------------------------------
+  // Exclusivo deste fork: sem `cortar-tag`/releases numeradas (ver acima), o
+  // deploy da VPS de produção acontece a cada `push` na main, direto pela
+  // imagem `latest`, depois que "Publicar imagem Docker (GHCR)" publica.
+  "deploy.yml::deploy": {
+    condicao: "github.event.workflow_run.conclusion == 'success'",
+    efeito:
+      "Este job é quem entra por SSH na VPS, reaplica o baseline e sobe as três imagens " +
+      "novas. Desligá-lo faz a imagem publicar no GHCR sem NUNCA chegar à VPS de produção " +
+      "— nenhuma atualização, nenhum erro visível em lugar nenhum.",
+  },
   "release.yml::abrir-pr-de-release": {
     condicao: "github.event_name == 'workflow_dispatch'",
     efeito:
       "Este job é quem monta o PR de release a partir dos fragmentos de `.changes/`. " +
       "Desligá-lo faz nenhuma versão ser fechada — sem erro em lugar nenhum.",
   },
-  "release.yml::cortar-tag": {
-    condicao: "github.event_name == 'push'",
-    efeito:
-      "Este job é quem CRIA E EMPURRA a tag `vX.Y.Z`, que é o gatilho da atualização " +
-      "do parque instalado inteiro. Desligá-lo faz a release parar em silêncio: nenhuma " +
-      "tag nasce, nenhuma imagem sai, `stable` congela, e a descoberta é um cliente " +
-      "rodando `update.sh` e não recebendo nada.",
-  },
+  // `release.yml::cortar-tag` foi REMOVIDO deste fork (exigia
+  // RELEASE_APP_ID/RELEASE_APP_PRIVATE_KEY, GitHub App que este fork não tem —
+  // ver o cabeçalho de `release.yml`). Entrada tirada daqui de propósito,
+  // conforme a própria instrução deste teste: "se você está adaptando o repo
+  // para rodar num fork, faça isso NO fork".
   "publish-image.yml::a-tag-veio-da-main": {
     condicao: null,
     efeito:

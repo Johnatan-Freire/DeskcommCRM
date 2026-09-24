@@ -1,0 +1,89 @@
+name: Deploy automático (VPS)
+
+# Dispara depois que "Publicar imagem Docker (GHCR)" termina com sucesso na
+# main — ou seja, depois que as 3 imagens (app/worker/scheduler) já estão no
+# GHCR. Entra por SSH na VPS, sincroniza o código (compose/baseline), reaplica
+# o schema (idempotente) e sobe as imagens novas.
+#
+# Não usa hostgator-setup-kit/update.sh: aquele script segue tags de release
+# (v1.2.3), e este projeto ainda não publica releases no fork — aqui o alvo é
+# sempre o topo da main (`latest`), a cada merge.
+
+on:
+  workflow_run:
+    workflows: ["Publicar imagem Docker (GHCR)"]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    if: github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configurar chave SSH
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "${{ secrets.VPS_SSH_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Sincronizar código, reaplicar schema e subir as imagens novas
+        run: |
+          # O baseline.sql fica minutos em silêncio (a saída vai pra uma
+          # variável, não pro terminal) e a rede do runner derruba conexão
+          # SSH ociosa por tempo demais — medido: "client_loop: send
+          # disconnect: Broken pipe" bem no meio da reaplicação. O keepalive
+          # evita isso mandando um pacote a cada 15s.
+          ssh -o ServerAliveInterval=15 -o ServerAliveCountMax=12 \
+              -i ~/.ssh/deploy_key "${{ secrets.VPS_SSH_USER }}@${{ secrets.VPS_SSH_HOST }}" '
+            set -euo pipefail
+            cd /var/www/crm
+
+            git fetch --depth 1 origin main
+            git reset --hard FETCH_HEAD
+
+            SUPABASE_DB_URL="$(sed -n "s/^SUPABASE_DB_URL=//p" .env | head -1)"
+            SUPABASE_DB_URL="${SUPABASE_DB_URL%\"}"
+            SUPABASE_DB_URL="${SUPABASE_DB_URL#\"}"
+            docker run --rm postgres:17-alpine psql "$SUPABASE_DB_URL" -c \
+              "create extension if not exists vector with schema public; create extension if not exists citext with schema public; create extension if not exists pg_trgm with schema public;" \
+              >/dev/null 2>&1 || true
+
+            raw="$(docker run --rm -i -v "$PWD/supabase/baseline.sql:/b.sql:ro" \
+                  postgres:17-alpine psql "$SUPABASE_DB_URL" -f /b.sql 2>&1 || true)"
+            benigno="already exists|multiple primary keys|multiple default values|is already a member|already a partition"
+            inesperado="$(printf "%s\n" "$raw" | grep -iE "ERROR|FATAL" | grep -viE "$benigno" || true)"
+            if [ -n "$inesperado" ]; then
+              echo "⚠ avisos inesperados ao reaplicar o baseline:"
+              printf "%s\n" "$inesperado" | head -20
+            else
+              echo "✓ baseline reaplicado sem avisos inesperados"
+            fi
+
+            docker compose -f docker-compose.prod.yml pull app worker scheduler
+            docker compose -f docker-compose.prod.yml up -d app worker scheduler
+          '
+
+      - name: Verificar saúde pós-deploy
+        run: |
+          set -euo pipefail
+          sleep 15
+          ssh -o ServerAliveInterval=15 -o ServerAliveCountMax=12 \
+              -i ~/.ssh/deploy_key "${{ secrets.VPS_SSH_USER }}@${{ secrets.VPS_SSH_HOST }}" '
+            cd /var/www/crm
+            docker compose -f docker-compose.prod.yml ps app worker scheduler
+          '
+          codigo="$(curl -s -o /dev/null -w '%{http_code}' https://crm.capitaltreinamentos.com/)"
+          echo "domínio respondeu: $codigo"
+          case "$codigo" in
+            200|307) ;;
+            *) echo "::error::domínio respondeu $codigo (esperado 200 ou 307)"; exit 1 ;;
+          esac
+
+      - name: Remover a chave SSH do runner
+        if: always()
+        run: rm -f ~/.ssh/deploy_key
