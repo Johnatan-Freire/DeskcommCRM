@@ -1,4 +1,6 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render } from "@testing-library/react";
+import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Message } from "@/lib/types/messaging";
 
@@ -56,6 +58,13 @@ function mensagem(n: number): Message {
   } as unknown as Message;
 }
 
+// O ChatThread usa `useAlterarMensagem` (react-query) desde o #1626; o `wrapper`
+// do RTL é mantido no `rerender`, e o cliente é um só por teste.
+let qc: QueryClient;
+const wrapper = ({ children }: { children: ReactNode }) => (
+  <QueryClientProvider client={qc}>{children}</QueryClientProvider>
+);
+
 const rolar = vi.fn();
 const original = Element.prototype.scrollIntoView;
 
@@ -66,6 +75,7 @@ function comportamentos(): unknown[] {
 
 describe("ChatThread: ancoragem ao fim", () => {
   beforeEach(() => {
+    qc = new QueryClient();
     rolar.mockClear();
     estado.mensagens = [];
     Element.prototype.scrollIntoView = rolar;
@@ -76,14 +86,14 @@ describe("ChatThread: ancoragem ao fim", () => {
 
   it("abre a conversa com histórico indo ao fim SEM animação", () => {
     estado.mensagens = [mensagem(1), mensagem(2)];
-    render(<ChatThread conversationId="c-1" />);
+    render(<ChatThread conversationId="c-1" />, { wrapper });
     expect(rolar).toHaveBeenCalledWith({ behavior: "auto", block: "end" });
     expect(comportamentos()).not.toContain("smooth");
   });
 
   it("mensagem nova, depois da abertura, rola suave", () => {
     estado.mensagens = [mensagem(1)];
-    const { rerender } = render(<ChatThread conversationId="c-1" />);
+    const { rerender } = render(<ChatThread conversationId="c-1" />, { wrapper });
     rolar.mockClear();
     estado.mensagens = [mensagem(1), mensagem(2)];
     rerender(<ChatThread conversationId="c-1" />);
@@ -91,7 +101,7 @@ describe("ChatThread: ancoragem ao fim", () => {
   });
 
   it("conversa que abre vazia: o primeiro conteúdo que chega ainda é a abertura (auto)", () => {
-    const { rerender } = render(<ChatThread conversationId="c-1" />);
+    const { rerender } = render(<ChatThread conversationId="c-1" />, { wrapper });
     estado.mensagens = [mensagem(1)];
     rerender(<ChatThread conversationId="c-1" />);
     expect(comportamentos()).toEqual(["auto"]);
@@ -99,7 +109,7 @@ describe("ChatThread: ancoragem ao fim", () => {
 
   it("trocar de conversa volta a abrir instantâneo", () => {
     estado.mensagens = [mensagem(1)];
-    const { rerender } = render(<ChatThread conversationId="c-1" />);
+    const { rerender } = render(<ChatThread conversationId="c-1" />, { wrapper });
     rolar.mockClear();
     rerender(<ChatThread conversationId="c-2" />);
     expect(comportamentos()).toEqual(["auto"]);

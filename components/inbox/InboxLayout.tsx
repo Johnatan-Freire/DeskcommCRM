@@ -498,6 +498,7 @@ export function InboxLayout({ initialSelectedId = null }: InboxLayoutProps = {})
             <div className="min-h-0 flex-1 overflow-hidden">
               <ChatThread
                 conversationId={selectedConversation.id}
+                provider={selectedConversation.channel_sessions?.provider ?? null}
                 onResponder={setRespondendo}
                 // O cartão da passagem escolhe o gesto a partir de quem é o dono
                 // da conversa: sem dono convida a assumir, com outro dono diz
