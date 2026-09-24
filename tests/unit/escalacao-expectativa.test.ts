@@ -22,20 +22,27 @@ import {
   expectativaDeAtendimento,
 } from "@/lib/escalacao/disponibilidade";
 
+const AGORA = new Date("2026-08-05T15:00:00.000Z");
+
+/** Preenche os campos novos (motivoEHorario/agendas) com o neutro — testes que não são sobre eles. */
+function qBase(over: { disponiveis: number; total: number; motivoEHorario?: boolean; agendas?: never[] }) {
+  return { motivoEHorario: false, agendas: [], ...over };
+}
+
 describe("a frase que o agente recebe ao escalar", () => {
   it("com gente disponível, autoriza dizer que alguém continua em seguida", () => {
-    const f = fraseDeExpectativa({ disponiveis: 2, total: 4 });
+    const f = fraseDeExpectativa(qBase({ disponiveis: 2, total: 4 }), AGORA);
     expect(f).toContain("2 pessoas");
     expect(f).toMatch(/pode dizer ao cliente/i);
     expect(f).not.toMatch(/NÃO prometa/);
   });
 
   it("uma pessoa só não vira '1 pessoas'", () => {
-    expect(fraseDeExpectativa({ disponiveis: 1, total: 3 })).toContain("1 pessoa da equipe");
+    expect(fraseDeExpectativa(qBase({ disponiveis: 1, total: 3 }), AGORA)).toContain("1 pessoa da equipe");
   });
 
-  it("equipe existe mas ninguém online: proíbe prometer contato imediato", () => {
-    const f = fraseDeExpectativa({ disponiveis: 0, total: 4 });
+  it("equipe existe mas ninguém online (motivo NÃO é horário): proíbe prometer contato imediato", () => {
+    const f = fraseDeExpectativa(qBase({ disponiveis: 0, total: 4 }), AGORA);
     expect(f).toMatch(/NÃO prometa contato/i);
     expect(f).toMatch(/registrado/i);
     // A diferença entre "ninguém agora" e "ninguém nunca" importa para o texto
@@ -47,24 +54,53 @@ describe("a frase que o agente recebe ao escalar", () => {
     // Numa instalação fresca NINGUÉM está em attendant_availability. Sem este
     // ramo, a primeira conversa de um cliente real terminaria com o agente
     // prometendo contato para o vazio.
-    const f = fraseDeExpectativa({ disponiveis: 0, total: 0 });
+    const f = fraseDeExpectativa(qBase({ disponiveis: 0, total: 0 }), AGORA);
     expect(f).toMatch(/ninguém configurado/i);
     expect(f).toMatch(/NÃO prometa/i);
   });
 
   it("as três situações produzem frases DIFERENTES", () => {
     const frases = new Set([
-      fraseDeExpectativa({ disponiveis: 2, total: 4 }),
-      fraseDeExpectativa({ disponiveis: 0, total: 4 }),
-      fraseDeExpectativa({ disponiveis: 0, total: 0 }),
+      fraseDeExpectativa(qBase({ disponiveis: 2, total: 4 }), AGORA),
+      fraseDeExpectativa(qBase({ disponiveis: 0, total: 4 }), AGORA),
+      fraseDeExpectativa(qBase({ disponiveis: 0, total: 0 }), AGORA),
     ]);
     expect(frases.size).toBe(3);
+  });
+
+  it("disponiveis===0 POR HORÁRIO (motivoEHorario) dá estimativa de volta, não só 'assim que possível'", () => {
+    // AGORA = 12:00 em São Paulo (15:00Z). Janela do único atendente: 14:00-18:00.
+    const f = fraseDeExpectativa(
+      qBase({
+        disponiveis: 0,
+        total: 1,
+        motivoEHorario: true,
+        agendas: [{ timezone: "America/Sao_Paulo", windows: [{ dow: 3, start: "14:00", end: "18:00" }] }] as never,
+      }),
+      AGORA,
+    );
+    expect(f).toMatch(/volta.*14:00/i);
+    expect(f).not.toMatch(/assim que possível/i);
+  });
+
+  it("disponiveis===0 por CAPACIDADE (motivoEHorario false) NÃO tenta estimar horário", () => {
+    // Mesmo passando agendas, se motivoEHorario é false o código nem olha pra elas —
+    // é o caso de "alguém está no expediente, só não tem folga na fila".
+    const f = fraseDeExpectativa(
+      qBase({
+        disponiveis: 0,
+        total: 1,
+        motivoEHorario: false,
+        agendas: [{ timezone: "America/Sao_Paulo", windows: [{ dow: 3, start: "10:00", end: "20:00" }] }] as never,
+      }),
+      AGORA,
+    );
+    expect(f).toMatch(/assim que possível/i);
+    expect(f).not.toMatch(/volta/i);
   });
 });
 
 describe("quem pode assumir agora", () => {
-  const AGORA = new Date("2026-08-05T15:00:00.000Z");
-
   function dublePg(linhas: Array<Record<string, unknown>>) {
     return { query: () => Promise.resolve({ rows: linhas, rowCount: linhas.length }) } as never;
   }
@@ -72,35 +108,44 @@ describe("quem pode assumir agora", () => {
   it("conta só quem está online, com folga e é atendente", async () => {
     const q = await quemPodeAssumirAgora(
       dublePg([
-        { user_id: "a", role: "agent", capacity: 5, schedule: {}, carga: "2" }, // livre
-        { user_id: "b", role: "manager", capacity: 3, schedule: {}, carga: "3" }, // lotado
-        { user_id: "c", role: "agent", capacity: null, schedule: null, carga: "0" }, // offline/não configurado
-        { user_id: "d", role: "viewer", capacity: 9, schedule: {}, carga: "0" }, // não é atendente
+        { user_id: "a", role: "agent", is_available: true, capacity: 5, schedule: {}, carga: "2" }, // livre
+        { user_id: "b", role: "manager", is_available: true, capacity: 3, schedule: {}, carga: "3" }, // lotado
+        { user_id: "c", role: "agent", is_available: null, capacity: null, schedule: null, carga: "0" }, // nunca configurou
+        { user_id: "d", role: "viewer", is_available: true, capacity: 9, schedule: {}, carga: "0" }, // não é atendente
       ]),
       "org",
       AGORA,
     );
-    expect(q).toEqual({ disponiveis: 1, total: 3 });
+    expect(q.disponiveis).toBe(1);
+    expect(q.total).toBe(3);
+    // a e b têm schedule {} (24/7) — mesmo com b lotado, ALGUÉM está "no horário"
+    // agora, então o motivo de b não contar é fila, não horário.
+    expect(q.motivoEHorario).toBe(false);
   });
 
   it("quem nunca configurou disponibilidade NÃO é contado como disponível", async () => {
     // O worker de roteamento também não o escolhe — contá-lo aqui prometeria o
     // que o roteamento nunca entregaria.
     const q = await quemPodeAssumirAgora(
-      dublePg([{ user_id: "a", role: "agent", capacity: null, schedule: null, carga: "0" }]),
+      dublePg([{ user_id: "a", role: "agent", is_available: null, capacity: null, schedule: null, carga: "0" }]),
       "org",
       AGORA,
     );
-    expect(q).toEqual({ disponiveis: 0, total: 1 });
+    expect(q.disponiveis).toBe(0);
+    expect(q.total).toBe(1);
+    // Ninguém CONFIGURADO — não é "todo mundo fora do horário" (não há agenda
+    // nenhuma pra julgar), então não tenta estimar volta.
+    expect(q.motivoEHorario).toBe(false);
   });
 
-  it("fora da janela de horário não conta, mesmo online e com folga", async () => {
+  it("fora da janela de horário não conta, mesmo online e com folga — e o motivo É horário", async () => {
     // 15:00Z = 12:00 em São Paulo; a janela abaixo é 18:00–19:00 local.
     const q = await quemPodeAssumirAgora(
       dublePg([
         {
           user_id: "a",
           role: "agent",
+          is_available: true,
           capacity: 5,
           schedule: { timezone: "America/Sao_Paulo", windows: [{ dow: 3, start: "18:00", end: "19:00" }] },
           carga: "0",
@@ -110,6 +155,54 @@ describe("quem pode assumir agora", () => {
       AGORA,
     );
     expect(q.disponiveis).toBe(0);
+    // Único configurado está fora da janela agora ⇒ motivo É horário, e a
+    // agenda dele volta pro chamador calcular a próxima abertura.
+    expect(q.motivoEHorario).toBe(true);
+    expect(q.agendas).toHaveLength(1);
+  });
+
+  it("agenda conta mesmo com is_available=false (heartbeat expirado) — não é presença, é horário declarado", async () => {
+    // O atendente configurou seg-sáb 08-12/14-18 uma vez e fechou a aba —
+    // AT-08 derrubou is_available pra false há muito. Time pequeno que não
+    // fica com o inbox aberto o dia inteiro veria is_available quase sempre
+    // falso; se a agenda dependesse dele, "volta às Xh" nunca apareceria.
+    const q = await quemPodeAssumirAgora(
+      dublePg([
+        {
+          user_id: "a",
+          role: "agent",
+          is_available: false,
+          capacity: 5,
+          schedule: { timezone: "America/Sao_Paulo", windows: [{ dow: 3, start: "18:00", end: "19:00" }] },
+          carga: "0",
+        },
+      ]),
+      "org",
+      AGORA,
+    );
+    expect(q.disponiveis).toBe(0);
+    expect(q.motivoEHorario).toBe(true);
+    expect(q.agendas).toHaveLength(1);
+  });
+
+  it("alguém no horário mas sem folga: motivo NÃO é horário (não estima volta)", async () => {
+    const q = await quemPodeAssumirAgora(
+      dublePg([
+        {
+          user_id: "a",
+          role: "agent",
+          is_available: true,
+          capacity: 1,
+          // 15:00Z = quarta 12:00 em São Paulo — dentro da janela abaixo.
+          schedule: { timezone: "America/Sao_Paulo", windows: [{ dow: 3, start: "08:00", end: "18:00" }] },
+          carga: "1", // lotado
+        },
+      ]),
+      "org",
+      AGORA,
+    );
+    expect(q.disponiveis).toBe(0);
+    expect(q.motivoEHorario).toBe(false);
   });
 
   it("leitura que falha vira instrução conservadora, nunca silêncio otimista", async () => {

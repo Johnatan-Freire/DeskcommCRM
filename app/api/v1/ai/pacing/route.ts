@@ -173,7 +173,7 @@ export async function PUT(req: NextRequest): Promise<Response> {
   if (!windowIsValid(eff.windowStartHour, eff.windowEndHour)) {
     return fail(
       "validation_failed",
-      `Janela inválida: início (${eff.windowStartHour}h) precisa ser antes do fim (${eff.windowEndHour}h).`,
+      `Janela inválida: início e fim não podem ser a mesma hora (${eff.windowStartHour}h).`,
       422,
       { requestId },
     );

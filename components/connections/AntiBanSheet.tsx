@@ -254,6 +254,9 @@ export function AntiBanSheet({ item, canWrite, onClose }: Props) {
             <p className="text-xs text-muted-foreground">
               {t(
                 "O assistente só envia mensagens dentro desta janela. Fora dela, a resposta fica agendada para a próxima abertura — você vê o motivo na conversa.",
+              )}{" "}
+              {t(
+                "Início maior que fim é uma janela que cruza a meia-noite (ex.: 22h até 7h) — também é válido.",
               )}
             </p>
           </fieldset>

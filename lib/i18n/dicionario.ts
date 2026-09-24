@@ -1652,6 +1652,13 @@ export const DICIONARIO: Traducoes = {
   "Telefone (opcional)": { es: "Teléfono (opcional)" },
   "Executando…": { es: "Ejecutando…" },
   "Executar teste": { es: "Ejecutar prueba" },
+  "Continuar conversa": { es: "Continuar conversación" },
+  "Reiniciar conversa de teste": { es: "Reiniciar conversación de prueba" },
+  "Esta mensagem leva os {n} turno(s) anteriores como contexto.": {
+    es: "Este mensaje lleva los {n} turno(s) anteriores como contexto.",
+  },
+  "Cliente: ": { es: "Cliente: " },
+  "Agente: ": { es: "Agente: " },
   Resultado: { es: "Resultado" },
   "Nenhum teste executado ainda.": { es: "Todavía no se ejecutó ninguna prueba." },
   "Executando dry-run…": { es: "Ejecutando dry-run…" },
@@ -5928,6 +5935,9 @@ export const DICIONARIO: Traducoes = {
   "Escreva como se fosse um cliente": { es: "Escribe como si fueras un cliente" },
   "Ele está pensando...": { es: "Está pensando..." },
   "Mandar mensagem": { es: "Enviar mensaje" },
+  "Mandar mais uma mensagem": { es: "Enviar otro mensaje" },
+  "Reiniciar conversa": { es: "Reiniciar conversación" },
+  "Você: ": { es: "Tú: " },
   "respondeu": { es: "respondió" },
   "Esta conversa não foi enviada a ninguém e não aparece no seu inbox.": {
     es: "Esta conversación no se envió a nadie y no aparece en tu bandeja de entrada.",
@@ -6906,6 +6916,9 @@ export const DICIONARIO: Traducoes = {
   "Novo Lead": { es: "Nuevo Lead" },
   "Rolar estágios para a esquerda": { es: "Desplazar etapas hacia la izquierda" },
   "Rolar estágios para a direita": { es: "Desplazar etapas hacia la derecha" },
+  "Início maior que fim é uma janela que cruza a meia-noite (ex.: 22h até 7h) — também é válido.": {
+    es: "Un inicio mayor que el fin es una ventana que cruza la medianoche (ej.: 22h hasta 7h) — también es válido.",
+  },
   "Não consegui carregar este funil:": { es: "No pude cargar este embudo:" },
   "sem responsável.": { es: "sin responsable." },
   "atribuído.": { es: "asignado." },

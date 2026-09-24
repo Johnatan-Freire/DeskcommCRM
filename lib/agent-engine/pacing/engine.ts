@@ -10,6 +10,7 @@
  * diários (warm-up por idade do número; limite do CRM injetado) → throttle+jitter.
  */
 import type { PacingKnobs, WarmupStep } from './defaults';
+import { relogioEm, instanteDoRelogio, type RelogioLocal } from '../../tempo/relogio-local';
 
 export interface PacingState {
   /** Último envio deste número (qualquer dia) — base do throttle. */
@@ -134,56 +135,13 @@ function addMs(d: Date, ms: number): Date {
 }
 
 // ---------------------------------------------------------------------------
-// Relógio de parede na tz do tenant — Intl puro, sem dependência nova.
+// Relógio de parede na tz do tenant — lib/tempo/relogio-local.ts (compartilhado
+// com lib/escalacao/proxima-abertura.ts, que precisa da MESMA conta tz-aware).
 
-interface Wall {
-  y: number;
-  mo: number;
-  d: number;
-  h: number;
-  mi: number;
-  s: number;
-  weekday: string; // 'Sun'..'Sat'
-}
-
-function wallClock(instant: Date, timezone: string): Wall {
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: timezone,
-    hour12: false,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    weekday: 'short',
-  }).formatToParts(instant);
-  const get = (type: string): string => parts.find((p) => p.type === type)?.value ?? '';
-  return {
-    y: Number(get('year')),
-    mo: Number(get('month')),
-    d: Number(get('day')),
-    h: Number(get('hour')) % 24, // algumas ICU rendem '24' à meia-noite
-    mi: Number(get('minute')),
-    s: Number(get('second')),
-    weekday: get('weekday'),
-  };
-}
-
-/**
- * Instante UTC cuja hora de parede na tz é (y, mo, d, h):00 — técnica clássica
- * de duas passadas pelo offset (correta inclusive sob DST).
- */
-function instantFromWall(y: number, mo: number, d: number, h: number, timezone: string): Date {
-  const targetAsUtc = Date.UTC(y, mo - 1, d, h);
-  let guess = targetAsUtc;
-  for (let i = 0; i < 2; i += 1) {
-    const w = wallClock(new Date(guess), timezone);
-    const guessAsUtc = Date.UTC(w.y, w.mo - 1, w.d, w.h, w.mi, w.s);
-    guess += targetAsUtc - guessAsUtc;
-  }
-  return new Date(guess);
-}
+type Wall = RelogioLocal;
+const wallClock = relogioEm;
+const instantFromWall = (y: number, mo: number, d: number, h: number, timezone: string): Date =>
+  instanteDoRelogio(y, mo, d, h, 0, timezone);
 
 /** Meia-noite LOCAL do tenant contendo `instant` — o corte do "hoje" dos caps diários. */
 export function dayStartInTz(instant: Date, timezone: string): Date {
@@ -212,8 +170,13 @@ export function proximaAberturaDaJanela(
 }
 
 function insideWindow(wall: Wall, knobs: PacingKnobs): boolean {
-  if (!knobs.allowSunday && wall.weekday === 'Sun') return false;
-  return wall.h >= knobs.windowStartHour && wall.h < knobs.windowEndHour;
+  if (!knobs.allowSunday && wall.dow === 0) return false;
+  const { windowStartHour: start, windowEndHour: end } = knobs;
+  // start < end: janela comum (ex.: 7h-22h). start > end: cruza a meia-noite
+  // (ex.: 22h-7h) — "dentro" é h >= start OU h < end, não AND. `windowIsValid`
+  // só barra start === end (janela de comprimento zero/ambígua); os outros
+  // dois casos chegam aqui de propósito.
+  return start < end ? wall.h >= start && wall.h < end : wall.h >= start || wall.h < end;
 }
 
 /** Próxima abertura de janela ESTRITAMENTE depois de `now` (pula domingo se evitado). */
@@ -223,7 +186,7 @@ function nextWindowOpen(now: Date, knobs: PacingKnobs): Date {
     // Date.UTC normaliza overflow de dia/mês em instantFromWall.
     const candidate = instantFromWall(w.y, w.mo, w.d + add, knobs.windowStartHour, knobs.timezone);
     if (candidate.getTime() <= now.getTime()) continue;
-    if (!knobs.allowSunday && wallClock(candidate, knobs.timezone).weekday === 'Sun') continue;
+    if (!knobs.allowSunday && wallClock(candidate, knobs.timezone).dow === 0) continue;
     return candidate;
   }
 }
@@ -233,7 +196,7 @@ function nextDayOpen(now: Date, knobs: PacingKnobs): Date {
   const w = wallClock(now, knobs.timezone);
   for (let add = 1; ; add += 1) {
     const candidate = instantFromWall(w.y, w.mo, w.d + add, knobs.windowStartHour, knobs.timezone);
-    if (!knobs.allowSunday && wallClock(candidate, knobs.timezone).weekday === 'Sun') continue;
+    if (!knobs.allowSunday && wallClock(candidate, knobs.timezone).dow === 0) continue;
     return candidate;
   }
 }

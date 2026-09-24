@@ -100,9 +100,11 @@ describe("pacing-knobs — validação com KNOB_BOUNDS (números nunca nascem aq
     expect(eff.warmupDailyCaps).toEqual(PACING_DEFAULTS.warmupDailyCaps);
   });
 
-  it("janela resultante: start < end obrigatório", () => {
+  it("janela resultante: só start === end é rejeitado (comprimento zero)", () => {
     expect(windowIsValid(7, 22)).toBe(true);
-    expect(windowIsValid(22, 7)).toBe(false);
+    // start > end é janela que CRUZA a meia-noite (ex.: 22h até 7h) — válida
+    // desde que o engine (insideWindow) passou a tratar como wraparound.
+    expect(windowIsValid(22, 7)).toBe(true);
     expect(windowIsValid(8, 8)).toBe(false);
   });
 

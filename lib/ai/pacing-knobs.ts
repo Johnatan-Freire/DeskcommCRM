@@ -171,12 +171,15 @@ export interface ChannelKnobsRow {
 }
 
 /**
- * Janela efetiva coerente: [start, end) com start < end — a mesma leitura que o
- * engine faz. Valida o PAR RESULTANTE (row nova mesclada com a atual/default),
- * não só os campos enviados: PATCH parcial não pode criar janela invertida.
+ * Janela efetiva coerente — a mesma leitura que `insideWindow` do engine faz:
+ * start < end é a janela comum (ex.: 7h-22h); start > end CRUZA a meia-noite
+ * (ex.: 22h-7h) e também é válida. Só start === end é rejeitado — comprimento
+ * zero, ambíguo entre "sempre aberta" e "sempre fechada". Valida o PAR
+ * RESULTANTE (row nova mesclada com a atual/default), não só os campos
+ * enviados: PATCH parcial não pode criar janela de comprimento zero.
  */
 export function windowIsValid(startHour: number, endHour: number): boolean {
-  return startHour < endHour;
+  return startHour !== endHour;
 }
 
 /**

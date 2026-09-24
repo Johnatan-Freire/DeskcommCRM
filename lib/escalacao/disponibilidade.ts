@@ -24,8 +24,9 @@
  * (pg) formam sobre `buildLeadActivityRow`: dois leitores, uma regra.
  */
 import { ROLE_RANK, type Role } from "@/lib/auth/types";
-import { isAttendantEligible, OPEN_LOAD_STATUSES } from "@/lib/routing/eligibility";
-import { availabilityScheduleSchema } from "@/lib/schemas/routing";
+import { isAttendantEligible, isWithinSchedule, OPEN_LOAD_STATUSES } from "@/lib/routing/eligibility";
+import { availabilityScheduleSchema, type AvailabilitySchedule } from "@/lib/schemas/routing";
+import { proximaAberturaGeral, fraseDaProximaAbertura } from "./proxima-abertura";
 
 import type { Queryable } from "../agent-engine/queue/queue";
 
@@ -34,11 +35,38 @@ export interface QuemPodeAssumir {
   disponiveis: number;
   /** Membros agent+ da organização, configurados ou não. */
   total: number;
+  /**
+   * true quando NENHUM atendente com agenda salva está dentro da PRÓPRIA
+   * janela de horário agora (mesmo ignorando capacidade E o toggle
+   * `is_available` ao vivo) — ou seja, `disponiveis===0` é efeito de
+   * HORÁRIO DECLARADO, não de fila cheia nem de ninguém ter aberto o inbox.
+   * Só nesse caso dá pra calcular "volta às Xh" com alguma confiança;
+   * capacidade cheia não é previsível daqui (não sabemos quando uma conversa
+   * em andamento termina), e "ninguém logado agora" também não é horário —
+   * é presença, e cai no genérico de propósito (ver `agendas` abaixo).
+   *
+   * Opcional: `lib/ai/handoff/aviso-ao-lead.ts` monta este tipo pelo lado
+   * supabase-js (roster de `atendentes.ts`, sem leitura de agenda) para
+   * `textoDoAviso` — esse consumidor não usa "próxima abertura", então não
+   * precisa calcular o campo. Ausente é lido como "não é motivo de horário".
+   */
+  motivoEHorario?: boolean;
+  /**
+   * Agendas de QUEM JÁ CONFIGUROU disponibilidade alguma vez — insumo pra
+   * "próxima abertura". Deliberadamente INDEPENDENTE do toggle `is_available`
+   * ao vivo (que expira em 15min sem heartbeat, AT-08): a agenda ("seg-sáb
+   * 08-12/14-18") é um horário DECLARADO, não uma presença; time pequeno que
+   * não fica com o inbox aberto o dia inteiro veria `is_available` quase
+   * sempre falso, e a estimativa de horário nunca apareceria se dependesse
+   * disso.
+   */
+  agendas?: Pick<AvailabilitySchedule, "timezone" | "windows">[];
 }
 
 interface LinhaDeDisponibilidade {
   user_id: string;
   role: string;
+  is_available: boolean | null;
   capacity: number | null;
   schedule: unknown;
   carga: string;
@@ -57,6 +85,7 @@ export async function quemPodeAssumirAgora(
   const { rows } = await db.query<LinhaDeDisponibilidade>(
     `select uo.user_id,
             uo.role,
+            aa.is_available,
             aa.capacity,
             aa.schedule,
             (select count(*)
@@ -68,7 +97,6 @@ export async function quemPodeAssumirAgora(
        left join attendant_availability aa
          on aa.organization_id = uo.organization_id
         and aa.user_id = uo.user_id
-        and aa.is_available
       where uo.organization_id = $1
         and uo.revoked_at is null`,
     [tenantId, OPEN_LOAD_STATUSES],
@@ -79,24 +107,34 @@ export async function quemPodeAssumirAgora(
     (r) => ROLE_RANK[r.role as Role] !== undefined && ROLE_RANK[r.role as Role] >= ROLE_RANK.agent,
   );
 
-  const disponiveis = atendentes.filter((r) => {
-    // capacity null = quem nunca configurou disponibilidade, ou está offline (o
-    // LEFT JOIN só traz a linha quando `is_available`). O worker de roteamento
-    // também não o escolhe; prometer com ele contado seria prometer o que o
-    // roteamento nunca vai entregar.
-    if (r.capacity === null) return false;
-    return isAttendantEligible(
-      {
-        isAvailable: true,
-        capacity: r.capacity,
-        currentLoad: Number(r.carga),
-        schedule: availabilityScheduleSchema.parse(r.schedule ?? {}),
-      },
-      now,
-    );
-  }).length;
+  // `capacity === null` = nunca salvou uma linha em attendant_availability
+  // (o LEFT JOIN não deu match nenhum). Agora is_available NÃO faz parte da
+  // condição do join — quem configurou uma vez e está offline no momento
+  // continua aqui, com a linha, só com `is_available: false`.
+  const configurados = atendentes.filter((r) => r.capacity !== null);
 
-  return { disponiveis, total: atendentes.length };
+  const agendas = configurados.map((r) => availabilityScheduleSchema.parse(r.schedule ?? {}));
+
+  // `disponiveis` (quem pode assumir DE VERDADE agora) continua exigindo
+  // is_available AO VIVO — é o mesmo cálculo que o roteamento usa, e prometer
+  // com quem está offline prometeria o que o roteamento nunca entregaria.
+  const disponiveis = configurados.filter((r, i) =>
+    isAttendantEligible(
+      { isAvailable: r.is_available === true, capacity: r.capacity as number, currentLoad: Number(r.carga), schedule: agendas[i]! },
+      now,
+    ),
+  ).length;
+
+  // Ignora capacidade E o toggle is_available de propósito (ver doc de
+  // `agendas` acima): se a AGENDA de alguém diz que está no horário agora
+  // (esteja ele logado ou não), o motivo de `disponiveis === 0` não é
+  // previsível por horário — pode ser fila cheia ou só ninguém ter aberto o
+  // inbox ainda hoje, e prometer "volta às Xh" seria inventar um horário que
+  // já passou.
+  const motivoEHorario =
+    configurados.length > 0 && configurados.every((r, i) => !isWithinSchedule(agendas[i]!, now));
+
+  return { disponiveis, total: atendentes.length, motivoEHorario, agendas };
 }
 
 /**
@@ -105,12 +143,21 @@ export async function quemPodeAssumirAgora(
  * Pura e separada da leitura porque é ela que decide o que o cliente ouve — e
  * comparar frase é barato, comparar linha de banco é caro.
  *
- * Os três casos são diferentes de propósito. O terceiro é o da instalação
- * fresca: numa VPS recém-instalada NINGUÉM está em `attendant_availability`, e
- * sem esta frase o agente prometeria contato para o vazio na primeira conversa
- * do cliente — a pior primeira impressão possível num produto self-host.
+ * Os casos são diferentes de propósito. O da instalação fresca (`total===0`):
+ * numa VPS recém-instalada NINGUÉM está em `attendant_availability`, e sem
+ * esta frase o agente prometeria contato para o vazio na primeira conversa do
+ * cliente — a pior primeira impressão possível num produto self-host.
+ *
+ * `now`/`timezone` só entram para calcular a "próxima abertura" quando o
+ * motivo de `disponiveis===0` é HORÁRIO (`motivoEHorario`) — pedido do dono do
+ * produto: se o handoff cai no almoço ou fora de expediente, o cliente ouve
+ * uma estimativa de verdade ("volta às 14h"), não só "assim que possível".
  */
-export function fraseDeExpectativa(q: QuemPodeAssumir): string {
+export function fraseDeExpectativa(
+  q: QuemPodeAssumir,
+  now: Date,
+  timezone: string = "America/Sao_Paulo",
+): string {
   if (q.total === 0) {
     return (
       "ATENÇÃO: esta conta ainda não tem ninguém configurado para receber atendimento. " +
@@ -119,6 +166,10 @@ export function fraseDeExpectativa(q: QuemPodeAssumir): string {
     );
   }
   if (q.disponiveis === 0) {
+    if (q.motivoEHorario && q.agendas) {
+      const proxima = proximaAberturaGeral(q.agendas, now);
+      if (proxima) return fraseDaProximaAbertura(proxima, now, timezone);
+    }
     return (
       "ATENÇÃO: não há ninguém da equipe disponível neste momento. NÃO prometa contato " +
       "imediato nem dê prazo curto — diga que o pedido ficou registrado e que a equipe " +
@@ -141,10 +192,11 @@ export async function expectativaDeAtendimento(
   db: Queryable,
   tenantId: string,
   now: Date,
+  timezone?: string,
 ): Promise<{ quem: QuemPodeAssumir | null; frase: string }> {
   try {
     const quem = await quemPodeAssumirAgora(db, tenantId, now);
-    return { quem, frase: fraseDeExpectativa(quem) };
+    return { quem, frase: fraseDeExpectativa(quem, now, timezone) };
   } catch {
     return {
       quem: null,
