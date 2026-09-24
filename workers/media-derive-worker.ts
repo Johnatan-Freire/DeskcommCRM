@@ -124,7 +124,6 @@ export async function deriveMessageMedia(row: EventRow): Promise<HandlerResult> 
       openrouterApiKey: process.env.OPENROUTER_API_KEY,
       cacheTtl: "1h",
     };
-    let llm = await resolveOrgLlmConfig(derivePool(), llmCfg, row.organization_id);
 
     // ─── O painel de provedores manda AQUI também ────────────────────────────
     //
@@ -136,6 +135,12 @@ export async function deriveMessageMedia(row: EventRow): Promise<HandlerResult> 
     // modelo padrão. É textualmente a classe de defeito que
     // `lib/ai/gateway-binding.ts` declara ter vindo matar — três pontos foram
     // fechados e este ficou igual.
+    //
+    // ⚠️ Resolver primeiro o padrão da organização falha quando a org não tem
+    // credencial padrão (ex.: onboarding com google/gemini sem chave), mesmo com
+    // `visao_de_imagem` configurado e ativo com OpenAI/Anthropic (#1591). Por
+    // isso, tentamos primeiro o binding de visão; se ele não existir ou falhar,
+    // caímos no padrão da organização.
     const bindingDaVisao = await lerBindingDoPonto(admin, row.organization_id, "visao_de_imagem");
     // A `base_url` do binding de visão, para descer até o factory do provedor.
     //
@@ -149,6 +154,8 @@ export async function deriveMessageMedia(row: EventRow): Promise<HandlerResult> 
     // binding funcionava no chat. Um caminho só: a base_url lida aqui é a mesma
     // que o turno usa.
     let baseUrlDaVisao: string | null = null;
+    let llm: Awaited<ReturnType<typeof resolveOrgLlmConfig>> | null = null;
+
     if (bindingDaVisao) {
       try {
         const comBinding = await resolveOrgLlmConfig(derivePool(), llmCfg, row.organization_id, {
@@ -169,6 +176,10 @@ export async function deriveMessageMedia(row: EventRow): Promise<HandlerResult> 
           error: err instanceof Error ? err.message : String(err),
         });
       }
+    }
+
+    if (!llm) {
+      llm = await resolveOrgLlmConfig(derivePool(), llmCfg, row.organization_id);
     }
 
     // A transcrição é SEMPRE do Whisper (api.openai.com), então precisa de uma
