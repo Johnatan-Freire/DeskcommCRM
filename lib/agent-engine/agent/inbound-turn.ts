@@ -4554,6 +4554,98 @@ export async function runAgentPreview(
 }
 
 /**
+ * Um hold longo (go-live, saúde degradada, sessão fora do ar) represa jobs de
+ * `inbound_turn` em `run_after='infinity'` (session-watchdog.ts) e os libera
+ * de uma vez quando o hold cai. Sem esta checagem, um job represado por horas
+ * dispara respondendo à mensagem CONGELADA no tempo que o originou — mesmo que
+ * um humano já tenha resolvido a conversa pessoalmente enquanto o job esperava.
+ * Caso real desta VPS: cliente mandou a última mensagem, o dono respondeu
+ * "Relaxa" pelo celular 22s depois (conversa encerrada de verdade), e ~16h
+ * depois — quando o hold de go-live foi liberado — o bot "respondeu" à
+ * mensagem antiga como se tivesse acabado de chegar, do nada.
+ *
+ * Duas condições, checadas ANTES de qualquer chamada de modelo:
+ *   1. já existe mensagem mais nova (humana ou não) na mesma conversa depois
+ *      da que originou o job → já foi resolvida por outra coisa, pula.
+ *   2. sem mensagem mais nova, mas o JOB já está represado por tempo demais
+ *      (ver `jobCreatedAt` abaixo) → não finge que acabou de chegar; escala
+ *      pra humano decidir em vez de soar como um bot que apareceu do nada.
+ *
+ * A condição 2 mede a idade do JOB (`jobCreatedAt`, imutável desde o enqueue —
+ * um hold só adia `run_after`, nunca reescreve `created_at`), não a da
+ * MENSAGEM. As duas coincidem no caso que originou esta guarda (job nasce
+ * junto com a mensagem, fica retido, dispara horas depois), mas divergem de
+ * propósito no reengajamento por template: ali um job FRESCO é criado agora
+ * para responder a uma mensagem que é velha por natureza (é o que abre a
+ * janela de 24h fechada). Usar `sent_at` vetaria esse turno legítimo com o
+ * mesmo motivo do incidente — mesma régua medida em
+ * tests/invariants/agent-send-template-turn.test.ts.
+ */
+export const INBOUND_TURN_STALENESS_MS = 4 * 60 * 60 * 1000; // 4h
+
+export interface InboundSupersededResult {
+  supersededBy: 'newer_message' | 'stale';
+  ageMs: number;
+}
+
+export async function inboundMessageSuperseded(
+  pool: pg.Pool,
+  organizationId: string,
+  conversationId: string,
+  inboundMessageId: string,
+  jobCreatedAt: Date,
+): Promise<InboundSupersededResult | null> {
+  const { rows } = await pool.query<{ sent_at: Date; newer_count: string }>(
+    `select m.sent_at,
+            (select count(*) from messages n
+              where n.conversation_id = m.conversation_id and n.sent_at > m.sent_at) as newer_count
+     from messages m
+     where m.id = $1 and m.organization_id = $2 and m.conversation_id = $3`,
+    [inboundMessageId, organizationId, conversationId],
+  );
+  const row = rows[0];
+  // mensagem sumiu (ex.: apagada) — segue o fluxo normal, deixa o erro aparecer adiante.
+  if (row === undefined) return null;
+  if (Number(row.newer_count) > 0) return { supersededBy: 'newer_message', ageMs: 0 };
+  const ageMs = Date.now() - jobCreatedAt.getTime();
+  if (ageMs > INBOUND_TURN_STALENESS_MS) return { supersededBy: 'stale', ageMs };
+  return null;
+}
+
+/** Best-effort — se o próprio aviso falhar, o turno pulado não vira erro por isso. */
+async function avisarMensagemRepresadaVelha(
+  db: pg.Pool,
+  tenantId: string,
+  conversationId: string,
+  ageMs: number,
+  log: Logger,
+): Promise<void> {
+  try {
+    await db.query(
+      `insert into agent_inbox_items (organization_id, kind, severity, title, body, ref_kind, ref_id)
+       select $1, 'other', 'info', $2, $3, 'conversation', $4
+       where not exists (
+         select 1 from agent_inbox_items
+         where organization_id = $1 and ref_kind = 'conversation' and ref_id = $4 and status = 'open'
+       )`,
+      [
+        tenantId,
+        'Mensagem represada ficou velha demais — assistente não respondeu sozinho',
+        'Uma mensagem represada (conexão fora do ar, hold de saúde, go-live) ficou parada ' +
+          `por ${(ageMs / 3_600_000).toFixed(1)}h. Pra não responder fora de contexto a uma ` +
+          'conversa que já pode ter sido resolvida por outro canal, o assistente pulou o turno. ' +
+          'Veja a conversa e decida se ainda faz sentido responder.',
+        conversationId,
+      ],
+    );
+  } catch (err) {
+    log.warn('aviso de mensagem represada velha não foi gravado', {
+      error: (err instanceof Error ? err.message : String(err)).slice(0, 120),
+    });
+  }
+}
+
+/**
  * Handler de `inbound_turn` para o registry do daemon (main.ts): o lead mandou uma
  * mensagem. Ids de envio vêm do payload do drain (fonte confiável — F2-05); a
  * abertura é o ritual padrão, sem bloco temporal.
@@ -4561,6 +4653,34 @@ export async function runAgentPreview(
 export function createInboundTurnHandler(deps: InboundTurnDeps) {
   return async (job: JobRow, pool: pg.Pool, ctx: { workerId: string }): Promise<void> => {
     const payload = inboundTurnPayloadSchema.parse(job.payload);
+
+    const superseded = await inboundMessageSuperseded(
+      pool,
+      job.organization_id,
+      payload.conversation_id,
+      payload.inbound_message_id,
+      job.created_at,
+    );
+    if (superseded !== null) {
+      const runLog = withFields(deps.log, {
+        job_id: job.id,
+        tenant_id: job.organization_id,
+        lead_id: job.contact_id,
+      });
+      if (superseded.supersededBy === 'newer_message') {
+        runLog.info('turno pulado — mensagem já superada por outra mais nova na conversa', {
+          inbound_message_id: payload.inbound_message_id,
+        });
+      } else {
+        runLog.warn('turno pulado — mensagem represada ficou velha demais pra responder como se fosse nova', {
+          inbound_message_id: payload.inbound_message_id,
+          idade_ms: superseded.ageMs,
+        });
+        await avisarMensagemRepresadaVelha(pool, job.organization_id, payload.conversation_id, superseded.ageMs, deps.log);
+      }
+      return;
+    }
+
     if (!job.contact_id) throw new Error('reply_without_contact');
     const resolvedAgent = await resolveConversationTurn(pool, deps.llmCfg, {
       tenantId: job.organization_id,

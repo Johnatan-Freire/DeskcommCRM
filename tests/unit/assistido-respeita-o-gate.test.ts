@@ -59,6 +59,9 @@ const job = {
   id: ids.job, organization_id: ids.org, contact_id: ids.contact, kind: 'inbound_turn',
   payload: { conversation_id: ids.conversation, contact_id: ids.contact, channel_session_id: ids.channel,
     inbound_message_id: '11000000-0000-4000-8000-000000000006', crm_event_id: '11000000-0000-4000-8000-000000000007' },
+  // job recém-criado — `inboundMessageSuperseded` lê isto pra decidir se o job
+  // ficou represado tempo demais (ver inbound-turn-mensagem-represada.test.ts).
+  created_at: new Date(),
 };
 const deps = {
   log: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },

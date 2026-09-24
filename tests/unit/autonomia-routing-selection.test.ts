@@ -41,6 +41,9 @@ const job = {
   id: ids.job, organization_id: ids.org, contact_id: ids.contact, kind: 'inbound_turn',
   payload: { conversation_id: ids.conversation, contact_id: ids.contact, channel_session_id: ids.channel,
     inbound_message_id: '11000000-0000-4000-8000-000000000006', crm_event_id: '11000000-0000-4000-8000-000000000007' },
+  // job recém-criado — `inboundMessageSuperseded` lê isto pra decidir se o job
+  // ficou represado tempo demais (ver inbound-turn-mensagem-represada.test.ts).
+  created_at: new Date(),
 };
 const deps = {
   log: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
@@ -59,6 +62,11 @@ function setup(a: PublishedAgentConfig, b: PublishedAgentConfig, sticky: boolean
   mocks.bySession.mockResolvedValue(a);
   mocks.conversationAgent.mockResolvedValue(a);
   const query = vi.fn(async (sql: string, values: unknown[]) => {
+    // Checagem de represamento (inboundMessageSuperseded), ANTES de tudo mais
+    // no handler — job recém-criado, sem mensagem mais nova: nunca superado.
+    if (sql.includes('newer_count')) {
+      return { rows: [{ sent_at: new Date(), newer_count: '0' }] };
+    }
     // Contexto curto do classificador (id do signal + limite): não pesa na seleção testada aqui.
     if (sql.includes('id<>$3')) {
       expect(values.slice(0, 2)).toEqual([ids.org, ids.conversation]);
