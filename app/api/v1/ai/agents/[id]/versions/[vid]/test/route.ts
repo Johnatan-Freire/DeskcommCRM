@@ -157,6 +157,7 @@ export async function POST(req: NextRequest, ctx: Ctx): Promise<Response> {
       sampleMessage: parsed.data.sample_message,
       sampleContact: parsed.data.sample_contact,
       channelId: version.channel_session_id,
+      priorTurns: parsed.data.prior_turns,
     });
     const finalText = result.candidates.map((c) => c.body).join("\n\n");
     resultPayload = {

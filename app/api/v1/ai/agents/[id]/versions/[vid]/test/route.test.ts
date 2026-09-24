@@ -146,6 +146,27 @@ describe("POST .../versions/:vid/test — core compartilhado", () => {
       error_code: "preview_failed",
     }));
   });
+
+  it("prior_turns do body chega em priorTurns do testAgentVersion — é a continuidade do chat de teste", async () => {
+    const { POST } = await import("./route");
+    const priorTurns = [
+      { role: "user", content: "oi, vocês têm o curso de X?" },
+      { role: "assistant", content: "temos sim! quer saber o valor?" },
+    ];
+    const req = new NextRequest("http://localhost/x", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sample_message: "quanto custa", prior_turns: priorTurns }),
+    });
+
+    await POST(req, { params: Promise.resolve({ id: AGENT, vid: VERSION }) });
+
+    expect(testAgentVersion).toHaveBeenCalledWith(
+      requestPool,
+      turnDeps,
+      expect.objectContaining({ priorTurns }),
+    );
+  });
 });
 
 // Este teste isola o handler; autoridade de suporte é exercitada na suíte própria.

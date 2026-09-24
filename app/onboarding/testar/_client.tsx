@@ -20,6 +20,11 @@ type Desfecho =
   | { tipo: "resposta"; texto: string }
   | { tipo: "erro"; mensagem: string };
 
+interface Turno {
+  role: "user" | "assistant";
+  content: string;
+}
+
 const EXEMPLO = "Oi! Vocês atendem hoje? Queria saber o preço.";
 
 export function TestarClient({ nome, agenteId, versaoId }: Props) {
@@ -28,6 +33,13 @@ export function TestarClient({ nome, agenteId, versaoId }: Props) {
   const [desfecho, setDesfecho] = useState<Desfecho | null>(null);
   const [carregando, setCarregando] = useState(false);
   const [pending, startTransition] = useTransition();
+  /**
+   * Sem `conversation_id` real (o ensaio não toca contacts/conversations),
+   * o backend não tem de onde carregar histórico — SOMOS nós que mantemos o
+   * transcript e reenviamos como `prior_turns`. Sem isto, uma segunda
+   * mensagem no mesmo ensaio era tratada como pergunta isolada.
+   */
+  const [transcript, setTranscript] = useState<Turno[]>([]);
 
   const funcionario = nome ?? t("seu funcionário");
 
@@ -39,13 +51,17 @@ export function TestarClient({ nome, agenteId, versaoId }: Props) {
 
   async function ensaiar() {
     if (!agenteId || !versaoId) return;
+    const enviada = mensagem.trim();
     setCarregando(true);
     setDesfecho(null);
     try {
       const res = await fetch(`/api/v1/ai/agents/${agenteId}/versions/${versaoId}/test`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ sample_message: mensagem }),
+        body: JSON.stringify({
+          sample_message: enviada,
+          ...(transcript.length > 0 ? { prior_turns: transcript } : {}),
+        }),
       });
       const json = (await res.json()) as {
         data?: { final_text?: string; status?: string; error_code?: string; error_message?: string };
@@ -74,11 +90,17 @@ export function TestarClient({ nome, agenteId, versaoId }: Props) {
         return;
       }
       const texto = d?.final_text?.trim();
-      setDesfecho(
-        texto
-          ? { tipo: "resposta", texto }
-          : { tipo: "erro", mensagem: t("Ele executou, mas não devolveu texto nenhum.") },
-      );
+      if (texto) {
+        setDesfecho({ tipo: "resposta", texto });
+        setTranscript((prev) => [
+          ...prev,
+          { role: "user", content: enviada },
+          { role: "assistant", content: texto },
+        ]);
+        setMensagem("");
+      } else {
+        setDesfecho({ tipo: "erro", mensagem: t("Ele executou, mas não devolveu texto nenhum.") });
+      }
     } catch (err) {
       setDesfecho({ tipo: "erro", mensagem: err instanceof Error ? err.message : String(err) });
     } finally {
@@ -124,16 +146,55 @@ export function TestarClient({ nome, agenteId, versaoId }: Props) {
               maxLength={4000}
             />
           </div>
-          <div className="flex sm:justify-end">
+          <div className="flex items-center justify-between gap-2">
+            {transcript.length > 0 ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                disabled={carregando}
+                onClick={() => {
+                  setTranscript([]);
+                  setDesfecho(null);
+                }}
+              >
+                {t("Reiniciar conversa")}
+              </Button>
+            ) : (
+              <span />
+            )}
             <Button
               type="button"
               onClick={ensaiar}
               disabled={carregando || mensagem.trim() === ""}
               className="w-full sm:w-auto"
             >
-              {carregando ? t("Ele está pensando...") : t("Mandar mensagem")}
+              {carregando
+                ? t("Ele está pensando...")
+                : transcript.length > 0
+                  ? t("Mandar mais uma mensagem")
+                  : t("Mandar mensagem")}
             </Button>
           </div>
+
+          {/* Turnos ANTERIORES ao mais recente — este último já aparece destacado
+              logo abaixo ("respondeu"), então excluí-lo aqui evita mostrar a
+              mesma resposta duas vezes. */}
+          {transcript.length > 2 && (
+            <div
+              data-testid="onboarding-teste-transcript"
+              className="max-h-48 space-y-2 overflow-y-auto rounded-md border bg-muted/30 p-3 text-sm"
+            >
+              {transcript.slice(0, -2).map((turno, i) => (
+                <p key={i} className="whitespace-pre-wrap">
+                  <span className="font-medium">
+                    {turno.role === "user" ? t("Você: ") : `${funcionario}: `}
+                  </span>
+                  {turno.content}
+                </p>
+              ))}
+            </div>
+          )}
 
           {desfecho?.tipo === "resposta" && (
             <div className="space-y-2 rounded-md border bg-muted/40 p-4">

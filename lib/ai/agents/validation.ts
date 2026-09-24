@@ -272,6 +272,23 @@ export const testRunSchema = z
         phone: z.string().trim().min(3).max(40).optional(),
       })
       .optional(),
+    /**
+     * Turnos anteriores da MESMA sessão de teste, na ordem em que aconteceram.
+     * O run de teste nasce com `conversation_id: null` (não é uma conversa de
+     * verdade — nada aqui toca `contacts`/`conversations`), então não há de
+     * onde carregar histórico do banco; o cliente (o chat de teste) é quem
+     * mantém o transcript e reenvia a cada chamada. Cap em 40 pra não deixar
+     * o orçamento de tokens do teste ser dominado pelo histórico.
+     */
+    prior_turns: z
+      .array(
+        z.object({
+          role: z.enum(["user", "assistant"]),
+          content: z.string().trim().min(1).max(4000),
+        }),
+      )
+      .max(40)
+      .optional(),
   })
   .strict();
 
