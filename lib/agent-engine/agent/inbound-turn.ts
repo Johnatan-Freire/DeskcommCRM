@@ -202,6 +202,7 @@ import { fusoDaOrganizacao } from './fuso-da-org';
 import { renderAgora } from '@/lib/tempo/agora';
 import { decidirElegibilidadeDaConversa } from '@/lib/ai/elegibilidade/consulta-pg';
 import { AUTORIZADO, iaPodeResponderMensagem } from '@/lib/ai/ativacao/corte-de-ativacao';
+import { anotarUltimaInboundVista, ultimaInboundJaRespondida } from './turno-ja-respondido';
 
 /**
  * Superfície ESTÁTICA das tools do agente (description + inputSchema) — parte do
@@ -4984,6 +4985,26 @@ export function createInboundTurnHandler(deps: InboundTurnDeps) {
       return;
     }
     if (operationAgent?.pausedAt) return;
+    // UMA RESPOSTA POR MENSAGEM: um turno que rodou antes deste pode ter lido a
+    // mensagem que acordou este job e já respondido a ela — ver o cabeçalho de
+    // `turno-ja-respondido.ts`, com o caso medido. A anotação vem DEPOIS da
+    // pergunta e ANTES de `runAgentTurn` ler a conversa: é ela que deixa o
+    // próximo turno fazer a mesma pergunta a respeito deste.
+    const alvo = {
+      organizationId: job.organization_id,
+      contactId: job.contact_id,
+      conversationId: payload.conversation_id,
+      jobId: job.id,
+    };
+    if (await ultimaInboundJaRespondida(pool, alvo)) {
+      deps.log.info('turno pulado — outro turno já viu e respondeu a última mensagem do cliente', {
+        job_id: job.id,
+        conversation_id: payload.conversation_id,
+        inbound_message_id: payload.inbound_message_id,
+      });
+      return;
+    }
+    await anotarUltimaInboundVista(pool, alvo);
     await runAgentTurn(deps, job, pool, ctx, {
       resolvedAgent,
       channelSessionId: payload.channel_session_id,
