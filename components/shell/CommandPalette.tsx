@@ -157,7 +157,7 @@ function Resultados({ aoEscolher }: { aoEscolher: () => void }) {
           onChange={(e) => aoDigitar(e.target.value)}
           onKeyDown={aoTeclar}
           placeholder={t("Buscar por nome, objetivo ou função (ex: leads, agenda, prompt, whatsapp)...")}
-          className="h-13 w-full bg-transparent text-sm outline-hidden placeholder:text-muted-foreground"
+          className="h-13 w-full bg-transparent text-sm text-foreground outline-hidden placeholder:text-muted-foreground"
         />
         {busca && (
           <button
