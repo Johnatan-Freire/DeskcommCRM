@@ -873,6 +873,12 @@ export const AUDIT_ACTIONS = [
   "registration.requested",
   "registration.approved",
   "registration.rejected",
+  // O pedido de descadastro é do cliente e o padrão é irreversível — mas a
+  // regra W-02 do catálogo de negócio prevê o override: admin desbloqueia à
+  // mão. Sem esta linha, a ação existiria sem rastro de QUEM a desfez, que é
+  // o dado que importa quando alguém pergunta "por que este cliente voltou a
+  // receber?".
+  "contact.unblocked",
 ] as const;
 
 /** Um código de auditoria. Derivado de `AUDIT_ACTIONS` — não redigite a lista. */
