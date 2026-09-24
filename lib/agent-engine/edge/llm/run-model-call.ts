@@ -212,6 +212,14 @@ export interface RunModelCallInput {
    * agente), nunca constante.
    */
   maxSteps?: number;
+  /**
+   * Encerra o loop quando o predicado for verdadeiro ao fim de uma etapa (além
+   * do teto de `maxSteps`). É predicado, e não nome de tool, de propósito: o
+   * rascunho assistido para quando há resposta ACEITA, não quando o modelo
+   * chamou `send_message` — um envio vetado devolve o erro ao modelo para ele
+   * reescrever na etapa seguinte, e parar ali entregava rascunho vazio.
+   */
+  pararQuando?: () => boolean;
   /** Teto por chamada auxiliar; nunca aumenta o limite configurado pela organização. */
   maxOutputTokens?: number;
   /** Cancelamento propagado pelo chamador; a falha continua registrada em llm_calls. */
@@ -662,7 +670,12 @@ export async function runModelCall(db: pg.Pool, cfg: LlmEdgeConfig, input: RunMo
       messages: input.messages,
       abortSignal: input.abortSignal,
       tools: guardServiceTools(prefix.tools),
-      stopWhen: input.maxSteps === undefined ? undefined : stepCountIs(input.maxSteps),
+      stopWhen:
+        input.maxSteps === undefined
+          ? undefined
+          : input.pararQuando === undefined
+            ? stepCountIs(input.maxSteps)
+            : [stepCountIs(input.maxSteps), input.pararQuando],
       temperature,
       topP,
       topK,
