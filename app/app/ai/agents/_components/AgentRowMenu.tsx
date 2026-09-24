@@ -2,6 +2,7 @@
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -25,6 +26,7 @@ import {
 import { DotsThree, PencilSimple, Copy, Pause, Play, Archive } from "@/lib/ui/icons";
 import { useT } from "@/hooks/i18n/useT";
 import { deriveAgentStatus } from "./AgentStatusBadge";
+import { agentsListQueryKey } from "@/hooks/ai/useAgents";
 import type { AgentRow } from "@/hooks/ai/useAgent";
 import {
   archiveAgentAction,
@@ -41,6 +43,7 @@ interface Props {
 export function AgentRowMenu({ agent }: Props) {
   const t = useT();
   const router = useRouter();
+  const qc = useQueryClient();
   const [isPending, startTransition] = useTransition();
   const [renameOpen, setRenameOpen] = useState(false);
   const [archiveOpen, setArchiveOpen] = useState(false);
@@ -56,6 +59,13 @@ export function AgentRowMenu({ agent }: Props) {
         const res = await action();
         if (res.ok) {
           toast.success(label);
+          // router.refresh() sozinho não bastava: a lista renderiza via
+          // useAgentsList (React Query, hooks/ai/useAgents.ts), que só usa o
+          // `initialData` do servidor no primeiro mount — um refresh do RSC
+          // não invalida o cache do client. Sem isto, Pausar/Despausar
+          // gravava certo no banco (confirmado) e a tela continuava mostrando
+          // o estado antigo até um F5 de verdade.
+          await qc.invalidateQueries({ queryKey: agentsListQueryKey });
           router.refresh();
         } else {
           const message =
