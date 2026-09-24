@@ -1,4 +1,4 @@
-<!-- traduzido-de: docs/white-label.md@e1d374bb48e0 -->
+<!-- traduzido-de: docs/white-label.md@ca7f3c3481e2 -->
 
 [🇧🇷 Português](white-label.md) · 🇺🇸 English · [🇪🇸 Español](white-label.es.md)
 
@@ -200,3 +200,9 @@ Full installation guide: [`hostgator-setup-kit/README.md`](../hostgator-setup-ki
 *This document exists in three languages, and the prerequisite that the previous version of this footer named has been paid for: the translations carry, on their first line, a seal with the hash of the original, and editing `docs/white-label.md` without re-sealing fails `pnpm test:unit`. After translating, re-seal with `pnpm exec tsx scripts/selar-traducao.ts --todas`.*
 
 *The three READMEs were deliberately left **out** of the seal. They are the most edited file in the repository: with a seal, every fix would become a PR blocked until ~490 lines were re-translated twice — and the realistic outcome of that is not up-to-date translations, it is somebody re-sealing without translating, which is the only way for the seal to die. They come in when someone chooses to pay that cost with their eyes open.*
+
+## A logo for each theme
+
+In **Brand**, **Logo** remains the default image (light theme and email). **Logo for dark theme (optional)** accepts a second PNG or JPG image up to 512 KB, designed for dark backgrounds. It appears without a white frame in the sidebar, installation sign-in screen and preview. Without the second image, the default logo keeps its white protection in dark mode. Each image has its own removal control; removing the dark image restores the previous behavior.
+
+An organization that uploads its own default logo stops inheriting the installation’s dark image, preventing accidental mixing of brands. Without its own logos, it inherits the installation’s pair. Sign-in always uses the installation brand. [Compatibility and rollback](runbooks/logo-por-tema.md).

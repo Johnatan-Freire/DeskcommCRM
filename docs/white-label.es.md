@@ -1,4 +1,4 @@
-<!-- traduzido-de: docs/white-label.md@e1d374bb48e0 -->
+<!-- traduzido-de: docs/white-label.md@ca7f3c3481e2 -->
 
 [🇧🇷 Português](white-label.md) · [🇺🇸 English](white-label.en.md) · 🇪🇸 Español
 
@@ -200,3 +200,9 @@ Guía completa de instalación: [`hostgator-setup-kit/README.md`](../hostgator-s
 *Este documento existe en tres idiomas, y el requisito que la versión anterior de este pie nombraba fue pagado: las traducciones llevan en la primera línea un sello con el hash del original, y editar `docs/white-label.md` sin volver a sellar reprueba `pnpm test:unit`. Después de traducir, vuelve a sellar con `pnpm exec tsx scripts/selar-traducao.ts --todas`.*
 
 *Los tres README quedaron **fuera** del sello a propósito. Son el archivo más editado del repositorio: con sello, cada arreglo se volvería un PR bloqueado hasta que ~490 líneas fueran retraducidas dos veces — y el desenlace realista de eso no es traducción al día, es alguien volviendo a sellar sin traducir, que es la única manera de que el sello muera. Entran cuando alguien quiera pagar ese coste con los ojos abiertos.*
+
+## Un logo para cada tema
+
+En **Marca**, **Logo** sigue siendo la imagen predeterminada (tema claro y correo electrónico). **Logo para el tema oscuro (opcional)** acepta una segunda imagen PNG o JPG de hasta 512 KB, preparada para fondos oscuros. Aparece sin marco blanco en el menú lateral, la pantalla de acceso de la instalación y la vista previa. Sin la segunda imagen, el logo predeterminado conserva la protección blanca en el tema oscuro. Cada archivo se elimina por separado; quitar el oscuro restaura el comportamiento anterior.
+
+Una organización que sube su propio logo predeterminado deja de heredar la imagen oscura de la instalación, evitando mezclar marcas. Sin logos propios, hereda el par de la instalación. El acceso siempre usa la marca de la instalación. [Compatibilidad y reversión](runbooks/logo-por-tema.md).

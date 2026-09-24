@@ -157,7 +157,7 @@ async function contatoDaOrgOrThrow(supabase: SB, ctx: HandlerCtx, contactId: str
 }
 
 /**
- * O gatilho `trg_lead_so_liga_a_propria_empresa` (migration 0403) recusa com
+ * O gatilho `trg_lead_so_liga_a_propria_empresa` (migration 0389 neste fork; 0403 no upstream) recusa com
  * SQLSTATE `PT404`/`PT422` o contato ou responsável de fora da organização. As
  * guardas acima respondem antes; isto cobre a janela entre conferir e gravar
  * (um vínculo revogado nesse meio) com a MESMA resposta, e não um 500.

@@ -4903,6 +4903,7 @@
   "Já existe uma atualização em andamento.": "已有更新正在进行中。",
   "Lead foi modificado por outro usuário. Recarregue e tente novamente.": "销售线索已被其他用户修改。请重新加载后重试。",
   "Liberou a conversa de volta para a fila": "已将对话释放回队列",
+  "Atendente revogado da organização": "客服的组织访问权限已撤销",
   "Material não encontrado.": "未找到素材。",
   "Move cross-pipeline não é permitido. Clone o lead para o pipeline alvo.": "不允许跨销售漏斗移动。请将销售线索克隆到目标销售漏斗。",
   "Nada para alterar.": "没有可更改的内容。",

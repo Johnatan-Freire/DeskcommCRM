@@ -1,6 +1,6 @@
 /**
  * O LEAD SÓ SE LIGA A CONTATO E RESPONSÁVEL DA PRÓPRIA EMPRESA — no banco
- * (migration 0403).
+ * (migration 0389 neste fork; 0403 no upstream).
  *
  * Os handlers de lead já conferiam, mas não eram o único caminho: a REST do
  * banco (`/rest/v1/crm_leads`, com GRANT para `authenticated` e políticas que
@@ -234,13 +234,13 @@ describe("a cura dos vínculos cruzados que já existem", () => {
     process.cwd(),
     "supabase",
     "migrations",
-    "20260924070000_0403_lead_so_liga_a_propria_empresa.sql",
+    "20260924070000_0389_lead_so_liga_a_propria_empresa.sql",
   );
   const cura = () => {
     const texto = readFileSync(MIGRATION, "utf8");
     const inicio = texto.indexOf("-- 1 · cura");
     const fim = texto.indexOf("-- 2 · gatilho");
-    if (inicio < 0 || fim < 0) throw new Error("seções da migration 0403 não encontradas");
+    if (inicio < 0 || fim < 0) throw new Error("seções da migration 0389 não encontradas");
     return texto.slice(inicio, fim);
   };
   const atividadesDeCura = async (id: string) =>

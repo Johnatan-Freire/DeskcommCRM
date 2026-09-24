@@ -394,6 +394,14 @@ const schema = z.object({
    * respondendo 500 a tudo.
    */
   CASE_ALERT_RETENTION_DAYS: z.string().optional().default(""),
+  /**
+   * Candidato da prospecção nativa vencido (migration 0408, issue #1313).
+   * `z.string()` pela MESMA razão das cinco acima — quem interpreta é
+   * `lib/retencao/politica.ts`, onde lixo resolve para o lado seguro e o
+   * operador vê o aviso no log, em vez de o contêiner ficar `healthy`
+   * respondendo 500 a tudo. Padrão 365, piso 90, decisão do dono (PR #1577).
+   */
+  PROSPECCAO_RETENTION_DAYS: z.string().optional().default(""),
 
   // LGPD export (S-08.04)
   LGPD_SIGNING_KEY: z.string().optional().default(""),
