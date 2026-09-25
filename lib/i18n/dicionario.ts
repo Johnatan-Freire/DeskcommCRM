@@ -8333,6 +8333,19 @@ export const DICIONARIO: Traducoes = {
   // Ausentes de propósito, porque a palavra é a MESMA nos dois idiomas e
   // `traduzir()` devolve a chave: "nunca", "Preparado", "Consultado por",
   // "Preparando…". Entrada que repete a chave é ruído que envelhece.
+  "Estado da base de conhecimento": { es: "Estado de la base de conocimiento" },
+  "prontos": { es: "listos" },
+  "preparando": { es: "preparando" },
+  "preparando o material…": { es: "preparando el material…" },
+  "tudo pronto": { es: "todo listo" },
+  "Alguns materiais falharam ao preparar. O motivo está no cartão de cada um; depois de corrigir, clique em “Preparar tudo de novo”.": {
+    es: "Algunos materiales fallaron al prepararse. El motivo está en la tarjeta de cada uno; después de corregirlo, haz clic en “Preparar todo de nuevo”.",
+  },
+  "Preparar tudo de novo": { es: "Preparar todo de nuevo" },
+  "Não há material para reindexar.": { es: "No hay material para reindexar." },
+  "Vou preparar o que falta e o que mudou; o material sem alteração é pulado.": {
+    es: "Voy a preparar lo que falta y lo que cambió; el material sin cambios se omite.",
+  },
   "Vou preparar este material de novo — leva alguns instantes.": {
     es: "Voy a preparar este material de nuevo. Tardará unos instantes.",
   },

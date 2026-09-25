@@ -38713,6 +38713,14 @@ create index if not exists prospecting_candidates_expira_idx
   on public.prospecting_candidates ((coalesce(attempted_at, created_at)))
   where status not in ('queued','sending') and suppression_salt is null;
 
+-- ---- reindexação incremental: hash do conteúdo indexado (migration 0409, de @vgamkt, #1130) ----
+-- O indexador pula a fonte cujo conteúdo não mudou desde a última indexação
+-- bem-sucedida com o mesmo modelo. Racional inteiro na migration 0409.
+alter table public.ai_knowledge_sources
+  add column if not exists content_hash text;
+comment on column public.ai_knowledge_sources.content_hash is
+  'Hash do conteúdo que foi indexado por último. O indexador pula a reindexação quando o hash atual é igual E o modelo de embedding da versão ativa é o mesmo.';
+
 -- ---- VARREDURA anon: função nova nasce exposta em quem ATUALIZA (migration 0116) ----
 --
 -- ⚠️ DE PROPÓSITO, NENHUMA FUNÇÃO É CRIADA DEPOIS DESTE BLOCO. Apêndice que cria

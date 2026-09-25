@@ -1939,6 +1939,7 @@ export type Database = {
           active_kb_version_id: string | null
           agent_id: string | null
           chunks_count: number
+          content_hash: string | null
           created_at: string
           id: string
           ingested_at: string | null
@@ -1957,6 +1958,7 @@ export type Database = {
           active_kb_version_id?: string | null
           agent_id?: string | null
           chunks_count?: number
+          content_hash?: string | null
           created_at?: string
           id?: string
           ingested_at?: string | null
@@ -1975,6 +1977,7 @@ export type Database = {
           active_kb_version_id?: string | null
           agent_id?: string | null
           chunks_count?: number
+          content_hash?: string | null
           created_at?: string
           id?: string
           ingested_at?: string | null
