@@ -138,6 +138,33 @@ describe("busca do inbox — o contato entra no predicado", () => {
     expect(args(c, "contacts", "or")).toContain("phone_number");
   });
 
+  it("todas as grafias comuns do mesmo número geram um filtro que CASA contra a forma E.164 gravada", async () => {
+    // `contacts.phone_number` grava em E.164 (+5561999999999, lib/channels/
+    // phone-variants.ts). `\D` no handler descarta `+`, espaço, `-` e `()`
+    // igualmente — com ou sem DDI, o dígitos extraídos são sempre um SUBSTRING
+    // contíguo de "5561999999999", que é o que faz o `ilike.*...*` casar contra
+    // o valor gravado independente de como o atendente digitou.
+    const CANONICO_SEM_MAIS = "5561999999999"; // phone_number gravado, sem o "+"
+    const grafias: Array<[string, string]> = [
+      ["+55 61 99999-9999", "5561999999999"],
+      ["5561999999999", "5561999999999"],
+      ["61999999999", "61999999999"], // sem DDI — ainda assim substring do canônico
+      ["61 99999-9999", "61999999999"],
+      ["(61) 99999-9999", "61999999999"],
+    ];
+    for (const [grafia, digitosEsperados] of grafias) {
+      expect(
+        CANONICO_SEM_MAIS.includes(digitosEsperados),
+        `dígitos extraídos de "${grafia}" (${digitosEsperados}) não são substring do canônico ${CANONICO_SEM_MAIS} — o ilike não casaria`,
+      ).toBe(true);
+      const c = await buscar(grafia, [{ id: "contato-tel" }]);
+      const filtro = args(c, "contacts", "or");
+      expect(filtro, `grafia "${grafia}" não gerou filtro de phone_number`).toContain(
+        `phone_number.ilike.*${digitosEsperados}*`,
+      );
+    }
+  });
+
   it("termo curto de dígitos não vira busca de telefone", async () => {
     // "12" casaria metade da base e devolveria a lista inteira embaralhada —
     // pior que não achar, porque parece que a busca funcionou.
