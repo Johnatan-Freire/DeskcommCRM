@@ -7,7 +7,7 @@ const messageRow = {
   organization_id: "org1",
   type: "audio" as string,
   media_mime: "audio/ogg",
-  media_storage_path: "org1/conv1/msg1.ogg",
+  media_storage_path: "org1/conv1/msg1.ogg" as string | null,
   media_derived_status: null as string | null,
 };
 
@@ -34,6 +34,9 @@ let bindingDeVisao: { provider: string; model_id: string; credential_id: string 
  * teste passando por não ter exercitado nada.
  */
 const avisoAbertoNaCentral: Record<string, unknown> | null = null;
+
+/** Versão publicada com `video_frames_enabled` — null = leitura de vídeo desligada (o padrão). */
+let agenteComVideo: Record<string, unknown> | null = { id: "v1" };
 const inboxInsertMock = vi.fn();
 
 vi.mock("@/lib/supabase/admin", () => ({
@@ -44,7 +47,9 @@ vi.mock("@/lib/supabase/admin", () => ({
           ? bindingDeVisao
           : tabela === "agent_inbox_items"
             ? avisoAbertoNaCentral
-            : messageRow;
+            : tabela === "ai_agent_versions"
+              ? agenteComVideo
+              : messageRow;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const terminais: any = {
         maybeSingle: async () => ({ data: linha, error: null }),
@@ -129,6 +134,8 @@ describe("deriveMessageMedia", () => {
     inboxInsertMock.mockReset();
     messageRow.media_derived_status = null;
     messageRow.type = "audio";
+    messageRow.media_storage_path = "org1/conv1/msg1.ogg";
+    agenteComVideo = { id: "v1" };
     bindingDeVisao = null;
     messageRow.media_mime = "audio/ogg";
     vi.mocked(resolveOrgLlmConfig).mockReset().mockResolvedValue(configResolvida());
@@ -185,6 +192,27 @@ describe("deriveMessageMedia", () => {
     const r = await deriveMessageMedia(eventRow());
     expect(r.status).toBe("skipped");
     expect(downloadMock).not.toHaveBeenCalled();
+  });
+
+  /**
+   * Mídia que o worker PULA de propósito grava `skipped`. Sem a marca o status
+   * ficava null para sempre, e o drain — que espera a mídia da CONVERSA —
+   * atrasava em até 120s a resposta do texto que o cliente mandou depois.
+   */
+  it("vídeo com leitura desligada (padrão) → grava skipped, sem baixar", async () => {
+    messageRow.type = "video";
+    agenteComVideo = null;
+    const r = await deriveMessageMedia(eventRow());
+    expect(r.status).toBe("skipped");
+    expect(downloadMock).not.toHaveBeenCalled();
+    expect(updateEqMock).toHaveBeenCalledWith({ media_derived_status: "skipped" });
+  });
+
+  it("mensagem sem arquivo no storage → grava skipped", async () => {
+    messageRow.media_storage_path = null;
+    const r = await deriveMessageMedia(eventRow());
+    expect(r.status).toBe("skipped");
+    expect(updateEqMock).toHaveBeenCalledWith({ media_derived_status: "skipped" });
   });
 
   it("erro na derivação marca failed no último attempt", async () => {
