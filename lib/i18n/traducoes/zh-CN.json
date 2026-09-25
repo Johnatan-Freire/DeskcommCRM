@@ -5263,7 +5263,7 @@
   "O fluxo começa quando o agente abre um caso — o momento em que ele diz que precisa de uma pessoa. Não há o que escolher aqui: vale para qualquer caso desta conta.": "当智能体创建工单时流程开始 — 即它表示需要人工介入的时刻。此处无需选择：适用于此账户的任何工单。",
   "O agente continua conversando depois de abrir o caso — sem espera, o cliente recebe duas mensagens ao mesmo tempo.": "智能体在创建工单后仍继续对话 — 若不等待，客户会同时收到两条消息。",
   "Entra sozinha: conversas resolvidas que alguém marcar como aproveitáveis pela IA são anonimizadas e indexadas em lote. Não há conteúdo para colar aqui.": "自动加入：有人标记为可供 AI 使用的已解决会话会被匿名化并批量索引。此处没有可粘贴的内容。",
-  "Top K = quantos trechos buscar. Similarity threshold = mínimo de relevância (cosine). Confidence = limiar abaixo do qual o agent escala para humano.": "Top K = 检索多少片段。Similarity threshold = 最低相关性（余弦）。Confidence = 低于该阈值时智能体转人工。",
+  "Top K = quantos trechos buscar. Similarity threshold = mínimo de relevância (cosine).": "Top K = 检索多少片段。Similarity threshold = 最低相关性（余弦）。",
   "A conta de inteligência artificial é sua: você contrata direto na Anthropic, OpenAI ou Google e cola a chave aqui. Ela é guardada criptografada e nunca mais aparece na tela depois de salva — nem para você.": "AI 账户是您自己的：您直接在 Anthropic、OpenAI 或 Google 购买，并将密钥粘贴到这里。密钥会加密保存，保存后不会再显示在屏幕上 — 对您也不例外。",
   "Seus agentes só conseguem pensar depois que você cola aqui uma chave da Anthropic, da OpenAI ou do Google. A cobrança vai direto para a sua conta no provedor, e a chave fica guardada criptografada.": "只有在您将 Anthropic、OpenAI 或 Google 的密钥粘贴到这里后，您的智能体才能思考。费用直接计入您在提供商的账户，密钥会加密保存。",
   "Quando a IA trava em algo que só um humano resolve, ela abre um caso aqui — e continua conversando com o cliente enquanto espera sua resposta.": "当 AI 遇到只有人工才能解决的问题时，它会在此创建工单 — 并在等待您回复期间继续与客户对话。",
