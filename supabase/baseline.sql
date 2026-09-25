@@ -37377,6 +37377,16 @@ create trigger trg_ai_agent_versions_content_immutable
   before update on public.ai_agent_versions
   for each row execute function fn_ai_agent_version_content_immutable();
 
+-- ---- channel_knobs.number_activated_at aceita NULL (migration 0402) ----
+--
+-- `pacingKnobsUpdateSchema` (lib/ai/pacing-knobs.ts) já declara este campo
+-- `.nullable().optional()` — null é "idade desconhecida", estado válido e
+-- distinto de "ativado agora". A coluna nasceu NOT NULL (migration 0050) e
+-- rejeitava (23502) todo PUT /api/v1/ai/pacing em que o campo opcional da
+-- tela (Proteção de envio) fosse deixado em branco. Sem backfill: só afrouxa.
+alter table public.channel_knobs
+  alter column number_activated_at drop not null;
+
 -- ---- VARREDURA anon: função nova nasce exposta em quem ATUALIZA (migration 0116) ----
 --
 -- ⚠️ DE PROPÓSITO, NENHUMA FUNÇÃO É CRIADA DEPOIS DESTE BLOCO. Apêndice que cria

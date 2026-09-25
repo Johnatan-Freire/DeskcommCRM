@@ -1,0 +1,25 @@
+-- 0402: channel_knobs.number_activated_at aceita NULL — a coluna nasceu
+-- `not null default now()` (migration 0050), mas a camada de aplicação
+-- (lib/ai/pacing-knobs.ts, AntiBanSheet.tsx, lib/agent-engine/pacing/engine.ts)
+-- sempre tratou `null` como um estado válido e DISTINTO de "ativado agora":
+-- significa "idade desconhecida", e o motor de pacing usa isso para tratar o
+-- número como o degrau MAIS conservador de warm-up permanentemente — não só
+-- no primeiro dia (`ageDays = state.numberActivatedAt ? floor(...) : 0`).
+--
+-- A UI expõe "Número em uso desde" como campo OPCIONAL, com texto explicando
+-- que deixar em branco é um estado esperado. Só que o PUT /api/v1/ai/pacing
+-- manda `number_activated_at: null` explicitamente quando o campo está vazio
+-- — e null explícito ignora o DEFAULT do Postgres, então a constraint NOT
+-- NULL rejeitava (23502) TODO salvamento da tela de Proteção de envio em que
+-- esse campo opcional ficasse em branco. `pacingKnobsUpdateSchema` já declara
+-- `.nullable().optional()` para este campo — o schema promete o que o banco
+-- recusava.
+--
+-- Porte do fork DeskcommCRM (Capital Code), commit `3d1d1654d` — achado
+-- testando em produção a janela de envio cruzando meia-noite (22h-07h): a
+-- própria tela recusava salvar mesmo sem tocar o campo problemático, porque
+-- o form sempre reenvia o payload inteiro. Sem backfill: ALTER só afrouxa,
+-- nenhum dado existente é tocado. **Numerada `0402` (não `0168` do fork)**:
+-- 0168 já está ocupado no upstream v1.47.0.
+alter table public.channel_knobs
+  alter column number_activated_at drop not null;
