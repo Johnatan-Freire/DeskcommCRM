@@ -4683,6 +4683,9 @@ export const DICIONARIO: Traducoes = {
   "Criar e editar leads": { es: "Crear y editar leads" },
   "Ler mensagens": { es: "Leer mensajes" },
   "Enviar mensagens": { es: "Enviar mensajes" },
+  "Integração pode enviar em nome de um atendente": {
+    es: "La integración puede enviar en nombre de un asesor",
+  },
   "Ler o log de auditoria": { es: "Leer el registro de auditoría" },
   // ─── Configurações: Distribuição de atendimento ───
   "Distribuição de atendimento salva.": { es: "Distribución de atención guardada." },
@@ -6398,6 +6401,17 @@ export const DICIONARIO: Traducoes = {
   "Atividade registrada": { es: "Actividad registrada" },
   "Você/time": { es: "Tú/equipo" },
   "Sistema": { es: "Sistema" },
+  // #1613 — autoria "em nome de" no balão e os recusos da rota.
+  "via": { es: "vía" },
+  "Envio em nome de outro usuário exige o escopo messages:on_behalf.": {
+    es: "El envío en nombre de otro usuario requiere el alcance messages:on_behalf.",
+  },
+  "on_behalf_of_user_id precisa apontar para um atendente ativo desta organização.": {
+    es: "on_behalf_of_user_id debe apuntar a un asesor activo de esta organización.",
+  },
+  "Não foi possível ler o membro apontado em on_behalf_of_user_id.": {
+    es: "No fue posible leer el miembro indicado en on_behalf_of_user_id.",
+  },
   "Autor não registrado": { es: "Autor no registrado" },
 
   // ─── Contacts: lista, ficha, timeline, LGPD ───

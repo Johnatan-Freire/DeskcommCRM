@@ -38833,6 +38833,19 @@ create trigger trg_teto_de_tokens_ativos
     for each row
     execute function public.fn_teto_de_tokens_ativos();
 
+-- ---- autoria "em nome de" na mensagem (migration 0416, issue #1613) ----
+--
+-- Coluna nova, nullable, sem backfill e sem policy nova: a RLS por organização
+-- já cobre a linha de `messages`, e o campo é gravado pelo handler só depois do
+-- gate `messages:on_behalf` na rota. Idempotente porque o `update.sh` do clone
+-- re-executa este bloco inteiro a cada atualização. Fica antes da varredura de
+-- `anon`, como todo apêndice novo, embora não crie função.
+alter table public.messages
+  add column if not exists sent_on_behalf_of_user_id uuid;
+
+comment on column public.messages.sent_on_behalf_of_user_id is
+  'Autoria "em nome de" (#1613, migration 0416): a PESSOA — membro ativo agent+ da organização — em nome de quem um token enviou esta mensagem. null em todo envio direto. Só a rota POST /api/v1/messages grava, e só com o escopo messages:on_behalf; o balão mostra "Fulano · via {token}" a partir de metadata.sent_on_behalf.';
+
 -- ---- VARREDURA anon: função nova nasce exposta em quem ATUALIZA (migration 0116) ----
 --
 -- ⚠️ DE PROPÓSITO, NENHUMA FUNÇÃO É CRIADA DEPOIS DESTE BLOCO. Apêndice que cria
