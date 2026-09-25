@@ -224,6 +224,16 @@ const versionShapeSchema = z
      * existência é aceitável aqui — ao contrário de pipeline/material.
      */
     sistema_escolar_tool_ids: z.array(z.enum(SISTEMA_ESCOLAR_TOOL_IDS)).default([]),
+    /**
+     * Autorização para `update_lead_state` marcar won/lost (migration 0401).
+     * `.default(false)` = agente novo nasce fechado, mesma direção segura de
+     * `pipeline_ids`/`sistema_escolar_tool_ids` acima — `won` move o card real
+     * sem verificação de pagamento nenhuma, e capability terminal sensível não
+     * pode depender só do DEFAULT do SQL (que existe pra preservar versão já
+     * publicada, não pra versão nova).
+     */
+    can_mark_won: z.boolean().default(false),
+    can_mark_lost: z.boolean().default(false),
   })
   .strict();
 
@@ -252,6 +262,8 @@ export const versionPatchSchema = versionShapeSchema
     pipeline_ids: versionShapeSchema.shape.pipeline_ids.removeDefault(),
     knowledge_source_ids: versionShapeSchema.shape.knowledge_source_ids.removeDefault(),
     sistema_escolar_tool_ids: versionShapeSchema.shape.sistema_escolar_tool_ids.removeDefault(),
+    can_mark_won: versionShapeSchema.shape.can_mark_won.removeDefault(),
+    can_mark_lost: versionShapeSchema.shape.can_mark_lost.removeDefault(),
   })
   .partial();
 

@@ -17,6 +17,32 @@ function poolWith(row: Record<string, unknown> | undefined): pg.Pool {
   return { query: vi.fn().mockResolvedValue({ rows: row ? [row] : [] }) } as unknown as pg.Pool;
 }
 
+describe('loadPublishedAgentConfig — capabilities terminais (can_mark_won/can_mark_lost)', () => {
+  it('coluna ausente (clone sem a migration 0401) → canMarkWon/canMarkLost false, nunca true por acidente', async () => {
+    const cfg = await loadPublishedAgentConfig(poolWith(baseRow), 'org1', 'cs1');
+    expect(cfg?.canMarkWon).toBe(false);
+    expect(cfg?.canMarkLost).toBe(false);
+  });
+
+  it('coluna presente: mapeia o valor real, inclusive granular (won bloqueado, lost liberado)', async () => {
+    const cfg = await loadPublishedAgentConfig(
+      poolWith({ ...baseRow, can_mark_won: false, can_mark_lost: true }),
+      'org1', 'cs1',
+    );
+    expect(cfg?.canMarkWon).toBe(false);
+    expect(cfg?.canMarkLost).toBe(true);
+  });
+
+  it('true não implica o outro: canMarkWon=true sozinho não libera lost', async () => {
+    const cfg = await loadPublishedAgentConfig(
+      poolWith({ ...baseRow, can_mark_won: true, can_mark_lost: false }),
+      'org1', 'cs1',
+    );
+    expect(cfg?.canMarkWon).toBe(true);
+    expect(cfg?.canMarkLost).toBe(false);
+  });
+});
+
 describe('loadPublishedAgentConfig — campos de RAG', () => {
   it('expõe active_kb_version_id e knobs de RAG do config', async () => {
     const cfg = await loadPublishedAgentConfig(poolWith(baseRow), 'org1', 'cs1');

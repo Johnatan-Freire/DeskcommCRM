@@ -280,6 +280,12 @@ export async function publishFirstVersion(
       tool_ids: selection ? [] : capacidadesPadraoDoOnboarding(),
       pipeline_ids: pipelineIds,
       channel_session_id: canal.id,
+      // Capability terminal nasce FECHADA mesmo aqui, no agente padrão de toda
+      // instalação nova: o DEFAULT do banco é `true` (preserva versão antiga já
+      // publicada), e sem escrita explícita este INSERT nasceria com won/lost
+      // liberados sem verificação de pagamento nenhuma (migration 0401).
+      can_mark_won: false,
+      can_mark_lost: false,
       status: "draft",
       created_by: userId,
     })

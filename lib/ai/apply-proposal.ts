@@ -151,6 +151,15 @@ export async function applyProposal(
       history_token_window: base.history_token_window,
       handoff_keywords: base.handoff_keywords,
       handoff_tool_enabled: base.handoff_tool_enabled,
+      // Sem escrita explícita, o DEFAULT do banco é `true` (preserva versão
+      // antiga já publicada) — e este construtor, ao contrário do revert, já
+      // NÃO copia nenhum campo de escopo sensível de `base` (pipeline_ids,
+      // sistema_escolar_tool_ids, operator_tool_ids ficam de fora de propósito,
+      // ver VERSION_COPY_COLUMNS acima). Capability terminal segue a MESMA
+      // direção: a versão aplicada por proposta de playbook nasce fechada,
+      // nunca herda won/lost liberados por acidente de DEFAULT (migration 0401).
+      can_mark_won: false,
+      can_mark_lost: false,
       status: "draft",
       created_by: userId,
     })

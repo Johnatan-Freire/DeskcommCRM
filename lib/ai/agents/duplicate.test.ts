@@ -51,6 +51,8 @@ const VERSAO_PUBLICADA = {
   pipeline_ids: ["pipeline-1"],
   knowledge_source_ids: ["fonte-1"],
   sistema_escolar_tool_ids: ["consultar_aluno_sistema_escolar"],
+  can_mark_won: false,
+  can_mark_lost: true,
   status: "published",
   published_at: "2026-07-31T00:00:00Z",
   superseded_at: null,
@@ -128,6 +130,12 @@ describe("duplicateAgentWithVersion", () => {
     expect(versao!.row.pipeline_ids).toEqual(["pipeline-1"]);
     expect(versao!.row.knowledge_source_ids).toEqual(["fonte-1"]);
     expect(versao!.row.sistema_escolar_tool_ids).toEqual(["consultar_aluno_sistema_escolar"]);
+    // Capability terminal HERDA da origem — nunca reseta pra `true` (default
+    // do banco) nem pra `false` (agente novo). O fixture tem os dois valores
+    // DIFERENTES de propósito (won=false, lost=true): prova que a cópia não é
+    // simétrica por acidente.
+    expect(versao!.row.can_mark_won).toBe(false);
+    expect(versao!.row.can_mark_lost).toBe(true);
   });
 
   it("a cópia nasce como draft v1 e fora do ar", async () => {

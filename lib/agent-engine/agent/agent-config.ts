@@ -50,6 +50,16 @@ export interface PublishedAgentConfig {
    */
   sistemaEscolarToolIds: string[];
   /**
+   * Autorização para `update_lead_state` marcar `stage=won` (migration 0401).
+   * `false` bloqueia — inclusive quando `agentConfig` inteiro está ausente
+   * (fail-closed no chamador, `verificarAutorizacaoTerminal` em
+   * `lead-state.ts`). `won` move o card real sem nenhuma verificação de
+   * pagamento própria; a permissão explícita é o único controle que existe.
+   */
+  canMarkWon: boolean;
+  /** Mesma proteção de `canMarkWon`, para `stage=lost`. */
+  canMarkLost: boolean;
+  /**
    * Materiais que ESTE agente consulta (`ai_agent_versions.knowledge_source_ids`).
    * Vazio = NENHUM: a ferramenta de busca some do turno.
    */
@@ -120,6 +130,8 @@ interface Row {
   cases_enabled: boolean;
   tool_ids: string[] | null;
   sistema_escolar_tool_ids: string[] | null;
+  can_mark_won: boolean | null;
+  can_mark_lost: boolean | null;
   active_kb_version_id: string | null;
   config: Record<string, unknown> | null;
   operator_enabled: boolean | null;
@@ -150,6 +162,8 @@ const SELECT_AGENT_CONFIG_COLUMNS = `a.operation_mode,a.paused_at,a.operation_re
             v.cases_enabled,
             v.tool_ids,
             v.sistema_escolar_tool_ids,
+            v.can_mark_won,
+            v.can_mark_lost,
             a.active_kb_version_id,
             a.config,
             v.operator_enabled,
@@ -209,6 +223,14 @@ function mapAgentConfigRow(r: Row): PublishedAgentConfig {
     // tool de sistema escolar em vez de quebrar a query — mesma direção segura
     // de `operatorToolIds`/`pipelineIds` logo abaixo (agir de menos).
     sistemaEscolarToolIds: r.sistema_escolar_tool_ids ?? [],
+    // `?? false` — NUNCA `?? true` — cobre o clone sem a 0401: coluna ausente
+    // vem como null/undefined, e a direção fail-closed é NÃO autorizar won/lost
+    // por default, mesmo que o DEFAULT do SQL (para preservar versão antiga já
+    // migrada) seja `true`. `agentConfig` ausente por completo já bloqueia no
+    // chamador (`verificarAutorizacaoTerminal`); esta linha cobre o caso de
+    // `agentConfig` presente mas com a coluna faltando.
+    canMarkWon: r.can_mark_won ?? false,
+    canMarkLost: r.can_mark_lost ?? false,
     // `?? []` cobre o clone sem a 0181: sem a coluna, o agente cai no ponteiro
     // legado abaixo em vez de ficar sem material nenhum.
     knowledgeSourceIds: r.knowledge_source_ids ?? [],

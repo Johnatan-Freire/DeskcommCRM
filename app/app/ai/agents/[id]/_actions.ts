@@ -38,7 +38,7 @@ import { VALID_TOOL_IDS } from "@/lib/mcp/tools";
 const UUID_RX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const VERSION_COLUMNS =
-  "id, organization_id, agent_id, version_number, system_prompt, provider, model, credential_id, tool_ids, trigger_config, channel_session_id, max_steps, token_budget, cost_budget_cents, history_message_window, history_token_window, handoff_keywords, handoff_tool_enabled, cases_enabled, split_messages, split_max_chars, followup, operator_enabled, operator_model, operator_tool_ids, status, published_at, superseded_at, created_at, created_by,pipeline_ids,knowledge_source_ids,provisioning_origin,sistema_escolar_tool_ids";
+  "id, organization_id, agent_id, version_number, system_prompt, provider, model, credential_id, tool_ids, trigger_config, channel_session_id, max_steps, token_budget, cost_budget_cents, history_message_window, history_token_window, handoff_keywords, handoff_tool_enabled, cases_enabled, split_messages, split_max_chars, followup, operator_enabled, operator_model, operator_tool_ids, status, published_at, superseded_at, created_at, created_by,pipeline_ids,knowledge_source_ids,provisioning_origin,sistema_escolar_tool_ids,can_mark_won,can_mark_lost";
 
 type ActionResult<T = void> =
   | { ok: true; data?: T }
@@ -318,6 +318,8 @@ export async function saveAgentDraftAction(
         pipeline_ids: v.pipeline_ids,
         knowledge_source_ids: v.knowledge_source_ids,
         sistema_escolar_tool_ids: v.sistema_escolar_tool_ids,
+        can_mark_won: v.can_mark_won,
+        can_mark_lost: v.can_mark_lost,
         split_messages: v.split_messages,
         split_max_chars: v.split_max_chars,
         followup: v.followup,
@@ -535,6 +537,8 @@ export async function revertToVersionAction(
     pipeline_ids: string[];
     knowledge_source_ids: string[];
     sistema_escolar_tool_ids: string[];
+    can_mark_won: boolean;
+    can_mark_lost: boolean;
     split_messages: boolean;
     split_max_chars: number;
   };
@@ -584,6 +588,11 @@ export async function revertToVersionAction(
         pipeline_ids: src.pipeline_ids,
         knowledge_source_ids: src.knowledge_source_ids ?? [],
         sistema_escolar_tool_ids: src.sistema_escolar_tool_ids ?? [],
+        // Mesmo raciocínio do comentário acima: reverter e devolver won/lost
+        // liberados (default do banco) numa versão que os tinha bloqueados
+        // publicaria uma autorização que ninguém deu de volta.
+        can_mark_won: src.can_mark_won ?? false,
+        can_mark_lost: src.can_mark_lost ?? false,
         split_messages: src.split_messages,
         split_max_chars: src.split_max_chars,
         status: "draft",
@@ -747,6 +756,8 @@ export async function createMcpAgentAction(
     pipeline_ids: v.pipeline_ids,
     knowledge_source_ids: v.knowledge_source_ids,
     sistema_escolar_tool_ids: v.sistema_escolar_tool_ids,
+    can_mark_won: v.can_mark_won,
+    can_mark_lost: v.can_mark_lost,
     status: "draft",
     created_by: authUser.id,
   });
