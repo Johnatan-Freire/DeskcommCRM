@@ -38737,6 +38737,58 @@ comment on column public.ai_knowledge_sources.content_hash is
 -- O vocabulário novo é lido lá onde a constraint mora; esta linha é só o
 -- marcador de que a mudança existe e onde ela foi parar.
 
+
+
+
+
+
+-- ---- teto de tokens ativos por organização (migration 0415, issue #1448) ----
+-- Um trigger BEFORE INSERT conta os tokens VIVOS da organização (sem
+-- revoked_at, não expirados) e recusa a emissão quando bate no teto, com
+-- mensagem própria em PT-BR que diz o limite e manda revogar um token para
+-- liberar espaço. Revogados e expirados não contam: é o que deixa a rotação
+-- legítima passar. SQLSTATE `PT409`, que a rota de emissão devolve como 409 —
+-- mesmo desenho do `PT404`/`PT422` da 0403. Racional inteiro no cabeçalho da
+-- migration; a definição abaixo é a MESMA, byte a byte.
+
+create or replace function public.fn_teto_de_tokens_ativos() returns trigger
+    language plpgsql security definer
+    set search_path = ''
+as $$
+declare
+  v_teto   constant integer := 50;
+  v_ativos integer;
+begin
+  select count(*)
+    into v_ativos
+    from public.api_tokens
+   where organization_id = new.organization_id
+     and revoked_at is null
+     and (expires_at is null or expires_at > now());
+
+  if v_ativos >= v_teto then
+    raise exception
+      'Teto de tokens ativos por organização atingido: % de %. Revogue um token que não esteja mais em uso (Configurações → Tokens de API → Revogar) para liberar espaço — tokens revogados ou expirados não contam — e tente criar outro.',
+      v_ativos, v_teto
+      using errcode = 'PT409';
+  end if;
+
+  return new;
+end;
+$$;
+
+revoke execute on function public.fn_teto_de_tokens_ativos() from public, anon, authenticated;
+
+comment on function public.fn_teto_de_tokens_ativos() is
+  'Gatilho de api_tokens (migration 0415, issue #1448): recusa a INSERÇÃO quando a organização já tem o teto de tokens ATIVOS (sem revoked_at e não expirados). Mensagem própria em PT-BR com o limite e como revogar; SQLSTATE PT409, que a rota de emissão devolve como 409.';
+
+drop trigger if exists trg_teto_de_tokens_ativos on public.api_tokens;
+
+create trigger trg_teto_de_tokens_ativos
+    before insert on public.api_tokens
+    for each row
+    execute function public.fn_teto_de_tokens_ativos();
+
 -- ---- VARREDURA anon: função nova nasce exposta em quem ATUALIZA (migration 0116) ----
 --
 -- ⚠️ DE PROPÓSITO, NENHUMA FUNÇÃO É CRIADA DEPOIS DESTE BLOCO. Apêndice que cria
