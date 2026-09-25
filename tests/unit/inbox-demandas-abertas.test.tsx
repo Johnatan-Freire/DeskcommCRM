@@ -12,11 +12,14 @@ import { CRMSidePanel } from "@/components/inbox/CRMSidePanel";
  */
 function renderPainel() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
+  const view = render(
     <QueryClientProvider client={client}>
       <CRMSidePanel conversation={conversation} />
     </QueryClientProvider>,
   );
+  return { ...view, mudarConversa: (next: React.ComponentProps<typeof CRMSidePanel>["conversation"]) => view.rerender(
+    <QueryClientProvider client={client}><CRMSidePanel conversation={next} /></QueryClientProvider>,
+  ) };
 }
 
 /**
@@ -111,6 +114,9 @@ vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 vi.mock("@/hooks/inbox/useConversationTags", () => ({
   useUpdateConversationTags: () => ({ mutate: vi.fn(), isPending: false }),
   useConversationTagVocabulary: () => ({ data: [] }),
+}));
+vi.mock("@/hooks/contacts/useContactTagVocabulary", () => ({
+  useContactTagVocabulary: () => ({ data: [] }),
 }));
 vi.mock("@/hooks/contacts/useUpdateContact", () => ({
   useUpdateContact: () => ({ mutate: vi.fn(), isPending: false }),
@@ -230,4 +236,60 @@ describe("painel do inbox — demandas abertas", () => {
     const posicao = secao.compareDocumentPosition(leads);
     expect(posicao & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
+});
+
+vi.mock("@/hooks/auth/AuthProvider", () => ({ useAuth: () => ({ user: { support: null } }) }));
+
+
+describe("desfecho — rascunho atravessa somente lacuna transitória do mesmo contexto", () => {
+  const resposta = (revision: number) => ({ ...RESPOSTA, demandas: [{ ...RESPOSTA.demandas[0], revision }] });
+  it("null→mesma conversa conserva escolha e revisão observada; conflito não renova CAS", async () => {
+    get.mockResolvedValue({ data: resposta(1) });
+    const view = renderPainel();
+    await userEvent.click(await screen.findByRole("button", { name: "Encerrar demanda" }));
+    await userEvent.selectOptions(screen.getByLabelText("Desfecho da demanda"), "perdida");
+    view.mudarConversa(null);
+    expect(screen.queryByLabelText("Desfecho da demanda")).toBeNull();
+    get.mockResolvedValue({ data: resposta(2) });
+    view.mudarConversa({ ...conversation!, service_revision: 2 });
+    expect((await screen.findByLabelText("Desfecho da demanda") as HTMLSelectElement).value).toBe("perdida");
+    patch.mockRejectedValueOnce(new Error("409 service_stale"));
+    await userEvent.click(screen.getByRole("button", { name: "Confirmar desfecho" }));
+    await waitFor(() => expect(patch).toHaveBeenCalledWith("/api/v1/demandas/d-1", { action: "encerrar", desfecho: "perdida", expected_revision: 1 }));
+    expect((screen.getByLabelText("Desfecho da demanda") as HTMLSelectElement).value).toBe("perdida");
+    const { toast } = await import("sonner");
+    expect(toast.error).toHaveBeenCalledWith("Não foi possível encerrar. Cancele esta edição e abra novamente para revisar o desfecho.");
+    await userEvent.click(screen.getByRole("button", { name: "Cancelar" }));
+    await userEvent.click(screen.getByRole("button", { name: "Encerrar demanda" }));
+    await userEvent.click(screen.getByRole("button", { name: "Confirmar desfecho" }));
+    await waitFor(() => expect(patch).toHaveBeenLastCalledWith("/api/v1/demandas/d-1", { action: "encerrar", desfecho: "resolvida", expected_revision: 2 }));
+  });
+  it.each(["conversa", "contato"])("troca real de %s descarta rascunho, sem exibir nem reutilizar", async (kind) => {
+    get.mockResolvedValue({ data: resposta(1) });
+    const view = renderPainel();
+    await userEvent.click(await screen.findByRole("button", { name: "Encerrar demanda" }));
+    await userEvent.selectOptions(screen.getByLabelText("Desfecho da demanda"), "perdida");
+    view.mudarConversa(null);
+    view.mudarConversa(kind === "conversa" ? { ...conversation!, id: "cv-2" } : { ...conversation!, contact_id: "outro", contacts: { ...conversation!.contacts!, id: "outro" } });
+    await screen.findByRole("button", { name: "Encerrar demanda" });
+    expect(screen.queryByLabelText("Desfecho da demanda")).toBeNull();
+    view.mudarConversa(conversation);
+    await screen.findByRole("button", { name: "Encerrar demanda" });
+    expect(screen.queryByLabelText("Desfecho da demanda")).toBeNull();
+    expect(patch).not.toHaveBeenCalled();
+  });
+});
+
+it("mostra enriquecimento do contato e esconde ao trocar para outra conversa", async () => {
+  get.mockResolvedValue({ data: { ...RESPOSTA, enrichment: { name: "Empresa enriquecida", category: "Clínica", address: "Rua Exemplo", website: "https://example.com", maps_url: "javascript:alert(1)", rating: 4.9, reviews: 123, emails: ["comercial@example.com"], socials: ["https://instagram.com/exemplo", "javascript:alert(1)"], collected_at: "2026-09-16T12:00:00Z" } } });
+  const view = renderPainel();
+  expect(await screen.findByText("Empresa enriquecida")).toBeTruthy();
+  expect(screen.getByRole("link", { name: "example.com" }).getAttribute("href")).toBe("https://example.com/");
+  expect(screen.queryByRole("link", { name: "Ver no Google Maps" })).toBeNull();
+  expect(screen.getByText("comercial@example.com")).toBeTruthy();
+  view.mudarConversa({ ...conversation!, contacts: { ...conversation!.contacts!, is_anonymized: true } });
+  expect(screen.queryByText("Empresa enriquecida")).toBeNull();
+  get.mockImplementation(() => new Promise(() => {}));
+  view.mudarConversa({ ...conversation!, id: "cv-2", contacts: { ...conversation!.contacts!, id: "contact-2" } });
+  expect(screen.queryByText("Empresa enriquecida")).toBeNull();
 });

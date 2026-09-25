@@ -309,12 +309,10 @@ const REGRAS: ReadonlyArray<RegraTexto> = [
  *    porque `lib/mcp/tools/catalog` é
  *    client-safe por contrato do próprio módulo — zero zod, zero supabase, zero
  *    next/headers; o grafo de runtime dele é só dado. Importar daqui não arrasta nada.
- * 2. NÃO deriva de `AGENT_TOOL_DEFS` (as nativas — conte com
- *    `Object.keys(AGENT_TOOL_DEFS).length`, não confie num número aqui: já
- *    apodreceu de 12 pra 14 sem este comentário notar), que vive em
+ * 2. NÃO deriva de `AGENT_TOOL_DEFS` (as 12 nativas), que vive em
  *    `lib/agent-engine/agent/inbound-turn.ts`. Importá-lo criaria ciclo
  *    (inbound-turn → before-send → este módulo → inbound-turn) E arrastaria o motor
- *    inteiro (AI SDK, pg, canal) para dentro de um detector puro. São todas
+ *    inteiro (AI SDK, pg, canal) para dentro de um detector puro. As 12 são todas
  *    snake_case, então a regra (A) já as pega — e quem PROVA isso é
  *    `tests/unit/vazamento-interno-detector.test.ts`, que importa `AGENT_TOOL_DEFS` (um
  *    teste pode pagar o peso) e exige que cada uma seja detectada. Tool nativa nova que

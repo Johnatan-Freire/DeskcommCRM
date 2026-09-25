@@ -1,6 +1,9 @@
 "use client";
 
 import { toast } from "sonner";
+import { useT } from "@/hooks/i18n/useT";
+import { traduzir } from "@/lib/i18n/dicionario";
+import { idiomaAtual } from "@/lib/i18n/IdiomaProvider";
 import { ApiError } from "@/lib/api/types";
 
 type Variant = "error" | "warning" | "info";
@@ -66,6 +69,9 @@ const COPY: Record<string, { variant: Variant; msg?: string }> = {
     variant: "warning",
     msg: "Calma — muitas tentativas. Espere alguns segundos.",
   },
+  // Sem `msg`: a rota diz o que fazer (esperar, ou reparear), e o tom é de
+  // espera, não de quebra — o número continua pareado.
+  wacalls_not_connected: { variant: "warning" },
   lgpd_anonymization_irreversible: {
     variant: "error",
     msg: "Esta ação não pode ser desfeita: o contato já foi anonimizado.",
@@ -99,9 +105,39 @@ const COPY: Record<string, { variant: Variant; msg?: string }> = {
   // pergunta não tinha alvo. Para quem usa, isto é "escolha uma semana", não
   // "algo quebrou" — daí `info` e não `error`.
   agenda_listagem_sem_recorte: { variant: "info" },
+
+  // ---- Motivo da perda (issue #917) ----
+  //
+  // Pelo mesmo critério das quatro de agenda acima: é recusa ROTINEIRA, não
+  // quebra. O operador arrastou um card para a etapa de perda sem escolher a
+  // causa — o card volta para onde estava e nada foi tocado. Vermelho aqui
+  // ensina a ignorar vermelho, que é o que torna o vermelho de verdade invisível.
+  //
+  // Sem `msg` de propósito: a rota manda "Informe o motivo da perda." e, no
+  // inválido, a frase que nomeia a lista do funil — texto mais específico do que
+  // qualquer genérico daqui alcança.
+  lost_reason_required: { variant: "warning" },
+  lost_reason_invalid: { variant: "warning" },
+
+  // ---- Chaves de IA em uso ----
+  //
+  // Recusa ROTINEIRA, não quebra: a chave está ligada a versões de agente e o
+  // caminho certo é repontar (ou editar para girar). A ROTA manda a frase
+  // específica — quantas versões, quais agentes —, então aqui só se declara o
+  // TOM. Sem `msg` de propósito: a lista de agentes é contexto que nenhuma
+  // frase genérica alcança.
+  credential_in_use: { variant: "warning" },
 };
 
-export function showApiError(err: unknown): void {
+/**
+ * `t` chega pronto de fora: `showApiError` resolve via `idiomaAtual()` (fora da
+ * árvore React), `useApiErrorHandler` via `useT()` (dentro dela). Nenhum dos
+ * dois passa `t` como segundo parâmetro de `onError` — o TanStack Query chama
+ * `onError(error, variables, context)`, e um segundo parâmetro aqui receberia
+ * `variables` no lugar (foi exatamente o que aconteceu e quebrou o typecheck
+ * em cadeia da primeira tentativa).
+ */
+function toastFor(err: unknown, t: (texto: string) => string): void {
   if (err instanceof ApiError) {
     const entry = COPY[err.code];
     const description = err.requestId ? `ID: ${err.requestId}` : undefined;
@@ -113,16 +149,30 @@ export function showApiError(err: unknown): void {
             ? toast.info
             : toast.error;
       // `entry.msg ?? err.message`: entrada sem `msg` declara só o tom e deixa
-      // passar o texto da rota, que costuma ser mais específico.
-      fn(entry.msg ?? err.message ?? err.code, { description });
+      // passar o texto da rota, que costuma ser mais específico. Passa por
+      // `t()` do mesmo jeito: o texto da rota é pt-BR literal (ver a seção
+      // "Mensagens literais de `fail()`" em lib/i18n/dicionario.ts), e sem
+      // tradução aqui chegaria em português na tela de quem escolheu espanhol.
+      fn(entry.msg ? t(entry.msg) : t(err.message ?? err.code), { description });
       return;
     }
-    toast.error(err.message || err.code, { description });
+    toast.error(t(err.message) || err.code, { description });
     return;
   }
-  toast.error("Erro inesperado. Tente novamente.");
+  toast.error(t("Erro inesperado. Tente novamente."));
+}
+
+/**
+ * `showApiError` é passado por REFERÊNCIA como `onError` em ~80 lugares, a
+ * maioria dentro de `useMutation` — não pode virar hook. `idiomaAtual()` lê o
+ * espelho que `IdiomaProvider` mantém fora da árvore React para viabilizar
+ * exatamente isto: traduzir sem mudar a assinatura pública da função.
+ */
+export function showApiError(err: unknown): void {
+  toastFor(err, (texto) => traduzir(texto, idiomaAtual()));
 }
 
 export function useApiErrorHandler(): (err: unknown) => void {
-  return showApiError;
+  const t = useT();
+  return (err: unknown) => toastFor(err, t);
 }

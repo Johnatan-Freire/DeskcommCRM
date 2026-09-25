@@ -39,24 +39,26 @@ describe("montarRequisicaoDeProva", () => {
     expect(anthropic!.body).toMatchObject({ max_tokens: 1 });
   });
 
-  it("openai manda max_completion_tokens, nunca max_tokens — modelo novo recusa o nome antigo", () => {
-    // Medido numa instalação real: o catálogo de modelos (migration 0104) marca
-    // um modelo da família gpt-5.x como default do provider openai, e essa
-    // família responde 400 "Unsupported parameter: 'max_tokens'" — a prova de
-    // crédito da própria instalação quebrava ao testar a própria chave padrão.
+  it("OpenAI usa max_completion_tokens — max_tokens é recusado pelos modelos de raciocínio (o1/o3/gpt-5)", () => {
+    // Medido em produção: o modelo padrão curado para OpenAI é da família de
+    // raciocínio, e ela responde 400 "Unsupported parameter: 'max_tokens' is
+    // not supported with this model. Use 'max_completion_tokens' instead."
+    // Isso derrubava a prova de crédito no onboarding com toda chave válida.
     const openai = montarRequisicaoDeProva("openai", "k", "gpt-5.6-terra");
     expect(openai!.body).not.toHaveProperty("max_tokens");
     expect(openai!.body).toHaveProperty("max_completion_tokens");
   });
 
-  it("openai pede mais que 1 token — modelo de raciocínio some com o mínimo antes de sobrar texto", () => {
-    // Também medido contra a chave real: com 1 ou 4 tokens de teto, o modelo
-    // gasta tudo em `reasoning_tokens` (internos, nem sempre visíveis) e
-    // devolve 400 ou 200-com-conteúdo-vazio — os dois desfechos são "chave
-    // funciona, orçamento pequeno demais", não "chave ruim", mas caem no
-    // balde genérico de erro em `normalizarErro`. 1 token reproduzia esse
-    // falso negativo; o valor atual tem que ficar bem acima disso.
-    const openai = montarRequisicaoDeProva("openai", "k", "m") as { body: { max_completion_tokens: number } };
+  it("OpenAI pede mais que 1 token — modelo de raciocínio some com o mínimo antes de sobrar texto", () => {
+    // Também medido contra uma chave real: com 1 ou 4 tokens de teto, o
+    // modelo gasta tudo em `reasoning_tokens` (internos, nem sempre visíveis)
+    // e devolve 400 ou 200-com-conteúdo-vazio — os dois desfechos são "chave
+    // funciona, orçamento pequeno demais", não "chave ruim", mas o 400 cai no
+    // balde genérico de erro em `normalizarErro`. 4 tokens ainda reproduzia o
+    // falso negativo na medição real; o valor atual tem que ficar bem acima.
+    const openai = montarRequisicaoDeProva("openai", "k", "m") as {
+      body: { max_completion_tokens: number };
+    };
     expect(openai.body.max_completion_tokens).toBeGreaterThan(4);
   });
 
@@ -132,5 +134,49 @@ describe("provarSaldo", () => {
       expect(r.codigo).toBe("limite_ou_saldo");
       expect(r.httpStatus).toBe(402);
     }
+  });
+
+  it("teto de tokens curto demais não vira 'chave ruim' — mesmo sem regra própria, não mente sobre o motivo", async () => {
+    // O texto real da OpenAI quando o teto de resposta some inteiro no
+    // raciocínio interno do modelo (medido contra uma chave válida, com o
+    // bug de `max_completion_tokens` pequeno demais ainda presente). Este
+    // teste prova que `normalizarErro` NÃO confunde esse 400 com credencial
+    // recusada, saldo insuficiente ou provedor fora do ar — ele cai no balde
+    // genérico, honesto mesmo sem diagnóstico fino, nunca aponta o dedo pra
+    // chave que está certa.
+    const fetchImpl = vi.fn(
+      async () =>
+        new Response(
+          '{"error":{"message":"Could not finish the message within the max_completion_tokens limit."}}',
+          { status: 400 },
+        ),
+    );
+    const r = await provarSaldo("openai", "sk-x", "gpt-5.6-terra", {
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.codigo).not.toBe("credencial_recusada");
+      expect(r.codigo).not.toBe("limite_ou_saldo");
+      expect(r.codigo).not.toBe("provedor_indisponivel");
+    }
+  });
+
+  it("resposta 200 (mesmo com o teto de tokens curto) é aceita — a cobrança é a prova, não o texto", async () => {
+    // Outro desfecho medido do mesmo bug: com 4 tokens de teto, a OpenAI
+    // responde 200 com `content=""` (finish_reason=length) — a chamada foi
+    // cobrada de verdade, então `classificarResposta` já trata isso como
+    // sucesso corretamente (qualquer 2xx passa). O valor maior (32) existe
+    // pra evitar o 400 do teste anterior, não este caso, que já era seguro.
+    const fetchImpl = vi.fn(
+      async () =>
+        new Response('{"choices":[{"message":{"content":""},"finish_reason":"length"}]}', {
+          status: 200,
+        }),
+    );
+    const r = await provarSaldo("openai", "sk-x", "gpt-5.6-terra", {
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    expect(r).toEqual({ ok: true });
   });
 });

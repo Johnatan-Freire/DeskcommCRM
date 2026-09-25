@@ -7,7 +7,7 @@
  *  - shape ANTIGO intacto (nada renomeado/removido — consumidor atual não quebra);
  *  - fixtures dos 3 estados: atribuída (user), na fila, IA atendendo;
  *  - COERÊNCIA da queue_position: o número da tool = a posição na MESMA ordem que
- *    o inbox (G5-03 / gov-5d): last_inbound_at ASC, id ASC — computada de forma
+ *    o inbox (G5-03 / gov-5d): awaiting_since ASC, id ASC — computada de forma
  *    independente e comparada;
  *  - LGPD: só id + nome do usuário no payload; nunca email/telefone/metadata.
  */
@@ -28,6 +28,7 @@ import {
 } from "@/lib/mcp/tools/conversations";
 import { crmListLeads, crmGetLead } from "@/lib/mcp/tools/leads";
 import type { McpContext } from "@/lib/mcp/types";
+import { comandoDaConversa } from "@/lib/inbox/comando-da-conversa";
 
 const ORG = "22222222-2222-4222-8222-222222222222";
 const USER_A = "11111111-1111-4111-8111-111111111111"; // Alice
@@ -40,19 +41,35 @@ const USER_NAMES: Record<string, string> = { [USER_A]: "Alice", [USER_B]: "Bob" 
 const CONV_OLD = "aaaaaaaa-0000-4000-8000-000000000001";
 const CONV_MID = "aaaaaaaa-0000-4000-8000-000000000002";
 const CONV_NEW = "aaaaaaaa-0000-4000-8000-000000000003";
+// Fila: 3 conversas com tempos de espera conhecidos (oldest = pos 1). A coluna
+// da espera é o awaiting_since (`ORDEM_DA_ESPERA`); o CONV_OLD guarda o
+// last_inbound_at mais NOVO de propósito, para que a ordem emule a régua viva e
+// não a antiga (que dava a ele a ÚLTIMA posição).
 const now = Date.now();
 const QUEUE_ROWS = [
-  { id: CONV_NEW, last_inbound_at: new Date(now - 2 * 60_000).toISOString() },
-  { id: CONV_OLD, last_inbound_at: new Date(now - 30 * 60_000).toISOString() },
-  { id: CONV_MID, last_inbound_at: new Date(now - 10 * 60_000).toISOString() },
+  {
+    id: CONV_NEW,
+    awaiting_since: new Date(now - 2 * 60_000).toISOString(),
+    last_inbound_at: new Date(now - 2 * 60_000).toISOString(),
+  },
+  {
+    id: CONV_OLD,
+    awaiting_since: new Date(now - 30 * 60_000).toISOString(),
+    last_inbound_at: new Date(now).toISOString(),
+  },
+  {
+    id: CONV_MID,
+    awaiting_since: new Date(now - 10 * 60_000).toISOString(),
+    last_inbound_at: new Date(now - 10 * 60_000).toISOString(),
+  },
 ];
 
-/** Ordem canônica do inbox (G5-03): last_inbound_at ASC, id ASC. */
-function inboxOrder(rows: Array<{ id: string; last_inbound_at: string }>): string[] {
+/** Ordem canônica do inbox (G5-03): awaiting_since ASC, id ASC. */
+function inboxOrder(rows: Array<{ id: string; awaiting_since: string }>): string[] {
   return [...rows]
     .sort(
       (a, b) =>
-        a.last_inbound_at.localeCompare(b.last_inbound_at) || a.id.localeCompare(b.id),
+        a.awaiting_since.localeCompare(b.awaiting_since) || a.id.localeCompare(b.id),
     )
     .map((r) => r.id);
 }
@@ -115,7 +132,7 @@ function makeCtx(resolve: Resolver): McpContext {
 
 // Row de conversa mínima com os campos que os handlers/tools leem.
 function convRow(over: Record<string, unknown>): Record<string, unknown> {
-  return {
+  const base: Record<string, unknown> = {
     id: over.id,
     organization_id: ORG,
     contact_id: "c0000000-0000-4000-8000-000000000001",
@@ -139,14 +156,47 @@ function convRow(over: Record<string, unknown>): Record<string, unknown> {
     updated_at: new Date(now).toISOString(),
     ...over,
   };
+  /**
+   * `comando_da_conversa` é CALCULADO pelo banco (migration 0203) e chega junto
+   * com a linha — `isInQueue` do MCP o lê para decidir se busca as posições.
+   *
+   * O dublê o DERIVA pela regra canônica em vez de cravar um valor: cravar faria
+   * este arquivo ficar verde no dia em que a regra mudasse e o produto errasse,
+   * que é o defeito que o espelho SQL↔TS existe para impedir. Aqui ele custa uma
+   * linha e mantém o dublê honesto de graça.
+   */
+  return {
+    ...base,
+    comando_da_conversa: comandoDaConversa(
+      {
+        status: String(base.status),
+        assigned_to_user_id: (base.assigned_to_user_id as string | null) ?? null,
+        bot_silenced_until: (base.bot_silenced_until as string | null) ?? null,
+        force_human: false,
+        is_blocked: false,
+        automaticoDaOrg: true,
+      },
+      new Date(now),
+    ).comando.quem,
+  };
 }
 
 /** Resolver de conversas: getQueuePositions (select "id") devolve a fila na ordem do inbox. */
 function convResolver(single: Record<string, unknown> | null): Resolver {
   return (q) => {
     if (q.table === "conversations" && q.select === "id") {
-      // Emula o ORDER BY do banco: retorna a fila JÁ ordenada (inbox order).
-      const ordered = inboxOrder(QUEUE_ROWS).map((id) => ({ id }));
+      // Emula o ORDER BY do banco: retorna a fila JÁ ordenada (inbox order)…
+      //
+      // …E O FILTRO. Desde a migration 0203 `getQueuePositions` pede
+      // `comando_da_conversa in comandosDaFila(...)`, então uma conversa que o
+      // AUTOMÁTICO está conduzindo não volta desta consulta — e é por isso que
+      // ela não ganha `queue_position`. Um dublê que devolvesse a lista inteira
+      // afirmaria o contrário do produto e deixaria o caso "IA atendendo, sem
+      // posição" verde pelo motivo errado.
+      const naFila = single === null || single.comando_da_conversa === "aguardando";
+      const ordered = inboxOrder(QUEUE_ROWS)
+        .filter((id) => naFila || id !== single?.id)
+        .map((id) => ({ id }));
       return { data: ordered, error: null };
     }
     if (q.table === "conversations" && q.terminal === "maybeSingle") {
@@ -188,7 +238,19 @@ describe("crm_get_conversation — governança + shape", () => {
   });
 
   it("NA FILA: assignee_kind=null, sem nome, queue_position preenchida", async () => {
-    const row = convRow({ id: CONV_MID, status: "open", assigned_to_user_id: null });
+    // O FIXTURE GANHOU O SILÊNCIO, e a mudança não é cosmética.
+    //
+    // Até a migration 0203, "na fila" era `open` + sem dono — e era justamente
+    // esse par que punha na fila tudo que o robô estava atendendo (medido na VPS:
+    // 83 na aba, 47 delas comandadas pelo automático). Sob a régua nova, `open` +
+    // sem dono + sem trava É O AUTOMÁTICO. Para estar esperando uma pessoa, a
+    // conversa precisa ter sido escalada — que é o que `bot_silenced_until` diz.
+    const row = convRow({
+      id: CONV_MID,
+      status: "open",
+      assigned_to_user_id: null,
+      bot_silenced_until: "infinity",
+    });
     const res = (await crmGetConversation.handler(
       { conversation_id: CONV_MID },
       makeCtx(convResolver(row)),
@@ -231,7 +293,7 @@ describe("crm_get_conversation — governança + shape", () => {
 // ---------------------------------------------------------------------------
 
 describe("crm_list_conversations — coerência queue_position ↔ inbox", () => {
-  it("as 3 conversas na fila recebem a posição da ordem do inbox (last_inbound_at ASC, id ASC)", async () => {
+  it("as 3 conversas na fila recebem a posição da ordem do inbox (awaiting_since ASC, id ASC)", async () => {
     // Handler de list retorna as 3 conversas da fila.
     const rows = QUEUE_ROWS.map((r) =>
       convRow({ id: r.id, status: "open", assigned_to_user_id: null, last_inbound_at: r.last_inbound_at }),

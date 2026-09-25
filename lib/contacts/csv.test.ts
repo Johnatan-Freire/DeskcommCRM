@@ -82,6 +82,132 @@ describe("mapHeader", () => {
   });
 });
 
+/**
+ * Cobre TODO apelido, e não uma amostra: um apelido repetido em dois campos cai
+ * em silêncio no primeiro (`mapHeader` para no primeiro que contém a célula),
+ * e só uma linha por apelido denuncia isso. Os de espanhol são a promessa da
+ * frase "columnas reconocidas: nombre, teléfono, email…" do diálogo de importação.
+ */
+describe("mapHeader — todo apelido reconhecido cai no seu campo", () => {
+  it.each([
+    // pt-BR / en (o que já existia)
+    ["name", "name"],
+    ["nome", "name"],
+    ["cliente", "name"],
+    ["display_name", "display_name"],
+    ["apelido", "display_name"],
+    ["nome_de_exibicao", "display_name"],
+    ["email", "email"],
+    ["e_mail", "email"],
+    ["phone_number", "phone_number"],
+    ["telefone", "phone_number"],
+    ["whatsapp", "phone_number"],
+    ["celular", "phone_number"],
+    ["fone", "phone_number"],
+    ["cpf", "cpf"],
+    ["birthdate", "birthdate"],
+    ["nascimento", "birthdate"],
+    ["data_de_nascimento", "birthdate"],
+    ["aniversario", "birthdate"],
+    ["tags", "tags"],
+    ["etiquetas", "tags"],
+    ["grupos", "tags"],
+    // es
+    ["nombre", "name"],
+    ["apodo", "display_name"],
+    ["nombre_para_mostrar", "display_name"],
+    ["correo", "email"],
+    ["correo_electronico", "email"],
+    ["telefono", "phone_number"],
+    ["movil", "phone_number"],
+    ["nacimiento", "birthdate"],
+    ["fecha_de_nacimiento", "birthdate"],
+    ["cumpleanos", "birthdate"],
+  ])("%s → %s", (alias, campo) => {
+    expect(mapHeader([alias]).indices).toEqual({ [campo]: 0 });
+  });
+});
+
+describe("mapHeader — cabeçalho em espanhol como o Excel escreve", () => {
+  it("acento, caixa e espaços: Nombre, Teléfono, Correo electrónico…", () => {
+    const { indices, motivo } = mapHeader([
+      "Nombre",
+      "Nombre para mostrar",
+      "Correo electrónico",
+      "Teléfono",
+      "Fecha de nacimiento",
+      "Etiquetas",
+    ]);
+    expect(motivo).toBeNull();
+    expect(indices).toEqual({
+      name: 0,
+      display_name: 1,
+      email: 2,
+      phone_number: 3,
+      birthdate: 4,
+      tags: 5,
+    });
+  });
+
+  it("Móvil e Cumpleaños (ñ e acento saem na normalização)", () => {
+    const { indices, motivo } = mapHeader(["Móvil", "Cumpleaños"]);
+    expect(motivo).toBeNull();
+    expect(indices).toEqual({ phone_number: 0, birthdate: 1 });
+  });
+
+  it("cabeçalho misto pt + es mapeia cada coluna", () => {
+    const { indices, motivo } = mapHeader(["Nome", "Teléfono", "Correo", "Nascimento"]);
+    expect(motivo).toBeNull();
+    expect(indices).toEqual({ name: 0, phone_number: 1, email: 2, birthdate: 3 });
+  });
+
+  it("em espanhol, sem telefone nem correo, falha aberto com o mesmo motivo", () => {
+    const { motivo } = mapHeader(["Nombre", "Apodo", "Nacimiento"]);
+    expect(motivo).toMatch(/sem coluna de telefone nem e-mail/);
+  });
+});
+
+describe("CSV em espanhol de ponta a ponta (parseCsv → mapHeader → mapLinha)", () => {
+  function importa(csv: string) {
+    const [cabecalho, linha] = parseCsv(csv);
+    const { indices, motivo: motivoHeader } = mapHeader(cabecalho!);
+    expect(motivoHeader).toBeNull();
+    return mapLinha(linha!, indices);
+  }
+
+  it("separado por ponto e vírgula (etiquetas entre aspas, que têm ';' dentro)", () => {
+    const { contato, motivo } = importa(
+      [
+        "nombre;teléfono;correo electrónico;nacimiento;etiquetas",
+        'Ana García;+34 612 345 678;ana@ejemplo.com;15/03/1990;"vip; newsletter"',
+      ].join("\n"),
+    );
+    expect(motivo).toBeNull();
+    expect(contato.name).toBe("Ana García");
+    expect(contato.phone_number).toBe("+34612345678");
+    expect(contato.email).toBe("ana@ejemplo.com");
+    expect(contato.birthdate).toBe("1990-03-15");
+    expect(contato.tags).toEqual(["vip", "newsletter"]);
+  });
+
+  it("separado por vírgula, com apodo e móvil", () => {
+    const { contato, motivo } = importa(
+      [
+        "Nombre,Apodo,Móvil,Correo,Fecha de nacimiento,Etiquetas",
+        // Etiquetas separam por ';' ou '|' (a vírgula é o delimitador do arquivo).
+        "Luis Pérez,Lucho,+34 699 111 222,luis@ejemplo.com,02/11/1985,vip; newsletter",
+      ].join("\n"),
+    );
+    expect(motivo).toBeNull();
+    expect(contato.name).toBe("Luis Pérez");
+    expect(contato.display_name).toBe("Lucho");
+    expect(contato.phone_number).toBe("+34699111222");
+    expect(contato.email).toBe("luis@ejemplo.com");
+    expect(contato.birthdate).toBe("1985-11-02");
+    expect(contato.tags).toEqual(["vip", "newsletter"]);
+  });
+});
+
 describe("normalizaTelefone", () => {
   it.each([
     ["+5511999998888", "+5511999998888"],
@@ -153,6 +279,58 @@ describe("mapLinha", () => {
     const { contato, motivo } = mapLinha(["Ana", "+5511999998888"], indices);
     expect(motivo).toBeNull();
     expect(contato.email).toBeUndefined();
+  });
+});
+
+/**
+ * `traduzir()` real só troca a CHAVE que bate byte a byte com uma entrada do
+ * dicionário; o resto degrada para o próprio texto. Um mock que traduz
+ * QUALQUER string esconderia um pedaço colado FORA de `t()` que deveria estar
+ * dentro (ou vice-versa) — ver o bug real corrigido em
+ * `lib/catalogo/planilha.test.ts` e `lib/leads/planilha.test.ts`.
+ */
+describe("mapHeader / mapLinha — mensagens de erro passam por t()", () => {
+  const indices = mapHeader(["Nome", "Telefone", "Email", "Tags"]).indices;
+  const DICIONARIO_FAKE: Record<string, string> = {
+    "cabeçalho sem coluna de telefone nem e-mail": "CABECERA SIN COLUMNA DE TELÉFONO NI E-MAIL",
+    "e-mail inválido: ": "E-MAIL INVÁLIDO: ",
+    "telefone inválido: ": "TELÉFONO INVÁLIDO: ",
+    " (use DDI+DDD+número, ex.: +5511999998888)":
+      " (USA CÓDIGO DE PAÍS+CÓDIGO DE ÁREA+NÚMERO, EJ.: +5511999998888)",
+    "linha sem telefone nem e-mail": "LÍNEA SIN TELÉFONO NI E-MAIL",
+  };
+  const gritar = (texto: string): string => DICIONARIO_FAKE[texto] ?? texto;
+
+  it("mapHeader: sem identificador traduz por completo", () => {
+    const { motivo } = mapHeader(["Nome", "Idade"], gritar);
+    expect(motivo).toBe("CABECERA SIN COLUMNA DE TELÉFONO NI E-MAIL");
+  });
+
+  it("mapHeader: sem t, comportamento idêntico ao de antes", () => {
+    const { motivo } = mapHeader(["Nome", "Idade"]);
+    expect(motivo).toBe("cabeçalho sem coluna de telefone nem e-mail");
+  });
+
+  it("mapLinha: sem telefone/e-mail traduz por completo", () => {
+    const { motivo } = mapLinha(["Só Nome", "", "", ""], indices, gritar);
+    expect(motivo).toBe("LÍNEA SIN TELÉFONO NI E-MAIL");
+  });
+
+  it("mapLinha: telefone inválido traduz por completo, incluindo o texto após o valor cru", () => {
+    const { motivo } = mapLinha(["Ana", "123", "", ""], indices, gritar);
+    expect(motivo).toBe(
+      'TELÉFONO INVÁLIDO: "123" (USA CÓDIGO DE PAÍS+CÓDIGO DE ÁREA+NÚMERO, EJ.: +5511999998888)',
+    );
+  });
+
+  it("mapLinha: e-mail inválido traduz por completo", () => {
+    const { motivo } = mapLinha(["Ana", "", "nao-e-email", ""], indices, gritar);
+    expect(motivo).toBe('E-MAIL INVÁLIDO: "nao-e-email"');
+  });
+
+  it("mapLinha: sem t, comportamento idêntico ao de antes (degrada para o texto original)", () => {
+    const { motivo } = mapLinha(["Ana", "123", "", ""], indices);
+    expect(motivo).toBe('telefone inválido: "123" (use DDI+DDD+número, ex.: +5511999998888)');
   });
 });
 

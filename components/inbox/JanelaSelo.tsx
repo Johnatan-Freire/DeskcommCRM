@@ -1,6 +1,8 @@
 "use client";
 import { useEffect, useState } from "react";
+import { useT } from "@/hooks/i18n/useT";
 
+import { fonteDeTemplates } from "@/lib/channels/templates-fonte";
 import { Badge } from "@/components/ui/badge";
 import {
   estadoDaJanela,
@@ -41,6 +43,7 @@ export function JanelaSelo({
   provider: string | null | undefined;
   lastInboundAt: string | null;
 }) {
+  const t = useT();
   // O relógio do servidor não serve: o que importa é quanto falta AGORA, na
   // máquina de quem lê. `useState` com função para não recalcular a cada render.
   const [agora, setAgora] = useState(() => new Date());
@@ -49,6 +52,7 @@ export function JanelaSelo({
     return () => clearInterval(t);
   }, []);
 
+  const usaModelos = fonteDeTemplates(provider) !== null;
   const estado = estadoDaJanela(provider, lastInboundAt, agora);
   if (estado.tipo === "sem_restricao") return null;
 
@@ -58,15 +62,17 @@ export function JanelaSelo({
     // conversa esfriou. "Fechada" sozinho não distingue vinte minutos de um mês.
     const quanto =
       estado.fechadaHaMs === null
-        ? "O cliente nunca escreveu"
-        : `Janela fechada há ${formatarDecorrido(estado.fechadaHaMs)}`;
+        ? t("O cliente nunca escreveu")
+        : `${t("Janela fechada há")} ${formatarDecorrido(estado.fechadaHaMs)}`;
     return (
       <Badge
         variant="outline"
         className="h-4 border-amber-400 px-1.5 text-[10px] text-amber-700 dark:border-amber-700 dark:text-amber-300"
-        title="Passaram 24h desde a última mensagem do cliente. Só um modelo aprovado sai daqui — texto livre é recusado pela plataforma."
+        title={usaModelos ? t(
+          "Passaram 24h desde a última mensagem do cliente. Só um modelo aprovado sai daqui — texto livre é recusado pela plataforma.",
+        ) : t("Aguarde uma nova mensagem do cliente para reabrir o atendimento nesta rede.")}
       >
-        {quanto} · só modelo
+        {quanto} · {usaModelos ? t("só modelo") : t("aguardando o cliente")}
       </Badge>
     );
   }
@@ -79,9 +85,9 @@ export function JanelaSelo({
         "h-4 px-1.5 text-[10px]",
         urgente && "border-amber-400 text-amber-700 dark:border-amber-700 dark:text-amber-300",
       )}
-      title="Tempo restante para escrever texto livre. Depois disso, só modelo aprovado."
+      title={usaModelos ? t("Tempo restante para escrever texto livre. Depois disso, só modelo aprovado.") : t("Tempo restante para responder. Uma nova mensagem do cliente reabre a janela.")}
     >
-      Janela {formatarRestante(estado.restanteMs)}
+      {t("Janela")} {formatarRestante(estado.restanteMs)}
     </Badge>
   );
 }

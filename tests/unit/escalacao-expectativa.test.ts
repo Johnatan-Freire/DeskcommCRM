@@ -19,7 +19,6 @@ import { describe, expect, it } from "vitest";
 import {
   fraseDeExpectativa,
   quemPodeAssumirAgora,
-  quemPodeAssumirAgoraViaSupabase,
   expectativaDeAtendimento,
 } from "@/lib/escalacao/disponibilidade";
 
@@ -214,91 +213,5 @@ describe("quem pode assumir agora", () => {
     );
     expect(r.quem).toBeNull();
     expect(r.frase).toMatch(/NÃO prometa contato/i);
-  });
-});
-
-describe("quemPodeAssumirAgoraViaSupabase — mesma REGRA, cliente supabase-js", () => {
-  // O caller real é lib/mcp/tools/handoff.ts (crm_request_human_handoff),
-  // usado tanto por integrações MCP externas quanto pelo runtime de teste do
-  // agente — sem este leitor, "Testar agente" nunca mostra a estimativa de
-  // horário (achado ao vivo: teste às 12:43, fora da janela, devolveu o
-  // genérico antigo porque essa rota ainda lia só o texto fixo).
-  function dubleSupabase(tabelas: {
-    user_organizations?: Array<{ user_id: string; role: string }>;
-    attendant_availability?: Array<{ user_id: string; is_available: boolean; capacity: number; schedule: unknown }>;
-    conversations?: Array<{ assigned_to_user_id: string | null }>;
-  }) {
-    return {
-      from: (table: string) => {
-        const rows =
-          table === "user_organizations"
-            ? (tabelas.user_organizations ?? [])
-            : table === "attendant_availability"
-              ? (tabelas.attendant_availability ?? [])
-              : table === "conversations"
-                ? (tabelas.conversations ?? [])
-                : [];
-        const chain = {
-          select: () => chain,
-          eq: () => chain,
-          is: () => chain,
-          in: () => chain,
-          then: (resolve: (v: { data: unknown; error: null }) => unknown) =>
-            Promise.resolve({ data: rows, error: null }).then(resolve),
-        };
-        return chain;
-      },
-    } as never;
-  }
-
-  it("agenda conta mesmo com is_available=false — mesma regra do leitor pg", async () => {
-    // Quarta 15:00Z = 18:00 em São Paulo; janela do único atendente é 14-18h,
-    // então ainda ESTÁ dentro — motivo NÃO é horário aqui (controle).
-    const q = await quemPodeAssumirAgoraViaSupabase(
-      dubleSupabase({
-        user_organizations: [{ user_id: "a", role: "agent" }],
-        attendant_availability: [
-          {
-            user_id: "a",
-            is_available: false,
-            capacity: 5,
-            schedule: { timezone: "America/Sao_Paulo", windows: [{ dow: 3, start: "08:00", end: "19:00" }] },
-          },
-        ],
-        conversations: [],
-      }),
-      "org",
-      AGORA,
-    );
-    expect(q.total).toBe(1);
-    expect(q.disponiveis).toBe(0); // is_available=false — não conta como "pode assumir AGORA"
-    expect(q.motivoEHorario).toBe(false); // mas a agenda diz que é horário de expediente
-  });
-
-  it("fora da janela declarada: motivoEHorario true, mesmo sem ninguém nunca ter aberto o inbox", async () => {
-    const q = await quemPodeAssumirAgoraViaSupabase(
-      dubleSupabase({
-        user_organizations: [{ user_id: "a", role: "admin" }],
-        attendant_availability: [
-          {
-            user_id: "a",
-            is_available: false,
-            capacity: 5,
-            schedule: { timezone: "America/Sao_Paulo", windows: [{ dow: 3, start: "18:00", end: "19:00" }] },
-          },
-        ],
-        conversations: [],
-      }),
-      "org",
-      AGORA,
-    );
-    expect(q.motivoEHorario).toBe(true);
-    expect(q.agendas).toHaveLength(1);
-  });
-
-  it("ninguém em user_organizations: total 0, cai no genérico de instalação fresca", async () => {
-    const q = await quemPodeAssumirAgoraViaSupabase(dubleSupabase({}), "org", AGORA);
-    expect(q.total).toBe(0);
-    expect(fraseDeExpectativa(q, AGORA)).toMatch(/ninguém configurado/i);
   });
 });

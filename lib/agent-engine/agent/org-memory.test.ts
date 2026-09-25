@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type pg from 'pg';
 
-import { composeSystemPrompt, loadOrgMemory, loadOrgMemoryViaSupabase, renderOrgMemory } from './org-memory';
+import { composeSystemPrompt, loadOrgMemory, renderOrgMemory } from './org-memory';
 
 function poolSeq(responses: Array<{ rows: unknown[] }>): pg.Pool {
   const query = vi.fn();
@@ -21,61 +21,6 @@ describe('loadOrgMemory', () => {
 
   it('org sem memória: content null e entries vazias', async () => {
     const mem = await loadOrgMemory(poolSeq([{ rows: [] }, { rows: [] }]), 'org1');
-    expect(mem).toEqual({ content: null, entries: [] });
-  });
-});
-
-describe('loadOrgMemoryViaSupabase — mesma leitura, cliente supabase-js', () => {
-  // Achado ao vivo: "Testar agente" (runtime de teste, lib/ai/runtime/agent.ts,
-  // que usa createAdminClient()/supabase-js, não um pool pg) nunca via nada
-  // publicado em /app/ai/memory — um endereço salvo na memória não aparecia no
-  // teste, e o agente escalava pra humano por não ter a informação.
-  function dubleSupabase(state: {
-    pointer?: { version_id: string } | null;
-    version?: { content: string } | null;
-    entries?: Array<{ id: string; title: string; body: string }>;
-  }) {
-    return {
-      from: (table: string) => {
-        const chain = {
-          select: () => chain,
-          eq: () => chain,
-          order: () => chain,
-          maybeSingle: () => {
-            if (table === 'org_memory_pointers') return Promise.resolve({ data: state.pointer ?? null, error: null });
-            if (table === 'org_memory_versions') return Promise.resolve({ data: state.version ?? null, error: null });
-            return Promise.resolve({ data: null, error: null });
-          },
-          then: (resolve: (v: { data: unknown; error: null }) => unknown) =>
-            Promise.resolve({ data: table === 'org_memory_entries' ? (state.entries ?? []) : [], error: null }).then(
-              resolve,
-            ),
-        };
-        return chain;
-      },
-    } as never;
-  }
-
-  it('resolve doc pelo ponteiro (2 queries) e entries active', async () => {
-    const supabase = dubleSupabase({
-      pointer: { version_id: 'v1' },
-      version: { content: 'Endereço: Rua X, 123.' },
-      entries: [{ id: 'e1', title: 'Horário', body: 'Atendemos 8h-18h.' }],
-    });
-    const mem = await loadOrgMemoryViaSupabase(supabase, 'org1');
-    expect(mem).toEqual({
-      content: 'Endereço: Rua X, 123.',
-      entries: [{ id: 'e1', title: 'Horário', body: 'Atendemos 8h-18h.' }],
-    });
-  });
-
-  it('sem ponteiro: content null (não tenta buscar a versão)', async () => {
-    const mem = await loadOrgMemoryViaSupabase(dubleSupabase({ pointer: null }), 'org1');
-    expect(mem.content).toBeNull();
-  });
-
-  it('org sem memória nenhuma: mesmo formato de loadOrgMemory (pg)', async () => {
-    const mem = await loadOrgMemoryViaSupabase(dubleSupabase({}), 'org1');
     expect(mem).toEqual({ content: null, entries: [] });
   });
 });

@@ -11,10 +11,30 @@ export interface Conversation {
   channel: string;
   status: string;
   status_changed_at: string;
+  service_revision?: number;
+  service_closed_at?: string | null;
+  service_started_at?: string | null;
+  current_demanda_id?: string | null;
   assigned_to_user_id: string | null;
+  /**
+   * Cópia desnormalizada do nome de quem atende (migration 0202), escrita por
+   * `fn_conversation_assign` no mesmo UPDATE que grava `assigned_to_user_id`.
+   * `null` quando não atribuída, ou quando o backfill/lookup não alcançou —
+   * ver `lib/users/com-nome-do-atendente.ts` para o fallback desse caso raro.
+   */
+  assigned_to_user_name: string | null;
   assignee_kind: string | null;
   assigned_at: string | null;
   last_inbound_at: string | null;
+  /**
+   * A régua da Fila (migration 0267, issue #990): o instante da mensagem do
+   * cliente MAIS ANTIGA que ninguém respondeu ainda — `min(sent_at)` dos inbound
+   * posteriores a `last_outbound_at`. É o que ordena a aba Fila, o que a pílula
+   * "Aguardando há…" mostra (`esperaDaConversa`) e o que a posição das ferramentas
+   * de IA conta. Opcional cobrindo o intervalo entre o deploy deste código e a
+   * migration aplicada; `null` quando o cliente nunca escreveu.
+   */
+  awaiting_since?: string | null;
   last_outbound_at: string | null;
   last_message_at: string | null;
   last_message_preview: string | null;
@@ -31,10 +51,23 @@ export interface Conversation {
    * como aparecer só quando faz sentido, e a rota ficaria sem porta.
    */
   bot_silenced_until: string | null;
+  /**
+   * Campo CALCULADO pelo banco (migration 0203) — não é coluna, e por isso não vem
+   * em `select=*`: quem o quiser tem de pedi-lo por nome. Opcional porque a
+   * resposta de uma versão anterior, ainda em cache do react-query, não o tem.
+   */
+  comando_da_conversa?: string | null;
   last_handoff_at: string | null;
   created_at: string;
   updated_at: string;
 }
+
+/**
+ * Espelha o CHECK `messages_sent_via_check` do banco. O alias exportado existe
+ * para o invariante banco×TypeScript ler a fonte real do vocabulário, sem criar
+ * uma terceira lista manual só para o teste.
+ */
+export type SentVia = "user" | "ai" | "system" | "external_device" | "automation" | "crm";
 
 export interface Message {
   id: string;
@@ -54,7 +87,11 @@ export interface Message {
   media_mime: string | null;
   media_size_bytes: number | null;
   media_storage_path: string | null;
-  sent_via: "user" | "ai" | "system";
+  // Espelha o CHECK do banco (messages_sent_via_check): 'crm', 'external_device',
+  // 'automation', 'ai', 'user', 'system'. O tipo listava só três e o TypeScript
+  // aceitava os demais só porque o dado vem do Supabase sem cast — a tela então
+  // não conseguia nem NOMEAR o valor para exibi-lo (ver MessageBubble).
+  sent_via: SentVia;
   sent_by_user_id: string | null;
   sent_at: string;
   delivered_at: string | null;

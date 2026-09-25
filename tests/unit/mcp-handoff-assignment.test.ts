@@ -5,13 +5,13 @@
  *  - a escolha do destino usa o roteamento G5 (loadEligibleAttendants +
  *    selectRoundRobin) — DETERMINÍSTICO sobre elegíveis, NÃO o antigo
  *    pickRoundRobinAssignee random sobre user_organizations;
- *  - com elegível: rpc fn_conversation_assign p_reason='handoff' + retorno
+ *  - com elegível: rpc fn_channel_routing_claim p_reason='handoff' + retorno
  *    estruturado { assigned_to };
  *  - target_user_id elegível: atribui ao alvo;
  *  - sem elegível: fila — assignee_kind limpo + evento reason='handoff' from/to
  *    null + retorno { queued:true, position }.
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { triggerHandoff } from "@/lib/ai/handoff/orchestrator";
 import { crmRequestHumanHandoff } from "@/lib/mcp/tools/handoff";
@@ -38,11 +38,11 @@ interface StubState {
   /** atendentes em attendant_availability (is_available=true). */
   attendants: Array<{ user_id: string; capacity: number; schedule: unknown }>;
   queuePositionCount: number;
+  allowed?: string[];
+  claimResult?: string;
   rpcCalls: Array<{ fn: string; args: Record<string, unknown> }>;
   updates: Array<{ table: string; values: Record<string, unknown> }>;
   inserts: Array<{ table: string; values: Record<string, unknown> }>;
-  /** roster p/ quemPodeAssumirAgoraViaSupabase (next_action com estimativa de horário). */
-  roster: Array<{ user_id: string; role: string }>;
 }
 
 function makeSupabaseStub(state: StubState) {
@@ -75,20 +75,23 @@ function makeSupabaseStub(state: StubState) {
             data: {
               id: CONV_ID,
               organization_id: ORG_ID,
-              contact_id: null,
+              contact_id: null, channel_session_id: CONV_ID, assigned_to_user_id: null,
               last_inbound_at: null,
             },
             error: null,
           });
         }
+        if (table === "channel_sessions") return Promise.resolve({ data: { id: CONV_ID }, error: null });
+        if (table === "channel_routing_policies") return Promise.resolve({ data: state.allowed ? { id: "policy" } : null, error: null });
         return Promise.resolve({ data: null, error: null }); // crm_leads lookup
       },
       then: (resolve: (v: unknown) => unknown) => {
         let result: { data?: unknown; count?: number; error: null } = { data: [], error: null };
+        if (table === "user_organizations") result = { data: state.attendants.map(a => ({ user_id: a.user_id })), error: null };
+        else if (table === "channel_routing_responsibles") result = { data: (state.allowed ?? []).map(user_id => ({ user_id })), error: null };
+        else if (table === "conversations" && state.updates.length) result = { data: [{ id: CONV_ID }], error: null };
         if (table === "attendant_availability") result = { data: state.attendants, error: null };
-        else if (table === "user_organizations") result = { data: state.roster, error: null };
         else if (table === "conversations" && q.count) result = { count: state.queuePositionCount, error: null };
-        else if (table === "conversations") result = { data: [], error: null }; // carga p/ quemPodeAssumirAgoraViaSupabase
         return Promise.resolve(result).then(resolve);
       },
     };
@@ -98,7 +101,7 @@ function makeSupabaseStub(state: StubState) {
     from,
     rpc: (fn: string, args: Record<string, unknown>) => {
       state.rpcCalls.push({ fn, args });
-      return Promise.resolve({ data: [{ id: CONV_ID }], error: null });
+      return Promise.resolve({ data: fn === "fn_channel_routing_claim" ? state.claimResult ?? "assigned" : null, error: null });
     },
   };
 }
@@ -118,7 +121,6 @@ function makeCtx(state: StubState): McpContext {
 function stubState(over: Partial<StubState> = {}): StubState {
   return {
     attendants: [{ user_id: AGENT_ID, capacity: 5, schedule: {} }],
-    roster: [{ user_id: AGENT_ID, role: "agent" }],
     queuePositionCount: 4,
     rpcCalls: [],
     updates: [],
@@ -141,7 +143,7 @@ beforeEach(() => {
 });
 
 describe("crm_request_human_handoff v2 (INB-12 — roteamento G5 unificado)", () => {
-  it("com elegível: selectRoundRobin determinístico ⇒ fn_conversation_assign reason='handoff'", async () => {
+  it("com elegível: selectRoundRobin determinístico ⇒ fn_channel_routing_claim reason='handoff'", async () => {
     const state = stubState();
     const result = (await crmRequestHumanHandoff.handler(baseInput, makeCtx(state))) as {
       assigned_to: string | null;
@@ -151,13 +153,10 @@ describe("crm_request_human_handoff v2 (INB-12 — roteamento G5 unificado)", ()
 
     expect(state.rpcCalls).toEqual([
       {
-        fn: "fn_conversation_assign",
+        fn: "fn_channel_routing_claim",
         args: {
-          p_organization_id: ORG_ID,
-          p_conversation_id: CONV_ID,
-          p_to_user_id: AGENT_ID,
-          p_reason: "handoff",
-          p_enforce_expected: false,
+          p_org: ORG_ID, p_conversation: CONV_ID, p_channel: CONV_ID, p_user: AGENT_ID,
+          p_reason: "handoff", p_schedule: {},
         },
       },
     ]);
@@ -179,7 +178,7 @@ describe("crm_request_human_handoff v2 (INB-12 — roteamento G5 unificado)", ()
       makeCtx(state),
     )) as { assigned_to: string | null };
 
-    expect(state.rpcCalls[0]?.args.p_to_user_id).toBe(AGENT_B);
+    expect(state.rpcCalls[0]?.args.p_user).toBe(AGENT_B);
     expect(result.assigned_to).toBe(AGENT_B);
   });
 
@@ -194,56 +193,105 @@ describe("crm_request_human_handoff v2 (INB-12 — roteamento G5 unificado)", ()
     expect(result.assigned_to).toBeNull();
     expect(result.queued).toBe(true);
     expect(result.position).toBe(4);
-    expect(state.rpcCalls).toEqual([]);
+    expect(state.rpcCalls).toEqual([{ fn: "fn_request_channel_routing", args: { p_org: ORG_ID, p_conversation: CONV_ID } }]);
     expect(state.updates).toContainEqual({
       table: "conversations",
       values: { assignee_kind: null },
     });
-    expect(state.inserts).toContainEqual({
-      table: "conversation_assignment_events",
-      values: {
-        organization_id: ORG_ID,
-        conversation_id: CONV_ID,
-        from_user_id: null,
-        to_user_id: null,
-        changed_by: null,
-        reason: "handoff",
-      },
-    });
+    expect(state.inserts).toEqual([]);
+  });
+  it("alvo fora da política não recebe; lista vazia permanece na fila", async () => {
+    const state = stubState({ allowed: [] });
+    const result = await crmRequestHumanHandoff.handler({ ...baseInput, target_user_id: AGENT_ID }, makeCtx(state));
+    expect(result).toMatchObject({ assigned_to: null, queued: true });
+    expect(state.rpcCalls.some(c => c.fn === "fn_channel_routing_claim")).toBe(false);
+  });
+  it("perda por revogação no claim não troca por alguém fora da lista", async () => {
+    const state = stubState({ allowed: [AGENT_ID], claimResult: "candidate_revoked" });
+    expect(await crmRequestHumanHandoff.handler(baseInput, makeCtx(state))).toMatchObject({ assigned_to: null, queued: true });
+    expect(state.rpcCalls.filter(c => c.fn === "fn_channel_routing_claim")).toHaveLength(1);
+    expect(state.rpcCalls.at(-1)?.fn).toBe("fn_request_channel_routing");
   });
 
-  describe("next_action com expectativa real (ACH-03 fechado também aqui)", () => {
-    // Achado ao vivo: "Testar agente" (que chama esta tool) devolvia
-    // "avise em tom acolhedor" genérico às 12:43, fora do horário de
-    // expediente — porque esta rota ainda não consultava quemPodeAssumirAgora.
-    // new Date() interno da tool exige fake timer pra fixar o "agora".
-    beforeEach(() => {
-      // Quarta 2026-07-29, 13h em São Paulo (16h UTC) — fora de QUALQUER janela
-      // configurada abaixo (14h-18h), então motivoEHorario fica true.
-      vi.useFakeTimers();
-      vi.setSystemTime(new Date("2026-07-29T16:00:00.000Z"));
-    });
-    afterEach(() => {
-      vi.useRealTimers();
-    });
+});
 
-    it("fora do horário declarado: next_action tem a estimativa, não o genérico antigo", async () => {
-      const state = stubState({
-        attendants: [
-          {
-            user_id: AGENT_ID,
-            capacity: 5,
-            schedule: { timezone: "America/Sao_Paulo", windows: [{ dow: 3, start: "14:00", end: "18:00" }] },
-          },
-        ],
-      });
-      const result = (await crmRequestHumanHandoff.handler(baseInput, makeCtx(state))) as {
-        next_action: string;
-      };
-      expect(result.next_action).toMatch(/14:00/);
-      expect(result.next_action).not.toBe(
-        "Avise o cliente em tom acolhedor que um atendente humano vai assumir em instantes.",
-      );
+/**
+ * O CONTEXTO QUE O AGENTE EXTERNO ESCREVE, E ONDE ELE PODE MORAR.
+ *
+ * Antes desta entrega a tool descartava tudo menos a intenção: `reason` era
+ * fixado em `"requested_human"` e o texto que o agente escreveu ia para
+ * `metadata.original_reason` — que o orquestrador copia inteiro para
+ * `api_audit_log.metadata`. **Nenhum papel tem GRANT de UPDATE ou DELETE nessa
+ * tabela, nem `service_role`**: texto livre de fora gravado ali é texto que a
+ * cascata de LGPD não consegue redigir. O destino certo é `content`, que a
+ * cascata alcança.
+ *
+ * E o catálogo MCP promete, desta tool, "entregando um resumo do que já
+ * aconteceu na conversa". Era falso: nada de resumo saía daqui. Com os campos
+ * novos a promessa vira verdade — por isso o texto do catálogo se mantém.
+ */
+describe("crm_request_human_handoff · o contexto para quem assume", () => {
+  it("aceita o que o agente já tentou e o que o cliente quer", async () => {
+    const state = stubState({ allowed: [] });
+    await crmRequestHumanHandoff.handler(
+      {
+        ...baseInput,
+        o_que_tentei: [{ o_que: "consultei a política de troca", desfecho: "só vale em 7 dias" }],
+        cliente_quer: "trocar depois de 20 dias",
+      },
+      makeCtx(state),
+    );
+    const chamada = vi.mocked(triggerHandoff).mock.calls.at(-1)?.[0];
+    expect(chamada?.declarado?.cliente_quer).toBe("trocar depois de 20 dias");
+    expect(chamada?.declarado?.tentativas).toHaveLength(1);
+  });
+
+  it("o `reason` do agente vai para o texto do motivo, NUNCA para o audit", async () => {
+    const state = stubState({ allowed: [] });
+    await crmRequestHumanHandoff.handler(
+      { ...baseInput, reason: "cliente muito irritado com a entrega" },
+      makeCtx(state),
+    );
+    const chamada = vi.mocked(triggerHandoff).mock.calls.at(-1)?.[0];
+    expect(chamada?.motivoTexto).toBe("cliente muito irritado com a entrega");
+    expect(
+      JSON.stringify(chamada?.metadata ?? {}),
+      "texto livre de fora numa tabela sem UPDATE nem DELETE para nenhum papel",
+    ).not.toContain("cliente muito irritado");
+    expect(chamada?.metadata).not.toHaveProperty("original_reason");
+  });
+
+  it("a origem declarada é a do agente externo — não se confunde com a nativa", async () => {
+    const state = stubState({ allowed: [] });
+    await crmRequestHumanHandoff.handler(baseInput, makeCtx(state));
+    expect(vi.mocked(triggerHandoff).mock.calls.at(-1)?.[0].origem).toBe("mcp_externo");
+  });
+
+  it("`next_action` deixa de mandar avisar quem o orquestrador JÁ avisou", async () => {
+    // O aviso ao cliente é o passo 0 de `triggerHandoff`, e acontece antes de a
+    // tool responder. Repetir "avise o cliente" aqui fazia o agente mandar a
+    // mesma coisa duas vezes.
+    vi.mocked(triggerHandoff).mockResolvedValueOnce({
+      triggered: true,
+      reason: "requested_human",
+      aviso: { avisado: true },
     });
+    const r = (await crmRequestHumanHandoff.handler(baseInput, makeCtx(stubState({ allowed: [] })))) as {
+      next_action: string;
+    };
+    expect(r.next_action).toContain("já foi avisado");
+    expect(r.next_action).not.toMatch(/Avise o cliente/u);
+  });
+
+  it("quando o aviso NÃO saiu, a instrução muda — e não promete nada ao cliente", async () => {
+    vi.mocked(triggerHandoff).mockResolvedValueOnce({
+      triggered: true,
+      reason: "requested_human",
+      aviso: { avisado: false, porque: "na_fila_canal_fora", motivoCodigo: "na_fila_canal_fora" },
+    });
+    const r = (await crmRequestHumanHandoff.handler(baseInput, makeCtx(stubState({ allowed: [] })))) as {
+      next_action: string;
+    };
+    expect(r.next_action).toContain("Não foi possível avisar o cliente");
   });
 });

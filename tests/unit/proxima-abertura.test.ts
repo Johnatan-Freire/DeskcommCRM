@@ -28,7 +28,6 @@ function janelasSegASab() {
 /** UTC-3 fixo (sem DST no Brasil desde 2019) — `local` em "HH:MM" vira instante UTC do mesmo dia. */
 function quartaAs(hhmm: string): Date {
   const [h, mi] = hhmm.split(":").map(Number);
-  if (h === undefined || mi === undefined) throw new Error(`horário inválido no teste: ${hhmm}`);
   return new Date(Date.UTC(2026, 6, 29, h + 3, mi)); // 2026-07-29 é quarta-feira (dow=3)
 }
 

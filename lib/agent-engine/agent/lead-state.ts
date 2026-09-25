@@ -84,6 +84,41 @@ export type LeadStateUpdateResult =
     }
   | { ok: false; error: { code: 'invalid_payload' | 'invalid_transition'; message: string } };
 
+/**
+ * Autorização terminal (bloqueio won/lost, migration 0401): `won`/`lost`
+ * exigem capability explícita por versão de agente (`ai_agent_versions.can_mark_won`/
+ * `can_mark_lost`). Fail-closed de propósito — `autorizacao === null` (sem agente
+ * publicado, fallback genérico) bloqueia as duas, porque ausência de config não é
+ * autorização. Função pura: quem chama passa `stage` já sabendo que é uma tentativa
+ * de transição real (não noop), e decide sozinho se chama antes de qualquer escrita.
+ */
+export function verificarAutorizacaoTerminal(
+  stage: LeadStage,
+  autorizacao: { canMarkWon: boolean; canMarkLost: boolean } | null,
+): { ok: true } | { ok: false; error: { code: 'transicao_nao_autorizada'; message: string } } {
+  if (stage === 'won' && autorizacao?.canMarkWon !== true) {
+    return {
+      ok: false,
+      error: {
+        code: 'transicao_nao_autorizada',
+        message:
+          'Este agente não tem autorização para marcar won. Mantenha o estágio em negotiating e ' +
+          'abra um caso humano (open_human_case) pedindo confirmação de pagamento.',
+      },
+    };
+  }
+  if (stage === 'lost' && autorizacao?.canMarkLost !== true) {
+    return {
+      ok: false,
+      error: {
+        code: 'transicao_nao_autorizada',
+        message: 'Este agente não tem autorização para marcar lost.',
+      },
+    };
+  }
+  return { ok: true };
+}
+
 function teachInvalidTransition(current: LeadStage, to: LeadStage): LeadStateUpdateResult {
   const valid = LEAD_STAGE_TRANSITIONS[current];
   const options =

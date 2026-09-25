@@ -22,11 +22,18 @@ const consultas: { platformAdmins: unknown; memberships: unknown } = {
   memberships: { data: [], error: null },
 };
 
-vi.mock("next/headers", () => ({ cookies: async () => ({ getAll: () => [], set: () => {} }) }));
+// `get` entrou junto com a cadeia de idioma (usuário → organização): o
+// resolvedor pergunta ao cookie qual organização está ativa. O dublê tinha
+// `getAll`/`set` e não `get` — menos completo que a API real, e o teste caía
+// por falta do dublê, não por defeito.
+vi.mock("next/headers", () => ({
+  cookies: async () => ({ get: () => undefined, getAll: () => [], set: () => {} }),
+}));
 vi.mock("next/navigation", () => ({ redirect: () => { throw new Error("redirect"); } }));
 
 vi.mock("@/lib/supabase/server", () => ({
   createClient: async () => ({
+    rpc: async () => ({ data: null, error: null }),
     auth: {
       getUser: async () => ({
         data: { user: { id: "u1", email: "a@b.c", user_metadata: {} } },
@@ -39,7 +46,17 @@ vi.mock("@/lib/supabase/server", () => ({
       const chain = {
         select: () => chain,
         eq: () => chain,
-        is: () => (alvo === "platformAdmins" ? { maybeSingle: async () => resultado() } : resultado()),
+        // ⚠️ `is()` para memberships devolve o RESULTADO, e não a cadeia — o que
+        // fazia dele o terminal obrigatório. A consulta de memberships passou a
+        // ordenar (a lista decide qual organização fica ativa sem cookie, e sem
+        // `ORDER BY` "a primeira" é o que o Postgres devolver), então o terminal
+        // agora pode vir depois de `.order()`. O dublê precisa aceitar as duas
+        // formas — e é thenable, então `await` no fim resolve igual.
+        is: () =>
+          alvo === "platformAdmins"
+            ? { maybeSingle: async () => resultado() }
+            : { ...chain, then: chain.then },
+        order: () => ({ ...chain, then: chain.then }),
         maybeSingle: async () => resultado(),
         then: (r: (v: unknown) => unknown) => Promise.resolve(resultado()).then(r),
       };
@@ -97,7 +114,21 @@ describe("loadAuthUser — falha de permissão não vira 'sem organização'", (
     };
     const u = await loadAuthUser();
     expect(u?.organizations).toEqual([
-      { organization_id: "o1", organization_name: "Acme", role: "admin" },
+      // `locale` e `timezone` são o idioma e o fuso padrão da ORGANIZAÇÃO, que
+      // entram na membership para quem resolve a sessão não precisar de uma
+      // segunda consulta — o idioma para a interface, o fuso para a Agenda abrir
+      // na semana de quem olha. Os dois vêm `null` aqui porque o dublê não
+      // devolve as colunas, e é isso que este caso fixa: quando a consulta não
+      // traz, a sessão recebe `null` em vez de `undefined` ou de um padrão
+      // inventado no meio do caminho.
+      {
+        organization_id: "o1",
+        organization_name: "Acme",
+        role: "admin",
+        locale: null,
+        timezone: null,
+        interface_settings: { preset: "completa" },
+      },
     ]);
   });
 });

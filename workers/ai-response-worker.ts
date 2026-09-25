@@ -1,3 +1,7 @@
+import { recordLegacyNotice } from "@/lib/ai/agents/legacy-notice";
+import { serviceFromMessage } from "@/lib/atendimento/origem-mensagem";
+import { assertServiceBoundarySupabase } from "@/lib/atendimento/origem";
+import type { ServiceBoundary } from "@/lib/atendimento/fronteira";
 /**
  * ai-response-worker — pipeline that consumes `message.received` events and
  * produces an AI-generated outbound message + `message.send_requested` event.
@@ -16,12 +20,7 @@
 
 import { generateText, type LanguageModel } from "ai";
 
-import {
-  DEFAULT_BOT_MODEL,
-  gatewayConfig,
-  gatewayHeaders,
-  isAiGatewayConfigured,
-} from "@/lib/ai/gateway";
+import { DEFAULT_BOT_MODEL, gatewayConfig, gatewayHeaders } from "@/lib/ai/gateway";
 import { embedText } from "@/lib/ai/embed";
 import { MODELO_DE_EMBEDDING } from "@/lib/ai/embeddings/chave";
 import { getBudgetStatus, type BudgetStatus } from "@/lib/ai/budget/check";
@@ -34,9 +33,13 @@ import {
   HANDOFF_REASON_ORCAMENTO,
 } from "@/lib/agent-engine/edge/llm/orcamento";
 import { computeCost } from "@/lib/ai/cost";
+import { silencioVigente } from "@/lib/inbox/comando-da-conversa";
 import { logInvocation } from "@/lib/ai/log-invocation";
+import { elegivelParaWorkerLegado, precisaRecuperarLegado } from "@/lib/ai/agents/no-ar";
 import { renderSystemPrompt } from "@/lib/ai/render-system-prompt";
 import { triggerHandoff } from "@/lib/ai/handoff/orchestrator";
+import { decidirElegibilidadeDaConversaViaSupabase } from "@/lib/ai/elegibilidade/consulta-supabase";
+import { ttlDaAutorizacaoMs } from "@/lib/ai/elegibilidade/gate";
 import { checkG1, checkG3, checkG4Legal, checkG4Stage } from "@/lib/ai/handoff/triggers";
 import type {
   BotContext,
@@ -69,11 +72,6 @@ export interface ProcessResult {
 }
 
 export async function processMessageReceived(row: EventRow): Promise<ProcessResult> {
-  // Cheap pre-check before doing any DB work.
-  if (!isAiGatewayConfigured()) {
-    return { status: "skipped", reason: "ai_gateway_key_missing" };
-  }
-
   const messageId = (row.payload?.["message_id"] as string | undefined) ?? row.entity_id ?? null;
   const conversationId = (row.payload?.["conversation_id"] as string | undefined) ?? null;
   if (!messageId || !conversationId) {
@@ -101,6 +99,23 @@ export async function processMessageReceived(row: EventRow): Promise<ProcessResu
   }
 
   const ctx = decision.context;
+  const boundary = await serviceFromMessage(
+    createAdminClient(),
+    ctx.organization_id,
+    ctx.message_id,
+  );
+  if (
+    !boundary ||
+    boundary.contact_id !== ctx.contact_id ||
+    boundary.conversation_id !== ctx.conversation_id
+  )
+    return { status: "skipped", reason: "service_boundary_stale" };
+  try {
+    await assertServiceBoundarySupabase(createAdminClient(), boundary);
+  } catch {
+    return { status: "skipped", reason: "service_boundary_stale" };
+  }
+  ctx.serviceBoundary = boundary;
 
   // ── Synchronous triage (G1, G4) — bypass LLM entirely if a hard handoff
   //    signal is present in the inbound body or the lead's stage. -----------
@@ -109,8 +124,10 @@ export async function processMessageReceived(row: EventRow): Promise<ProcessResu
   if (checkG1(ctx.inbound_body)) {
     await triggerHandoff({
       conversationId: ctx.conversation_id,
+      serviceBoundary: ctx.serviceBoundary,
       organizationId: ctx.organization_id,
       reason: "requested_human",
+      origem: "legado_pedido",
       leadId,
       metadata: { message_id: ctx.message_id, source: "g1_regex" },
     });
@@ -120,8 +137,10 @@ export async function processMessageReceived(row: EventRow): Promise<ProcessResu
   if (checkG4Legal(ctx.inbound_body)) {
     await triggerHandoff({
       conversationId: ctx.conversation_id,
+      serviceBoundary: ctx.serviceBoundary,
       organizationId: ctx.organization_id,
       reason: "legal_mention",
+      origem: "legado_juridico",
       leadId,
       metadata: { message_id: ctx.message_id, source: "g4_legal_regex" },
     });
@@ -132,12 +151,22 @@ export async function processMessageReceived(row: EventRow): Promise<ProcessResu
   if (stageRequiresHuman) {
     await triggerHandoff({
       conversationId: ctx.conversation_id,
+      serviceBoundary: ctx.serviceBoundary,
       organizationId: ctx.organization_id,
       reason: "critical_stage",
+      origem: "legado_etapa",
       leadId,
       metadata: { message_id: ctx.message_id, source: "g4_stage_requires_human" },
     });
     return { status: "skipped", reason: "handoff_g4_stage" };
+  }
+
+  if (!elegivelParaWorkerLegado(ctx.agent)) {
+    return {
+      status: "skipped",
+      reason: "agent_inactive_or_missing",
+      detail: "legacy_recovery_required",
+    };
   }
 
   // ── Teto de gasto (IA-02) — mesma decisão e mesma régua que o engine aplica.
@@ -155,6 +184,7 @@ export async function processMessageReceived(row: EventRow): Promise<ProcessResu
   const veto = await vetoPorTetoDeGasto({
     orgId: ctx.organization_id,
     conversationId: ctx.conversation_id,
+    serviceBoundary: ctx.serviceBoundary,
     leadId,
   });
   if (veto !== null) {
@@ -215,7 +245,10 @@ export async function processMessageReceived(row: EventRow): Promise<ProcessResu
     // ── G3 — bot's own response signals low confidence / uncertainty.
     //    Persist the message (may serve as a draft for the human) but DO NOT
     //    dispatch via WAHA, and trigger handoff. ----------------------------
-    const confidence = response.citations[0]?.similarity ?? 0;
+    // `?? null`, nunca `?? 0`: sem citação não houve medição de similaridade, e
+    // zero é uma AFIRMAÇÃO ("o material é péssimo") que escala para humano toda
+    // resposta que não consultou a base. Ver o cabeçalho de `checkG3`.
+    const confidence = response.citations[0]?.similarity ?? null;
     const confidenceThreshold =
       typeof ctx.agent.config?.["confidence_threshold"] === "number"
         ? (ctx.agent.config["confidence_threshold"] as number)
@@ -233,8 +266,10 @@ export async function processMessageReceived(row: EventRow): Promise<ProcessResu
       });
       await triggerHandoff({
         conversationId: ctx.conversation_id,
+        serviceBoundary: ctx.serviceBoundary,
         organizationId: ctx.organization_id,
         reason: "low_confidence",
+        origem: "legado_confianca",
         leadId,
         metadata: {
           message_id: ctx.message_id,
@@ -356,6 +391,7 @@ export async function processMessageReceived(row: EventRow): Promise<ProcessResu
  * numa VPS onde não há para quem ligar.
  */
 async function vetoPorTetoDeGasto(alvo: {
+  serviceBoundary?: ServiceBoundary;
   orgId: string;
   conversationId: string;
   leadId: string | null;
@@ -470,8 +506,10 @@ async function vetoPorTetoDeGasto(alvo: {
   // recusa — mas ela é logada lá dentro.
   await triggerHandoff({
     conversationId: alvo.conversationId,
+    serviceBoundary: alvo.serviceBoundary,
     organizationId: orgId,
     reason: HANDOFF_REASON_ORCAMENTO,
+    origem: "legado_teto",
     leadId: alvo.leadId,
     metadata: {
       source: "teto_de_gasto",
@@ -576,7 +614,7 @@ async function buildContext(input: BuildContextInput): Promise<GuardDecision> {
   const { data: conv, error: convErr } = await admin
     .from("conversations")
     .select(
-      "id, organization_id, contact_id, channel_session_id, last_inbound_at, bot_silenced_until, last_handoff_at, assignee_kind, contacts:contact_id(id, display_name, locale, is_blocked, force_human)",
+      "id, organization_id, contact_id, channel_session_id, last_inbound_at, bot_silenced_until, last_handoff_at, assignee_kind, contacts:contact_id(id, name, display_name, locale, is_blocked, force_human)",
     )
     .eq("id", input.conversationId)
     .eq("organization_id", input.organizationId)
@@ -596,6 +634,7 @@ async function buildContext(input: BuildContextInput): Promise<GuardDecision> {
     assignee_kind: string | null;
     contacts: {
       id: string;
+      name: string | null;
       display_name: string | null;
       locale: string | null;
       is_blocked: boolean;
@@ -610,13 +649,53 @@ async function buildContext(input: BuildContextInput): Promise<GuardDecision> {
   // deterministicamente, mesma família de guard de force_human/bot_silenced_until.
   if (c.assignee_kind === "user") return skip("assigned_to_human");
 
+  // GATE DE ELEGIBILIDADE (opt-in por canal — `metadata.ai_gate = 'allowlist'`).
+  // Este worker é o caminho PRÉ-ENGINE: responde as orgs sem versão de agente
+  // publicada. Ele TAMBÉM tem de respeitar o gate — senão liga-se
+  // `ai_gate='allowlist'` num canal, o log não reclama, e a IA segue
+  // respondendo todo mundo por aqui (a "falha-em-verde" que a doutrina condena).
+  // Mesma regra pura que o drain e o turno do agent-engine. Canal 'open' (o
+  // default) → `permite:true`, nada muda. Fail-closed: erro de leitura → skip.
+  try {
+    const elegib = await decidirElegibilidadeDaConversaViaSupabase(admin, {
+      organizationId: input.organizationId,
+      conversationId: input.conversationId,
+      agora: new Date(),
+      ttlMs: ttlDaAutorizacaoMs(process.env),
+    });
+    if (elegib !== null && !elegib.permite) {
+      return skip("nao_elegivel_para_ia", elegib.motivo);
+    }
+  } catch (err) {
+    return skip(
+      "nao_elegivel_para_ia",
+      `elegibilidade indeterminada: ${err instanceof Error ? err.message.slice(0, 120) : "erro"}`,
+    );
+  }
+
   // 24h window (IA-01). Use last_inbound_at — webhook updates it on receive.
   if (c.last_inbound_at) {
     const age = Date.now() - new Date(c.last_inbound_at).getTime();
     if (age > WINDOW_24H_MS) return skip("window_24h_expired");
   }
-  // Post-handoff silence (IA-06)
-  if (c.bot_silenced_until && new Date(c.bot_silenced_until).getTime() > Date.now()) {
+  // Post-handoff silence (IA-06).
+  //
+  // A regra vem de `lib/inbox/comando-da-conversa.ts` — a MESMA que move a tela —
+  // e não de uma comparação local, porque a cópia local que estava aqui discordava
+  // dela em produção. Ela era:
+  //
+  //     new Date(c.bot_silenced_until).getTime() > Date.now()
+  //
+  // e o valor que o produto grava para escalação permanente é `'infinity'`, cujo
+  // `new Date(...).getTime()` é `NaN`. Toda comparação com `NaN` é falsa, então a
+  // guarda nunca disparava: a tela mostrava "automático parado" e este worker
+  // seguia respondendo por cima de uma conversa que a IA havia entregado a um
+  // humano (medido na VPS em 2026-08-30, handoff por `low_sentiment`).
+  //
+  // `silencioVigente` também falha FECHADO em data ilegível, que é a direção certa:
+  // dizer "o automático está ativo" sobre um dado que não se sabe ler é a frase
+  // tranquilizadora que a doutrina proíbe.
+  if (silencioVigente(c.bot_silenced_until, new Date()).vigente) {
     return skip("silenced_post_handoff");
   }
   // Recent handoff (idempotency for S-06.03)
@@ -638,7 +717,7 @@ async function buildContext(input: BuildContextInput): Promise<GuardDecision> {
   const inbound_body = (msg.body ?? "").trim();
   if (!inbound_body) return skip("empty_inbound_body");
 
-  // Corte de conexão (migration 0281) — mesma trava do lado do engine em
+  // Corte de conexão (migration 0398) — mesma trava do lado do engine em
   // `lib/agent-engine/edge/crm/drain.ts`: WAHA/NOWEB sincroniza histórico do
   // WhatsApp ao parear uma sessão nova, sem nada no payload que distinga
   // mensagem nova de mensagem antiga. `sent_at` é o horário REAL do WhatsApp;
@@ -657,18 +736,44 @@ async function buildContext(input: BuildContextInput): Promise<GuardDecision> {
     return skip("message_before_connection");
   }
 
-  // Default agent for this tenant.
-  const { data: agent } = await admin
+  // O agente legado desta organização.
+  //
+  // `is_active` sozinho NÃO é "quem atende", e tratá-lo como se fosse era o
+  // buraco: pausar um `mcp_agent` limpa `published_version_id` e deixa
+  // `is_active` de pé, então este SELECT continuava trazendo o agente que o dono
+  // acabara de pausar — e a trava `engine_owns_reply` logo abaixo, que é
+  // ORG-WIDE, deixa de valer exatamente quando o último publicado é pausado.
+  // Resultado medido em produção: pausar o agente o fazia VOLTAR a responder,
+  // com o `system_prompt` do cadastro no lugar do da versão publicada.
+  //
+  // A régua agora é a mesma que a tela usa (`lib/ai/agents/no-ar.ts`).
+  //
+  // ⚠️ Quem PROTEGE é a régua, não o `.is("archived_at", null)` abaixo — medido
+  // por sabotagem: apagar o filtro deixa os 4 casos de
+  // `tests/unit/agente-pausado-nao-atende.test.ts` verdes, porque
+  // `estadoDoAgente` já devolve "arquivado". O filtro fica por ser mais barato
+  // não trazer do banco o que vai ser descartado; não confie nele como guarda.
+  // Sem `.limit(1)`: o primeiro da ordem pode ser justamente o que a régua
+  // recusa, e cortar antes de filtrar faria um `mcp_agent` pausado — que é
+  // `is_default` na instalação que o onboarding cria — esconder o `rag_bot`
+  // legítimo logo abaixo dele. A ordem (`is_default`, depois `created_at`) é a
+  // de sempre; o que muda é que ela agora escolhe entre os ELEGÍVEIS.
+  const { data: candidatos } = await admin
     .from("ai_agents")
     .select(
-      "id, organization_id, model, system_prompt, config, guardrails, active_kb_version_id, is_active, is_default",
+      "id, organization_id, model, system_prompt, config, guardrails, active_kb_version_id, is_active, is_default, kind, published_version_id, archived_at, paused_at",
     )
     .eq("organization_id", input.organizationId)
     .eq("is_active", true)
+    .is("archived_at", null)
     .order("is_default", { ascending: false })
-    .order("created_at", { ascending: true })
-    .limit(1)
-    .maybeSingle();
+    .order("created_at", { ascending: true });
+
+  for (const candidate of candidatos ?? []) {
+    if (precisaRecuperarLegado(candidate))
+      await recordLegacyNotice(admin, input.organizationId, candidate.id, "sem_versao");
+  }
+  const agent = (candidatos ?? []).find(precisaRecuperarLegado) ?? null;
 
   if (!agent) return skip("agent_inactive_or_missing");
 
@@ -722,16 +827,16 @@ async function buildContext(input: BuildContextInput): Promise<GuardDecision> {
     .eq("conversation_id", input.conversationId)
     .order("created_at", { ascending: false })
     .limit(RECENT_MESSAGES_LIMIT);
-  const recent_messages: RecentMessage[] = ((recents ?? []) as RecentMessage[])
-    .slice()
-    .reverse();
+  const recent_messages: RecentMessage[] = ((recents ?? []) as RecentMessage[]).slice().reverse();
 
   // RAG best-effort: lista vazia quando não há material ou não há chave.
-  const retrieved_chunks = await retrieveContext({
-    organizationId: input.organizationId,
-    kbVersionId: agent.active_kb_version_id ?? null,
-    query: inbound_body,
-  });
+  const retrieved_chunks = elegivelParaWorkerLegado(agent)
+    ? await retrieveContext({
+        organizationId: input.organizationId,
+        kbVersionId: agent.active_kb_version_id ?? null,
+        query: inbound_body,
+      })
+    : [];
 
   return {
     kind: "proceed",
@@ -744,6 +849,10 @@ async function buildContext(input: BuildContextInput): Promise<GuardDecision> {
       inbound_body,
       recent_messages,
       agent: {
+        kind: agent.kind,
+        // A consulta acima já traz a coluna; faltava carregá-la até aqui, e a
+        // decisão que a lê ("este agente atende?") ficava sem o dado.
+        paused_at: agent.paused_at,
         id: agent.id,
         model: agent.model || DEFAULT_BOT_MODEL,
         system_prompt: agent.system_prompt,
@@ -753,6 +862,7 @@ async function buildContext(input: BuildContextInput): Promise<GuardDecision> {
       },
       contact: {
         id: c.contacts.id,
+        name: c.contacts.name,
         display_name: c.contacts.display_name,
         locale: c.contacts.locale,
       },
@@ -770,10 +880,7 @@ function skip(reason: SkipDecision["reason"], detail?: string): SkipDecision {
  * the handoff orchestrator for stage gating (G4) + timeline activity. Returns
  * null on missing/error — handoff itself never depends on a lead.
  */
-async function resolveLeadId(
-  organizationId: string,
-  contactId: string,
-): Promise<string | null> {
+async function resolveLeadId(organizationId: string, contactId: string): Promise<string | null> {
   try {
     const admin = createAdminClient();
     const { data } = await admin
@@ -841,21 +948,27 @@ async function retrieveContext(input: RetrieveInput): Promise<RagHit[]> {
 
   const { data, error } =
     fontes.length > 0
-      ? await admin.rpc("fn_buscar_trechos_das_fontes" as never, {
-          p_organization_id: input.organizationId,
-          p_source_ids: fontes as unknown as string,
-          p_embedding: embedding as unknown as string,
-          p_k: RAG_TOP_K,
-          p_threshold: RAG_THRESHOLD,
-          p_embedding_model: MODELO_DE_EMBEDDING,
-        } as never)
-      : await admin.rpc("retrieve_top_k_chunks" as never, {
-          p_organization_id: input.organizationId,
-          p_kb_version_id: input.kbVersionId,
-          p_embedding: embedding as unknown as string,
-          p_k: RAG_TOP_K,
-          p_threshold: RAG_THRESHOLD,
-        } as never);
+      ? await admin.rpc(
+          "fn_buscar_trechos_das_fontes" as never,
+          {
+            p_organization_id: input.organizationId,
+            p_source_ids: fontes as unknown as string,
+            p_embedding: embedding as unknown as string,
+            p_k: RAG_TOP_K,
+            p_threshold: RAG_THRESHOLD,
+            p_embedding_model: MODELO_DE_EMBEDDING,
+          } as never,
+        )
+      : await admin.rpc(
+          "retrieve_top_k_chunks" as never,
+          {
+            p_organization_id: input.organizationId,
+            p_kb_version_id: input.kbVersionId,
+            p_embedding: embedding as unknown as string,
+            p_k: RAG_TOP_K,
+            p_threshold: RAG_THRESHOLD,
+          } as never,
+        );
 
   if (error) {
     logger.warn("[ai-response-worker] busca de trechos falhou", {
@@ -994,6 +1107,7 @@ async function persistAndDispatch(
     },
   };
 
+  await assertServiceBoundarySupabase(admin, ctx.serviceBoundary ?? null);
   const { data: inserted, error } = await admin
     .from("messages")
     .insert(insertRow)
@@ -1011,18 +1125,21 @@ async function persistAndDispatch(
   // EXCEPTION (S-06.03 wave 3): when handoff was triggered (G3 low confidence),
   // we persist the bot's draft for the human to reuse but MUST NOT dispatch.
   if (!options.skipDispatch) {
-    const { error: emitErr } = await admin.rpc("emit_event" as never, {
-      p_event_type: "message.send_requested",
-      p_entity_kind: "message",
-      p_entity_id: inserted.id,
-      p_payload: {
-        message_id: inserted.id,
-        conversation_id: ctx.conversation_id,
-        ai_generated: true,
-      },
-      p_metadata: { source: "ai-response-worker" },
-      p_organization_id: ctx.organization_id,
-    } as never);
+    const { error: emitErr } = await admin.rpc(
+      "emit_event" as never,
+      {
+        p_event_type: "message.send_requested",
+        p_entity_kind: "message",
+        p_entity_id: inserted.id,
+        p_payload: {
+          message_id: inserted.id,
+          conversation_id: ctx.conversation_id,
+          ai_generated: true,
+        },
+        p_metadata: { source: "ai-response-worker" },
+        p_organization_id: ctx.organization_id,
+      } as never,
+    );
     if (emitErr) {
       logger.warn("[ai-response-worker] message.send_requested emit failed", {
         error: emitErr.message,
@@ -1033,20 +1150,23 @@ async function persistAndDispatch(
 
   // Domain event for downstream consumers (UI realtime, audit).
   void admin
-    .rpc("emit_event" as never, {
-      p_event_type: "ai.responded",
-      p_entity_kind: "message",
-      p_entity_id: inserted.id,
-      p_payload: {
-        message_id: inserted.id,
-        conversation_id: ctx.conversation_id,
-        agent_id: ctx.agent.id,
-        confidence: response.citations[0] ? response.citations[0].similarity : null,
-        citations: response.citations,
-      },
-      p_metadata: { source: "ai-response-worker" },
-      p_organization_id: ctx.organization_id,
-    } as never)
+    .rpc(
+      "emit_event" as never,
+      {
+        p_event_type: "ai.responded",
+        p_entity_kind: "message",
+        p_entity_id: inserted.id,
+        p_payload: {
+          message_id: inserted.id,
+          conversation_id: ctx.conversation_id,
+          agent_id: ctx.agent.id,
+          confidence: response.citations[0] ? response.citations[0].similarity : null,
+          citations: response.citations,
+        },
+        p_metadata: { source: "ai-response-worker" },
+        p_organization_id: ctx.organization_id,
+      } as never,
+    )
     .then(({ error: e }: { error: { message: string } | null }) => {
       if (e) {
         logger.warn("[ai-response-worker] ai.responded emit failed", {

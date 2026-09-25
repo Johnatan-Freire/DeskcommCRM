@@ -7,7 +7,12 @@ import {
   buscarAlunoPorTelefone,
   buscarCatalogoCursos,
   selecionarAluno,
+  sanitizarModalidades,
+  sanitizarCatalogo,
+  filtrarCatalogo,
   type RespostaAlunoPorTelefone,
+  type CatalogoCurso,
+  type CatalogoPacote,
 } from "./sistema-escolar";
 
 vi.mock("@/lib/env", () => ({ env: { AI_CRED_AES_KEY: Buffer.alloc(32, 7).toString("base64") } }));
@@ -108,6 +113,227 @@ describe("buscarAlunoPorTelefone / buscarCatalogoCursos", () => {
 
     expect(urlChamada).toBe("https://escola.example/api/deskcomm/cursos");
     expect(out).toEqual({ cursos: [], pacotes: [] });
+  });
+
+  it("schema tipado: curso real (payload de produção) passa no parse", async () => {
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({ cursos: [CURSO_INFORMATICA], pacotes: [] }), { status: 200 })) as typeof fetch;
+    const out = await buscarCatalogoCursos(config);
+    expect(out.cursos).toHaveLength(1);
+    expect(out.cursos[0]).toMatchObject({ nome: "Informática Básica", valor_integral: "780.00" });
+  });
+
+  it("T-schema: campo obrigatório faltando (nome) → ZodError, que o catch de inbound-turn.ts já cobre", async () => {
+    const { nome: _nome, ...semNome } = CURSO_INFORMATICA;
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({ cursos: [semNome], pacotes: [] }), { status: 200 })) as typeof fetch;
+    await expect(buscarCatalogoCursos(config)).rejects.toThrow();
+  });
+
+  it("T-schema: tipo incorreto (valor_integral como number) → ZodError", async () => {
+    const tipoErrado = { ...CURSO_INFORMATICA, valor_integral: 780 };
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({ cursos: [tipoErrado], pacotes: [] }), { status: 200 })) as typeof fetch;
+    await expect(buscarCatalogoCursos(config)).rejects.toThrow();
+  });
+});
+
+/** Curso real medido em produção (2026-09-22) — usado como fixture em vários testes abaixo. */
+const CURSO_INFORMATICA: CatalogoCurso = {
+  tipo: "curso",
+  nome: "Informática Básica",
+  descricao: "Prepara para uso do computador e internet com autonomia no dia a dia e no ambiente de trabalho.",
+  area: null,
+  modalidade: ["presencial", "ead"],
+  turnos: ["matutino", "vespertino"],
+  carga_horaria: "44.0",
+  duracao_meses: 6,
+  publico_alvo: null,
+  saidas_profissionais: null,
+  valor_integral: "780.00",
+  valor_avista: "624.00",
+  parcelas: 6,
+  valor_parcela: "130.00",
+  em_destaque: false,
+};
+
+const CURSO_PROGRAMACAO_INICIANTES: CatalogoCurso = {
+  ...CURSO_INFORMATICA,
+  nome: "Programação para iniciantes",
+  valor_integral: "980.00",
+};
+
+const CURSO_PROGRAMACAO_JOGOS: CatalogoCurso = {
+  ...CURSO_INFORMATICA,
+  nome: "Programação - Criação de Jogos",
+  valor_integral: "650.00",
+};
+
+const PACOTE_PROGRAMACAO_WEB: CatalogoPacote = {
+  tipo: "pacote",
+  nome: "Programação e Desenvolvimento Web",
+  descricao: "Formação completa",
+  area: null,
+  cursos_inclusos: ["Informática Básica", "Programação para iniciantes", "Desenvolvimento Web"],
+  carga_horaria: 190,
+  duracao_meses: 25,
+  publico_alvo: null,
+  objetivo_profissional: null,
+  habilidades: null,
+  valor_integral: "2457.00",
+  valor_avista: "1965.60",
+  parcelas: 21,
+  valor_parcela: "117.00",
+  economia_total: "1053.00",
+};
+
+const PACOTE_SEM_PARCELAMENTO: CatalogoPacote = {
+  tipo: "pacote",
+  nome: "Informática Completa",
+  descricao: "Operador de computador, Web Design, Design Gráfico",
+  area: null,
+  cursos_inclusos: ["Informática Básica", "Design Gráfico"],
+  carga_horaria: null,
+  duracao_meses: null,
+  publico_alvo: null,
+  objetivo_profissional: null,
+  habilidades: null,
+  valor_integral: "1400.00",
+  valor_avista: null,
+  parcelas: null,
+  valor_parcela: null,
+  economia_total: null,
+};
+
+describe("sanitizarModalidades — item 0.2: híbrido/hibrido NÃO é modalidade comercial atual (T70/T71)", () => {
+  it('["presencial"] → ok, canônico', () => {
+    expect(sanitizarModalidades(["presencial"], { curso: "X" })).toEqual({
+      modalidade: ["presencial"],
+      modalidade_status: "ok",
+    });
+  });
+
+  it('["ead"] → ok', () => {
+    expect(sanitizarModalidades(["ead"], { curso: "X" })).toEqual({
+      modalidade: ["ead"],
+      modalidade_status: "ok",
+    });
+  });
+
+  it('["presencial","ead"] → ok, os dois', () => {
+    expect(sanitizarModalidades(["presencial", "ead"], { curso: "X" })).toEqual({
+      modalidade: ["presencial", "ead"],
+      modalidade_status: "ok",
+    });
+  });
+
+  it('T70: ["hibrido"] (sem acento) → modalidade=[], inconsistente — NUNCA aparece como válido', () => {
+    expect(sanitizarModalidades(["hibrido"], { curso: "X" })).toEqual({
+      modalidade: [],
+      modalidade_status: "inconsistente",
+    });
+  });
+
+  it('["híbrido"] (com acento) → mesmo tratamento: modalidade=[], inconsistente', () => {
+    expect(sanitizarModalidades(["híbrido"], { curso: "X" })).toEqual({
+      modalidade: [],
+      modalidade_status: "inconsistente",
+    });
+  });
+
+  it('T71: ["presencial","banana"] → modalidade=["presencial"], inconsistente (parcial)', () => {
+    expect(sanitizarModalidades(["presencial", "banana"], { curso: "X" })).toEqual({
+      modalidade: ["presencial"],
+      modalidade_status: "inconsistente",
+    });
+  });
+
+  it('["presencial","hibrido"] → modalidade=["presencial"], inconsistente', () => {
+    expect(sanitizarModalidades(["presencial", "hibrido"], { curso: "X" })).toEqual({
+      modalidade: ["presencial"],
+      modalidade_status: "inconsistente",
+    });
+  });
+
+  it('["banana"] → modalidade=[], inconsistente — nunca derruba a chamada (nunca lança)', () => {
+    expect(() => sanitizarModalidades(["banana"], { curso: "X" })).not.toThrow();
+    expect(sanitizarModalidades(["banana"], { curso: "X" })).toEqual({
+      modalidade: [],
+      modalidade_status: "inconsistente",
+    });
+  });
+
+  it("array vazio (curso sem modalidade cadastrada) → inconsistente, nunca 'ok' por omissão", () => {
+    expect(sanitizarModalidades([], { curso: "X" }).modalidade_status).toBe("inconsistente");
+  });
+});
+
+describe("sanitizarCatalogo — aplica a sanitização a todo o catálogo, raw nunca chega ao modelo", () => {
+  it("curso com modalidade legada: o objeto devolvido NUNCA contém 'hibrido' em lugar nenhum", () => {
+    const curso = { ...CURSO_INFORMATICA, modalidade: ["hibrido"] };
+    const out = sanitizarCatalogo({ cursos: [curso], pacotes: [] });
+    const serializado = JSON.stringify(out.cursos[0]);
+    expect(serializado).not.toContain("hibrido");
+    expect(out.cursos[0]).toMatchObject({ modalidade: [], modalidade_status: "inconsistente" });
+  });
+
+  it("pacotes passam intocados (não têm campo modalidade no contrato real)", () => {
+    const out = sanitizarCatalogo({ cursos: [], pacotes: [PACOTE_PROGRAMACAO_WEB] });
+    expect(out.pacotes).toEqual([PACOTE_PROGRAMACAO_WEB]);
+  });
+});
+
+describe("filtrarCatalogo — busca determinística, sem escolha arbitrária (T53/T54)", () => {
+  const catalogo = sanitizarCatalogo({
+    cursos: [CURSO_INFORMATICA, CURSO_PROGRAMACAO_INICIANTES, CURSO_PROGRAMACAO_JOGOS],
+    pacotes: [PACOTE_PROGRAMACAO_WEB, PACOTE_SEM_PARCELAMENTO],
+  });
+
+  it("sem query: devolve tudo, ambiguous=false", () => {
+    const r = filtrarCatalogo(catalogo, {});
+    expect(r.match_count).toBe(5);
+    expect(r.ambiguous).toBe(false);
+  });
+
+  it('T53: "Informática Básica" (nome exato) → 1 match, ambiguous=false', () => {
+    const r = filtrarCatalogo(catalogo, { query: "Informática Básica" });
+    expect(r.match_count).toBe(1);
+    expect(r.ambiguous).toBe(false);
+    expect(r.cursos[0]?.nome).toBe("Informática Básica");
+  });
+
+  it('"informatica basica" sem acento/case → ainda bate (normalização só pra comparação)', () => {
+    const r = filtrarCatalogo(catalogo, { query: "informatica basica" });
+    expect(r.match_count).toBe(1);
+    // nome original preservado no retorno, mesmo a busca sendo normalizada
+    expect(r.cursos[0]?.nome).toBe("Informática Básica");
+  });
+
+  it('T54: "programação" → múltiplos candidatos (2 cursos + 1 pacote), ambiguous=true, NUNCA escolhe sozinho', () => {
+    const r = filtrarCatalogo(catalogo, { query: "programação" });
+    expect(r.match_count).toBe(3);
+    expect(r.ambiguous).toBe(true);
+    expect(r.cursos.map((c) => c.nome).sort()).toEqual(
+      ["Programação - Criação de Jogos", "Programação para iniciantes"].sort(),
+    );
+    expect(r.pacotes.map((p) => p.nome)).toEqual(["Programação e Desenvolvimento Web"]);
+  });
+
+  it('query sem nenhum match → match_count=0, listas vazias, NUNCA inventa', () => {
+    const r = filtrarCatalogo(catalogo, { query: "curso de astrologia" });
+    expect(r).toEqual({ cursos: [], pacotes: [], match_count: 0, ambiguous: false });
+  });
+
+  it('tipo="curso" restringe a busca — pacote que bateria fica de fora', () => {
+    const r = filtrarCatalogo(catalogo, { query: "programação", tipo: "curso" });
+    expect(r.match_count).toBe(2);
+    expect(r.pacotes).toEqual([]);
+  });
+
+  it('tipo="pacote" restringe — cursos que bateriam ficam de fora', () => {
+    const r = filtrarCatalogo(catalogo, { query: "programação", tipo: "pacote" });
+    expect(r.match_count).toBe(1);
+    expect(r.cursos).toEqual([]);
   });
 });
 

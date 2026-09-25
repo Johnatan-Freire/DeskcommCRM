@@ -25,14 +25,19 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { ArrowsClockwise, Trash } from "@/lib/ui/icons";
+import { ArrowsClockwise, PencilSimple, Trash } from "@/lib/ui/icons";
 import { apiClient } from "@/lib/api/client";
 import { showApiError } from "@/components/feedback/ApiErrorToast";
 import {
   credentialStatus,
   credentialsListQueryKey,
   type CredentialRow,
+  type CredentialStatus,
 } from "@/hooks/ai/useCredentials";
+import { useT } from "@/hooks/i18n/useT";
+import { PROVEDORES } from "@/lib/ai/pontos/provedores";
+import { descreverErroDeValidacao } from "@/lib/ai/credenciais/erro-de-validacao";
+import { RotateCredentialDialog } from "./RotateCredentialDialog";
 
 interface Props {
   credential: CredentialRow;
@@ -40,35 +45,41 @@ interface Props {
   usageCount: number;
 }
 
-const STATUS_LABEL: Record<ReturnType<typeof credentialStatus>, string> = {
+const STATUS_LABEL: Record<CredentialStatus, string> = {
   validated: "Validada",
   validating: "Validando…",
+  unvalidated: "Não validada",
   invalid: "Inválida",
   inactive: "Inativa",
 };
 
-const STATUS_VARIANT: Record<ReturnType<typeof credentialStatus>, "default" | "secondary" | "destructive" | "outline"> = {
+const STATUS_VARIANT: Record<CredentialStatus, "default" | "secondary" | "destructive" | "outline"> = {
   validated: "default",
   validating: "secondary",
+  unvalidated: "outline",
   invalid: "destructive",
   inactive: "outline",
 };
 
 export function CredentialCard({ credential, canWrite, usageCount }: Props) {
+  const t = useT();
   const router = useRouter();
   const qc = useQueryClient();
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
 
   const status = credentialStatus(credential);
   const last4 = credential.api_key_last4 ?? "????";
   const inUse = usageCount > 0;
+  const erro = descreverErroDeValidacao(credential.validation_error);
+  const provedor = PROVEDORES.find((p) => p.id === credential.provider);
 
   const onRevalidate = () => {
     startTransition(async () => {
       try {
         await apiClient.post(`/api/v1/ai/credentials/${credential.id}/revalidate`, {});
-        toast.success("Revalidando…");
+        toast.success(t("Revalidando…"));
         await qc.invalidateQueries({ queryKey: credentialsListQueryKey });
       } catch (err) {
         showApiError(err);
@@ -80,7 +91,7 @@ export function CredentialCard({ credential, canWrite, usageCount }: Props) {
     startTransition(async () => {
       try {
         await apiClient.delete(`/api/v1/ai/credentials/${credential.id}`);
-        toast.success("Credencial removida.");
+        toast.success(t("Credencial removida."));
         setDeleteOpen(false);
         await qc.invalidateQueries({ queryKey: credentialsListQueryKey });
         await refreshCredentialsView();
@@ -95,7 +106,7 @@ export function CredentialCard({ credential, canWrite, usageCount }: Props) {
     <Button
       variant="ghost"
       size="icon"
-      aria-label="Excluir credencial"
+      aria-label={t("Excluir credencial")}
       disabled={!canWrite || inUse || isPending}
       onClick={() => setDeleteOpen(true)}
     >
@@ -116,34 +127,67 @@ export function CredentialCard({ credential, canWrite, usageCount }: Props) {
         </div>
         <div className="flex shrink-0 items-center gap-1">
           <Badge variant={STATUS_VARIANT[status]} className="text-xs">
-            {STATUS_LABEL[status]}
+            {t(STATUS_LABEL[status])}
           </Badge>
         </div>
       </div>
 
       {credential.validation_error && (
-        <p className="line-clamp-2 text-xs text-destructive" title={credential.validation_error}>
-          {credential.validation_error}
+        <p className="text-xs text-destructive" title={credential.validation_error}>
+          {erro.generico
+            ? `${t("Falha na validação")} (${credential.validation_error}).`
+            : t(erro.frase)}
+          {erro.chaveErrada && provedor && (
+            <>
+              {" "}
+              <a
+                className="underline underline-offset-4"
+                href={provedor.ondePegarAChave}
+                target="_blank"
+                rel="noreferrer"
+              >
+                {t("Pegar chave em")} {provedor.rotulo}
+              </a>
+            </>
+          )}
+        </p>
+      )}
+
+      {status === "unvalidated" && (
+        <p className="text-xs text-muted-foreground">
+          {t("A validação não terminou. Clique em revalidar para testar a chave agora.")}
         </p>
       )}
 
       <dl className="grid grid-cols-2 gap-2 text-xs">
         <div>
-          <dt className="text-muted-foreground">Modelos</dt>
-          <dd className="font-mono">{credential.models_available ?? "—"}</dd>
+          <dt className="text-muted-foreground">{t("Modelos")}</dt>
+          <dd className="font-mono">{credential.models_available?.length ?? "—"}</dd>
         </div>
         <div>
-          <dt className="text-muted-foreground">Em uso por</dt>
+          <dt className="text-muted-foreground">{t("Em uso por")}</dt>
           <dd className="font-mono">{usageCount}</dd>
         </div>
       </dl>
 
       {canWrite && (
         <div className="flex items-center justify-end gap-1 pt-1">
+          {/* Rotacionar é o caminho que NÃO passa pela exclusão — e por isso
+              fica habilitado mesmo com a chave em uso. É por aqui que o
+              operador de um agente publicado troca a chave. */}
           <Button
             variant="ghost"
             size="icon"
-            aria-label="Revalidar credencial"
+            aria-label={t("Editar credencial")}
+            disabled={isPending}
+            onClick={() => setEditOpen(true)}
+          >
+            <PencilSimple size={14} aria-hidden />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label={t("Revalidar credencial")}
             disabled={isPending}
             onClick={onRevalidate}
           >
@@ -155,8 +199,11 @@ export function CredentialCard({ credential, canWrite, usageCount }: Props) {
                 <TooltipTrigger asChild>
                   <span tabIndex={0}>{deleteButton}</span>
                 </TooltipTrigger>
-                <TooltipContent>
-                  Em uso por {usageCount} agent{usageCount === 1 ? "" : "s"} publicado{usageCount === 1 ? "" : "s"}.
+                {/* Sem largura máxima o Radix desenha `minWidth: max-content`: esta
+                    frase, de 267 caracteres, vira UMA linha de ~1467px e o fim dela sai
+                    da tela em 1280, 1366 e 1440. Mesmo padrão de PlatformAdminsTable. */}
+                <TooltipContent className="max-w-xs break-words">
+                  {t("Em uso por")} {usageCount} {t("versão(ões) de agente")}. {t("Para trocar a chave, use editar. Para excluir, nenhuma versão pode estar usando a chave — e versão já publicada ou substituída não aceita mais apontar para outra chave, então a exclusão fica travada enquanto esse histórico existir.")}
                 </TooltipContent>
               </Tooltip>
             </TooltipProvider>
@@ -166,21 +213,30 @@ export function CredentialCard({ credential, canWrite, usageCount }: Props) {
         </div>
       )}
 
+      <RotateCredentialDialog
+        open={editOpen}
+        onOpenChange={setEditOpen}
+        credential={credential}
+      />
+
       <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              Remover credencial &ldquo;{credential.label}&rdquo;?
+              {t("Remover credencial")} &ldquo;{credential.label}&rdquo;?
             </AlertDialogTitle>
             <AlertDialogDescription>
-              Agents que usam esta credencial vão falhar ao executar.
-              Esta ação não pode ser desfeita.
+              {/* O diálogo só abre com `usageCount === 0` (a chave em uso tem o
+                  botão desabilitado), então não há agente a avisar — a frase
+                  antiga ("agents vão falhar") descrevia um caso que não chega
+                  aqui. O que sobra é o irreversível. */}
+              {t("Esta ação não pode ser desfeita.")}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={isPending}>Cancelar</AlertDialogCancel>
+            <AlertDialogCancel disabled={isPending}>{t("Cancelar")}</AlertDialogCancel>
             <AlertDialogAction onClick={onDelete} disabled={isPending}>
-              Remover
+              {t("Remover")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

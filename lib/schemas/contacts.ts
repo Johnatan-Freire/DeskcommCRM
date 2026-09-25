@@ -9,27 +9,33 @@
  */
 import { z } from "zod";
 
+import { normalizarTag, normalizarTags } from "@/lib/contacts/tag-normalizada";
+import { isValidCpf, type PerfilDoPais } from "@/lib/legal/perfil-do-pais";
+
 const PHONE_REGEX = /^\+\d{8,15}$/;
-const CPF_DIGITS = /^\d{11}$/;
 
 /**
- * CPF check-digit validator (algoritmo oficial Receita Federal).
- * Rejeita repetidos (00000000000, 11111111111, ...) e dígitos verificadores inválidos.
+ * Teto de 32 KB no jsonb inteiro. O CHECK do banco só garante que é OBJETO —
+ * sem limite de tamanho, um cliente da API escreveria megabytes numa coluna que
+ * a listagem de contatos traz inteira, e o custo apareceria como "a tela de
+ * contatos ficou lenta", longe da causa.
  */
-export function isValidCpf(raw: string): boolean {
-  const s = raw.replace(/\D/g, "");
-  if (!CPF_DIGITS.test(s) || /^(\d)\1{10}$/.test(s)) return false;
-  let sum = 0;
-  for (let i = 0; i < 9; i++) sum += parseInt(s[i]!, 10) * (10 - i);
-  let d1 = (sum * 10) % 11;
-  if (d1 === 10) d1 = 0;
-  if (d1 !== parseInt(s[9]!, 10)) return false;
-  sum = 0;
-  for (let i = 0; i < 10; i++) sum += parseInt(s[i]!, 10) * (11 - i);
-  let d2 = (sum * 10) % 11;
-  if (d2 === 10) d2 = 0;
-  return d2 === parseInt(s[10]!, 10);
-}
+const CUSTOM_FIELDS_MAX_BYTES = 32_768;
+
+const customFieldsSchema = z
+  .record(z.string().min(1).max(80), z.unknown())
+  .refine((value) => JSON.stringify(value).length <= CUSTOM_FIELDS_MAX_BYTES, {
+    message: "Campos personalizados excedem o limite de 32 KB",
+  });
+
+/**
+ * O mod-11 da Receita Federal mora no PERFIL do país
+ * (`lib/legal/perfil-do-pais.ts`), porque é ele quem responde pelo documento do
+ * titular — aqui fica só o re-export, para não existirem duas implementações da
+ * mesma regra. Quem importava deste módulo (rota de importação, testes,
+ * `lib/schemas/index.ts`) continua importando.
+ */
+export { isValidCpf };
 
 export const contactCreateSchema = z.object({
   name: z.string().min(1).max(200).optional(),
@@ -44,10 +50,13 @@ export const contactCreateSchema = z.object({
     .string()
     .regex(/^\d{4}-\d{2}-\d{2}$/)
     .optional(),
-  tags: z.array(z.string()).optional(),
+  // O marcador nasce em caixa baixa, pela MESMA regra da tag de conversa: o
+  // "VIP" gravado verbatim não casava com o filtro `?tag=vip` (issue #1224).
+  tags: z.array(z.string()).transform(normalizarTags).optional(),
   source: z.string().min(1).default("manual"),
   source_metadata: z.record(z.string(), z.unknown()).optional(),
   consent: z.record(z.string(), z.unknown()).optional(),
+  custom_fields: customFieldsSchema.optional(),
 });
 export type ContactCreate = z.infer<typeof contactCreateSchema>;
 
@@ -55,6 +64,40 @@ export const contactPatchSchema = contactCreateSchema.partial().extend({
   source: z.string().min(1).optional(),
 });
 export type ContactPatch = z.infer<typeof contactPatchSchema>;
+
+/**
+ * O documento do titular vem do PERFIL DO PAÍS da organização (issue #1033).
+ *
+ * `contactCreateSchema` continua sendo a régua brasileira — é o schema que as
+ * telas de cliente usam e o comportamento de quem já instalou. Estas fábricas
+ * só trocam o campo do documento: tudo o mais é o MESMO schema, estendido, e
+ * não uma segunda cópia — duas listas de campos divergem no dia em que uma
+ * ganhar um campo novo.
+ *
+ * Por que fábrica e não ler o país aqui dentro: o schema é síncrono e puro, e a
+ * resposta certa vem do banco (`perfilDaOrganizacao`), resolvida uma vez por
+ * requisição na borda. O que NÃO se faz é deixar o corpo da requisição escolher
+ * o país — quem decide é a organização, pela coluna dela (mesma doutrina da
+ * moeda em `lib/catalogo/moeda-da-org.ts`).
+ */
+export function contactCreateSchemaDoPais(perfil: PerfilDoPais) {
+  return contactCreateSchema.extend({
+    cpf: z
+      .string()
+      .refine(perfil.documento.valida, perfil.documento.mensagemInvalido)
+      .optional(),
+  });
+}
+
+/** O mesmo, para o PATCH (`app/api/v1/contacts/[id]/route.ts`). */
+export function contactPatchSchemaDoPais(perfil: PerfilDoPais) {
+  return contactPatchSchema.extend({
+    cpf: z
+      .string()
+      .refine(perfil.documento.valida, perfil.documento.mensagemInvalido)
+      .optional(),
+  });
+}
 
 export const CONTACT_ORDER_BY = [
   "last_activity_at",
@@ -66,7 +109,9 @@ export const CONTACT_ORDER_BY = [
 
 export const contactListQuerySchema = z.object({
   search: z.string().optional(),
-  tag: z.string().optional(),
+  // O filtro normaliza pelo MESMO caminho da escrita: `?tag=VIP` acha o que a
+  // ficha gravou como "vip" (issue #1224).
+  tag: z.string().transform(normalizarTag).optional(),
   source: z.string().optional(),
   cursor: z.string().optional(),
   limit: z.coerce.number().int().min(1).max(100).default(50),
@@ -82,3 +127,31 @@ export const lgpdAnonymizeSchema = z.object({
   justification: z.string().min(10).max(1000),
 });
 export type LgpdAnonymizeInput = z.infer<typeof lgpdAnonymizeSchema>;
+
+/**
+ * Juntar contatos duplicados.
+ *
+ * O principal fica FORA do array de secundários e o `refine` é o que garante
+ * isso na borda — `fn_mesclar_contatos` recusa o mesmo caso com `22023`, mas um
+ * 422 com a lista de campos é o que a tela consegue mostrar. As duas guardas
+ * existem porque a rota não é a única porta: a RPC é alcançável por
+ * `authenticated` (é assim que a RLS a autoriza), e ela precisa se defender só.
+ *
+ * O teto de 20 secundários por chamada não é arbitrário: a fusão trava as
+ * linhas (`for update`) e reponta toda FK que aponta para elas: um lote grande
+ * segura escrita de contato para a organização inteira enquanto roda.
+ */
+export const contactsMergeSchema = z
+  .object({
+    primary_contact_id: z.string().uuid(),
+    secondary_contact_ids: z.array(z.string().uuid()).min(1).max(20),
+  })
+  .refine((v) => !v.secondary_contact_ids.includes(v.primary_contact_id), {
+    message: "O contato principal não pode estar entre os que serão absorvidos.",
+    path: ["secondary_contact_ids"],
+  })
+  .refine((v) => new Set(v.secondary_contact_ids).size === v.secondary_contact_ids.length, {
+    message: "Contato repetido na seleção.",
+    path: ["secondary_contact_ids"],
+  });
+export type ContactsMergeInput = z.infer<typeof contactsMergeSchema>;

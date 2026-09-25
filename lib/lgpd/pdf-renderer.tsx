@@ -112,7 +112,7 @@ function fmtMoney(cents: number | null | undefined, currency: string | null | un
 
 /**
  * A MESMA cadeia que `lib/lgpd/sla-alarm.ts:93` já usa
- * (`organizationDpoEmail || env.LGPD_DPO_EMAIL`). Reusar a ordem, e não
+ * (organização acima, instalação abaixo — resolvida pelo coletor). Reusar a ordem, e não
  * inventar outra, é o que impede o documento e o alarme de apontarem para
  * encarregados diferentes na mesma organização.
  *
@@ -120,8 +120,27 @@ function fmtMoney(cents: number | null | undefined, currency: string | null | un
  * não-resposta num campo cuja função é dizer a quem o titular reclama.
  */
 function encarregado(data: ExportPayload): string {
-  return data.dpo_email || env.LGPD_DPO_EMAIL || "não informado pelo controlador";
+  // O renderizador não consulta configuração: ele desenha o que recebeu. Quem
+  // resolve o encarregado (organização acima, instalação abaixo) é o coletor,
+  // que é assíncrono e já busca `dpo_email` da organização. Deixar a busca aqui
+  // obrigaria um componente de PDF a falar com o banco no meio do desenho.
+  return data.dpo_email || "não informado pelo controlador";
 }
+
+// Concluir o processamento do job não comprova envio: ele também pode terminar
+// com um bloqueio. O relatório conserva essa diferença, sem anunciar entrega.
+const deliveryStatus: Record<string, string> = {
+  pending: "Pendente",
+  running: "Em processamento",
+  done: "Processamento concluído",
+  failed: "Falha no processamento",
+  dead: "Tentativas encerradas",
+};
+const noticeStatus: Record<string, string> = {
+  open: "Aberto",
+  resolved: "Resolvido",
+  dismissed: "Dispensado",
+};
 
 export function LgpdExportPdf({ data, unsignedWarning }: Props): React.ReactElement {
   const shortId = data.request_id.slice(0, 8);
@@ -131,9 +150,13 @@ export function LgpdExportPdf({ data, unsignedWarning }: Props): React.ReactElem
       <Page size="A4" style={styles.page}>
         {/* Header */}
         <View style={styles.header}>
-          <Text style={styles.title}>Relatório LGPD — Solicitação de Acesso aos Dados</Text>
+          <Text style={styles.title}>Relatório de Acesso aos Dados</Text>
           <Text style={styles.subtitle}>
-            Base legal: LGPD Art. 18, II (Lei nº 13.709/2018) · Solicitação #{shortId}
+            {/* A lei vem do PERFIL do país da organização (issue #1033): país
+                sem citação revisada não cita lei nenhuma — citar a errada é
+                pior do que não citar artigo nenhum. */}
+            Base legal: {data.lei_citada ?? "não declarada (país sem citação revisada)"} ·
+            Solicitação #{shortId}
           </Text>
         </View>
 
@@ -187,7 +210,7 @@ export function LgpdExportPdf({ data, unsignedWarning }: Props): React.ReactElem
               <Text style={styles.value}>{data.contact.phone_number ?? "—"}</Text>
             </View>
             <View style={styles.row}>
-              <Text style={styles.label}>CPF:</Text>
+              <Text style={styles.label}>{data.documento_rotulo}:</Text>
               <Text style={styles.value}>
                 {data.contact.cpf_present ? "Armazenado (criptografado)" : "—"}
               </Text>
@@ -311,9 +334,65 @@ export function LgpdExportPdf({ data, unsignedWarning }: Props): React.ReactElem
                 </Text>
                 {c.description ? <Text style={styles.small}>{c.description}</Text> : null}
                 {c.notes ? <Text style={styles.small}>Anotação: {c.notes}</Text> : null}
+                {c.meeting_url ? <Text style={styles.small}>Link da reunião: {c.meeting_url}</Text> : null}
                 {c.cancellation_reason ? (
                   <Text style={styles.small}>Cancelado: {c.cancellation_reason}</Text>
                 ) : null}
+              </View>
+            ))}
+          </View>
+        ) : null}
+
+        {/* O fluxo entrega este PDF; armazenar as categorias só no JSON não
+            as disponibiliza ao titular. Consumir apenas a projeção do coletor. */}
+        {data.reply_drafts?.length ? (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Sugestões e respostas revisadas</Text>
+            {data.reply_drafts.map(reply=><View key={reply.id} style={styles.itemBlock}>
+              <Text>Estado: {reply.status}</Text>
+              {reply.original_body?<Text>Sugestão: {reply.original_body}</Text>:null}
+              {reply.edited_body&&reply.edited_body!==reply.original_body?<Text>Edição: {reply.edited_body}</Text>:null}
+              {reply.approved_body?<Text>Texto aprovado: {reply.approved_body}</Text>:null}
+              {reply.feedback?<Text>Revisão: {JSON.stringify(reply.feedback)}</Text>:null}
+              {Array.isArray(reply.proposals)&&reply.proposals.length?<Text>Propostas: {JSON.stringify(reply.proposals)}</Text>:null}
+              <Text style={styles.small}>Criado em {fmtDate(reply.created_at)}</Text>
+            </View>)}
+          </View>
+        ):null}
+
+        {data.meeting_deliveries?.length ? (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Entregas de links de reunião</Text>
+            {data.meeting_deliveries.map((delivery) => (
+              <View key={delivery.id} style={styles.itemBlock}>
+                <Text>{deliveryStatus[delivery.status] ?? delivery.status}</Text>
+                <Text style={styles.small}>Registro: {delivery.id}</Text>
+                <Text style={styles.small}>
+                  Compromisso: {delivery.appointment_id ?? "referência indisponível"}
+                </Text>
+                <Text style={styles.small}>
+                  Criado em {fmtDate(delivery.created_at)} · Programado para {fmtDate(delivery.run_after)}
+                </Text>
+              </View>
+            ))}
+          </View>
+        ) : null}
+
+        {data.appointment_notices?.length ? (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Avisos sobre compromissos</Text>
+            {data.appointment_notices.map((notice) => (
+              <View key={notice.id} style={styles.itemBlock}>
+                <Text>{notice.title} · {noticeStatus[notice.status] ?? notice.status}</Text>
+                {notice.body ? <Text>{notice.body}</Text> : null}
+                <Text style={styles.small}>Registro: {notice.id}</Text>
+                <Text style={styles.small}>
+                  Compromisso: {notice.ref_id ?? "referência indisponível"}
+                </Text>
+                <Text style={styles.small}>
+                  Criado em {fmtDate(notice.created_at)}
+                  {notice.resolved_at ? ` · Resolvido em ${fmtDate(notice.resolved_at)}` : ""}
+                </Text>
               </View>
             ))}
           </View>
@@ -373,9 +452,9 @@ export function LgpdExportPdf({ data, unsignedWarning }: Props): React.ReactElem
         {/* CONTROLADOR, nunca marca — ver o cabeçalho deste arquivo. */}
         <View style={styles.footer} fixed>
           <Text>
-            Controlador: {data.organization_legal_name || "—"} · Relatório LGPD Art. 18 II
-            (Lei nº 13.709/2018) · Encarregado (DPO): {encarregado(data)} · Validade do
-            link de download conforme e-mail recebido
+            Controlador: {data.organization_legal_name || "—"} · Relatório de Acesso aos
+            Dados{data.lei_citada ? ` — ${data.lei_citada}` : ""} · Encarregado (DPO):{" "}
+            {encarregado(data)} · Validade do link de download conforme e-mail recebido
           </Text>
         </View>
       </Page>

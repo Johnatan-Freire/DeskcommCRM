@@ -44,10 +44,10 @@ const ESCOPOS = "https://www.googleapis.com/auth/calendar.events https://www.goo
  */
 let ultimoNonce = "";
 
-function estadoValido(): string {
+function estadoValido(authSessionId?: string): string {
   ultimoNonce = `nonce-de-teste-${noncesGravados.length}-${Math.random().toString(36).slice(2)}`;
   return emitirEstado(
-    { organizationId: ORG, userId: ANA },
+    { organizationId: ORG, userId: ANA, authSessionId },
     { segredo: SEGREDO, agora: new Date(), nonce: ultimoNonce },
   );
 }
@@ -155,14 +155,31 @@ async function chamar(
   return GET(pedido(query, vinculo));
 }
 
-const destino = (res: Response) => res.headers.get("location") ?? "";
+/**
+ * O destino da volta — lido do CORPO da página-ponte, e não do header.
+ *
+ * ⚠️ A VOLTA DEIXOU DE SER UM 307. Um redirect daqui para `/app/agenda` herda a
+ * cadeia iniciada em `accounts.google.com`, o cookie `SameSite=Strict` não
+ * viaja, e a pessoa cai no `/login` achando que foi deslogada — o relato do dono
+ * na v1.9.0, reproduzido em navegador. Agora `voltar()` responde 200 com uma
+ * página que navega por `location.replace`, disparada do NOSSO origin.
+ *
+ * Este helper existir é o que faz os 14 casos deste arquivo continuarem medindo
+ * o que sempre mediram — QUAL destino cada caminho escolhe — sem que nenhum
+ * precise saber a forma da resposta.
+ */
+async function destino(res: Response): Promise<string> {
+  const corpo = await res.clone().text();
+  const m = /location\.replace\((["'])(.*?)\1\)/.exec(corpo);
+  return m?.[2] ?? res.headers.get("location") ?? "";
+}
 
 describe("GET /api/v1/agenda/google/callback", () => {
   it("grava a conexão e volta dizendo que conectou", async () => {
     googleRespondendoBem();
     const res = await chamar({ code: "o-codigo", state: estadoValido() });
 
-    expect(destino(res)).toBe("https://crm.exemplo/app/agenda?ok=agenda_conectada");
+    expect(await destino(res)).toBe("https://crm.exemplo/app/agenda?ok=agenda_conectada");
     expect(upsertRecebido).toMatchObject({
       organization_id: ORG,
       user_id: ANA,
@@ -289,7 +306,7 @@ describe("GET /api/v1/agenda/google/callback", () => {
       .mockResolvedValueOnce(respostaHttp({ id: "ana@clinica.com.br", timeZone: "America/Sao_Paulo" }));
 
     const res = await chamar({ code: "c", state: estadoValido() });
-    expect(destino(res)).toBe("https://crm.exemplo/app/agenda?erro=sem_token_de_renovacao");
+    expect(await destino(res)).toBe("https://crm.exemplo/app/agenda?erro=sem_token_de_renovacao");
     expect(upsertRecebido).toBeNull();
   });
 
@@ -305,7 +322,7 @@ describe("GET /api/v1/agenda/google/callback", () => {
       .mockResolvedValueOnce(respostaHttp({ id: "ana@clinica.com.br", timeZone: "America/Sao_Paulo" }));
 
     const res = await chamar({ code: "c", state: estadoValido() });
-    expect(destino(res)).toBe("https://crm.exemplo/app/agenda?ok=agenda_conectada");
+    expect(await destino(res)).toBe("https://crm.exemplo/app/agenda?ok=agenda_conectada");
     expect(upsertRecebido).not.toHaveProperty("oauth_refresh_token_encrypted");
     // Controle positivo: a linha FOI montada, então a ausência acima é omissão
     // deliberada e não objeto vazio.
@@ -330,7 +347,7 @@ describe("GET /api/v1/agenda/google/callback", () => {
 
   it("quem clicou Cancelar volta sem erro no log — não é falha, é desistência", async () => {
     const res = await chamar({ error: "access_denied", state: estadoValido() });
-    expect(destino(res)).toBe("https://crm.exemplo/app/agenda?erro=conexao_cancelada");
+    expect(await destino(res)).toBe("https://crm.exemplo/app/agenda?erro=conexao_cancelada");
     expect(audit).not.toHaveBeenCalled();
   });
 
@@ -348,7 +365,7 @@ describe("GET /api/v1/agenda/google/callback", () => {
     googleRespondendoBem();
 
     const res = await chamar({ code: "c", state: estadoValido() }, "de-outro");
-    expect(destino(res)).toBe("https://crm.exemplo/app/agenda?erro=retorno_nao_verificavel");
+    expect(await destino(res)).toBe("https://crm.exemplo/app/agenda?erro=retorno_nao_verificavel");
     expect(upsertRecebido).toBeNull();
     expect(audit).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -365,7 +382,7 @@ describe("GET /api/v1/agenda/google/callback", () => {
     googleRespondendoBem();
 
     const res = await chamar({ code: "c", state: estadoValido() }, "ausente");
-    expect(destino(res)).toBe("https://crm.exemplo/app/agenda?erro=retorno_nao_verificavel");
+    expect(await destino(res)).toBe("https://crm.exemplo/app/agenda?erro=retorno_nao_verificavel");
     expect(upsertRecebido).toBeNull();
   });
 
@@ -377,7 +394,7 @@ describe("GET /api/v1/agenda/google/callback", () => {
     erroDoNonce = { code: "23505", message: "duplicate key value" };
 
     const res = await chamar({ code: "c", state: estadoValido() });
-    expect(destino(res)).toBe("https://crm.exemplo/app/agenda?erro=retorno_nao_verificavel");
+    expect(await destino(res)).toBe("https://crm.exemplo/app/agenda?erro=retorno_nao_verificavel");
     expect(upsertRecebido).toBeNull();
     expect(audit).toHaveBeenCalledWith(
       expect.objectContaining({ metadata: expect.objectContaining({ reason: "state_reutilizado" }) }),
@@ -409,13 +426,13 @@ describe("GET /api/v1/agenda/google/callback", () => {
     googleRespondendoBem();
     erroDoNonce = { code: "08006", message: "connection failure" };
     const res = await chamar({ code: "c", state: estadoValido() });
-    expect(destino(res)).toBe("https://crm.exemplo/app/agenda?erro=retorno_nao_verificavel");
+    expect(await destino(res)).toBe("https://crm.exemplo/app/agenda?erro=retorno_nao_verificavel");
     expect(upsertRecebido).toBeNull();
   });
 
   it("state inválido dá UM motivo só — distinguir na URL ajudaria um atacante", async () => {
     const res = await chamar({ code: "c", state: "forjado.zzz" });
-    expect(destino(res)).toBe("https://crm.exemplo/app/agenda?erro=retorno_nao_verificavel");
+    expect(await destino(res)).toBe("https://crm.exemplo/app/agenda?erro=retorno_nao_verificavel");
     expect(audit).toHaveBeenCalledWith(
       expect.objectContaining({ action: "agenda.google.conexao_falhou" }),
     );
@@ -435,7 +452,7 @@ describe("GET /api/v1/agenda/google/callback", () => {
       }),
     );
     const res = await chamar({ code: "c", state: estadoValido() });
-    expect(destino(res)).toBe("https://crm.exemplo/app/agenda?erro=permissao_incompleta");
+    expect(await destino(res)).toBe("https://crm.exemplo/app/agenda?erro=permissao_incompleta");
     expect(upsertRecebido).toBeNull();
   });
 
@@ -443,23 +460,23 @@ describe("GET /api/v1/agenda/google/callback", () => {
     googleRespondendoBem();
     vi.mocked(encryptWebhookSecret).mockResolvedValue(null);
     const res = await chamar({ code: "c", state: estadoValido() });
-    expect(destino(res)).toBe("https://crm.exemplo/app/agenda?erro=cifra_indisponivel");
-    expect(destino(res).toLowerCase()).not.toContain("nuvemshop");
+    expect(await destino(res)).toBe("https://crm.exemplo/app/agenda?erro=cifra_indisponivel");
+    expect((await destino(res)).toLowerCase()).not.toContain("nuvemshop");
     expect(upsertRecebido).toBeNull();
   });
 
   it("Google recusando a troca do código não vira 500", async () => {
     vi.mocked(fetch).mockResolvedValueOnce(respostaHttp({ error: "invalid_grant" }, 400));
     const res = await chamar({ code: "usado-duas-vezes", state: estadoValido() });
-    expect(res.status).toBe(307);
-    expect(destino(res)).toBe("https://crm.exemplo/app/agenda?erro=troca_de_codigo_falhou");
+    expect(res.status).toBe(200);
+    expect(await destino(res)).toBe("https://crm.exemplo/app/agenda?erro=troca_de_codigo_falhou");
   });
 
   it("falha ao gravar volta com motivo, em vez de dizer que conectou", async () => {
     googleRespondendoBem();
     erroDoUpsert = { message: "duplicate key" };
     const res = await chamar({ code: "c", state: estadoValido() });
-    expect(destino(res)).toBe("https://crm.exemplo/app/agenda?erro=nao_consegui_guardar");
+    expect(await destino(res)).toBe("https://crm.exemplo/app/agenda?erro=nao_consegui_guardar");
     expect(audit).not.toHaveBeenCalledWith(
       expect.objectContaining({ action: "agenda.google.conexao_concluida" }),
     );
@@ -473,8 +490,26 @@ describe("GET /api/v1/agenda/google/callback", () => {
     ];
     for (const q of casos) {
       const res = await chamar(q);
-      expect(res.status).toBe(307);
-      expect(destino(res)).toContain("/app/agenda?");
+      expect(res.status).toBe(200);
+      expect(await destino(res)).toContain("/app/agenda?");
     }
   });
 });
+
+const { callbackAllowed } = vi.hoisted(() => ({ callbackAllowed: vi.fn(async () => true) }));
+vi.mock("@/lib/impersonate/support", () => ({ supportCallbackWriteAllowed: callbackAllowed }));
+it("suporte restrito recusa callback antes de trocar código ou gravar conexão", async () => {
+  callbackAllowed.mockResolvedValueOnce(false);
+  googleRespondendoBem();
+  const res = await chamar({ code: "o-codigo", state: estadoValido() });
+  expect(await destino(res)).toContain("erro=retorno_nao_verificavel");
+  expect(upsertRecebido).toBeNull();
+});
+
+ it("auditoria recebe ator e sessão do state validado sem cookie JWT", async () => {
+  googleRespondendoBem();
+  const session = "33333333-3333-4333-8333-333333333333";
+  const { GET } = await import("@/app/api/v1/agenda/google/callback/route");
+  await GET(pedido({ state: estadoValido(session), code: "legitimo" }));
+  expect(audit).toHaveBeenCalledWith(expect.objectContaining({ action: "agenda.google.conexao_concluida", actorUserId: ANA, actorAuthSessionId: session, organizationId: ORG }));
+ });

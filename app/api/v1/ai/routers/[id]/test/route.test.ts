@@ -36,6 +36,7 @@ function mockAuthzOk() {
     full_name: null,
     avatar_url: null,
     is_platform_admin: false,
+    idioma: "pt-BR" as const,
     organizations: [{ organization_id: ORG_ID, organization_name: "Org", role: "manager" }],
   };
   vi.mocked(requireRole).mockResolvedValue({
@@ -155,6 +156,36 @@ describe("POST /api/v1/ai/routers/:id/test", () => {
     expect(() => admin.from("ai_router_decisions")).toThrow();
   });
 
+  it("SEM veredito, a confiança volta null — nunca zero", async () => {
+    // `?? 0` aqui dizia "o classificador tem certeza de que não é nada" para o
+    // caso em que ele não disse nada. A tela local escapava por checar
+    // `intent_name` antes de exibir, mas isto é `/api/v1/` — todo outro
+    // consumidor leria a invenção como medição.
+    mockAuthzOk();
+    vi.mocked(createAdminClient).mockReturnValue(makeAdminStub({ routerFound: true }) as never);
+    vi.mocked(loadActiveRouter).mockResolvedValue({
+      id: ROUTER_ID,
+      name: "Roteador",
+      classifierModel: "claude-haiku-4-5",
+      classifierProvider: null,
+      sticky: true,
+      minConfidence: 0.6,
+      fallbackAgentId: null,
+      members: [
+        { agentId: AGENT_ID, intentName: "vendas", intentDescription: "Quer comprar", examples: [] },
+      ],
+    });
+    vi.mocked(classifyIntent).mockResolvedValue(null as never);
+
+    const { POST } = await import("./route");
+    const res = await POST(req({ message: "oi" }), ctx());
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { data: { intent_name: string | null; confidence: number | null } };
+    expect(body.data.intent_name).toBeNull();
+    expect(body.data.confidence, "ausência de veredito não é confiança zero").toBeNull();
+  });
+
   it("confidence abaixo do min_confidence → não casa o membro, cai no fallback do router (espelha resolve-turn-agent)", async () => {
     mockAuthzOk();
     vi.mocked(createAdminClient).mockReturnValue(makeAdminStub({ routerFound: true, agentName: "Agente Fallback" }) as never);
@@ -219,3 +250,10 @@ describe("POST /api/v1/ai/routers/:id/test", () => {
     expect(res.status).toBe(422);
   });
 });
+
+// Este teste isola o handler; autoridade de suporte é exercitada na suíte própria.
+vi.mock("@/lib/impersonate/support", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/lib/impersonate/support")>(),
+  requireSupportWrite: vi.fn(async () => null),
+  authenticatedSessionId: vi.fn(async () => "f2200000-0000-4000-8000-000000000099"),
+}));

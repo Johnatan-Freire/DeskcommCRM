@@ -108,6 +108,37 @@ async function aplicarTextoAosEnrollmentsEmEspera(
   return aplicados;
 }
 
+/**
+ * Avança enrollments `active` já vencidos deste contato e manda o texto fixo
+ * neste request. O gatilho de retorno usa isto porque o cron de 1 minuto
+ * chega tarde demais para quem ACABOU de escrever.
+ */
+export async function avancarFollowupsAtivosDoContato(
+  admin: SupabaseClient,
+  organizationId: string,
+  contactId: string,
+): Promise<void> {
+  const contactIds = await idsDoContatoEGemeos(admin, organizationId, contactId);
+  const deps = tickDepsDe(admin);
+  for (let i = 0; i < 6; i++) {
+    const agora = new Date().toISOString();
+    const { data: vivos, error: vivosErr } = await admin
+      .from("followup_enrollments")
+      .select("*")
+      .eq("organization_id", organizationId)
+      .in("contact_id", contactIds)
+      .eq("status", "active")
+      .lte("next_eval_at", agora)
+      .limit(8);
+    if (vivosErr) throw new Error(vivosErr.message);
+    for (const row of vivos ?? []) {
+      await avancarEnrollmentAtivo(deps, row as EnrollmentRow);
+    }
+    const enviados = await enviarTextoFixoPendente(admin, contactIds);
+    if (!(vivos?.length) && !enviados) break;
+  }
+}
+
 export async function aplicarTextoNosFollowups(
   admin: SupabaseClient,
   sinal: SinalDeInboundFollowup,
@@ -116,7 +147,7 @@ export async function aplicarTextoNosFollowups(
   const ultimo = await ultimoInboundDoContato(admin, sinal.organizationId, contactIds);
   const texto = (sinal.texto?.trim() || ultimo.texto).trim();
   if (!texto) return;
-  // Corte de conexão (migration 0281): mensagem sincronizada pelo WAHA de
+  // Corte de conexão (migration 0398): mensagem sincronizada pelo WAHA de
   // ANTES do pareamento não é "a resposta do lead" — tratá-la como
   // `enviadaEm` ausente reusa o mesmo caminho fail-closed que
   // `inboundEhDestaPergunta` já tem para quando o WAHA não manda timestamp

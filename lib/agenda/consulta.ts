@@ -1,3 +1,5 @@
+import { googleRpc } from "./google/sync-store";
+import { lerCorposDoLembrete } from "./lembretes";
 /**
  * OS HORÁRIOS LIVRES DE UMA ORGANIZAÇÃO — a coleta, num lugar só.
  *
@@ -32,9 +34,44 @@
  * `motivoParaCliente` vai para o modelo e pode chegar ao cliente final: nada de
  * nome de campo, e ele diz o que fazer em seguida em vez de só negar. É a mesma
  * separação que `lerJornadaDoBanco` já faz, e pela mesma razão (DECISÃO 20).
+ *
+ * ─── ⚠️ O GOOGLE DO DONO DA AGENDA VEM DE FUNÇÃO, NÃO DE TABELA (issue #879) ──
+ *
+ * A junção com `calendar_connections` é o caminho até o Google Agenda, e a RLS
+ * dessa tabela só mostra a conexão ao PRÓPRIO dono e a `manager` para cima (ela
+ * guarda token OAuth):
+ *
+ *     create policy calendar_connections_dono_ou_manager_read ... using (
+ *       ... and (user_id = auth.uid()
+ *                or public.fn_role_at_least(organization_id, 'manager')))
+ *
+ * Consequência medida (Postgres descartável, `baseline.sql`, a MESMA agenda):
+ * dono vê 1 evento do Google, gerente vê 1, **atendente vê 0**. Com o client de
+ * sessão, o Atendente que marca na agenda de outra pessoa conferia ocupação
+ * contra uma lista sem o Google dela — na grade E no encaixe — e marcava por
+ * cima de um compromisso pessoal que existe.
+ *
+ * As duas leituras do Google (os eventos, em `coletaOQueOcupa`, e a situação
+ * das conexões, em `horariosLivresDaOrg`) saem por RPC —
+ * `fn_agenda_ocupacao_google_do_dono` e `fn_agenda_conexoes_google_do_dono`
+ * (migration 0260) — pelo MESMO client que veio de fora. São `security definer`
+ * que atravessam só a RLS da conexão, conferem o pertencimento no corpo
+ * (`fn_user_org_ids()`, a régua das policies) e filtram o dono; o que devolvem é
+ * ocupação (início, fim, transparência, situação), nunca título, descrição ou
+ * participantes.
+ *
+ * ⚠️ NÃO troque por `createAdminClient()` aqui. Foi a primeira forma deste
+ * conserto (PR #883): o admin ficava escondido dentro de uma coleta que recebe o
+ * client de fora, então a rota que passa a SESSÃO recebia sem saber uma leitura
+ * com service role, guardada só pelo `.eq("organization_id")` — o que
+ * `lib/supabase/admin.ts` proíbe em fluxo normal de usuário. E todo teste que
+ * passava pela coleta sem dublar o admin ia para a rede.
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { nomeDoContato, type ContatoNomeavel } from "@/lib/contacts/rotulo-do-contato";
+
+import { diaLocalISO } from "./fuso";
 import { horariosLivres, type ExcecaoDeData, type Slot } from "./horarios-livres";
 import { lerJornadaDoBanco } from "./jornada";
 import {
@@ -42,6 +79,7 @@ import {
   ocupadosDoDono,
   type LinhaDeAgendamento,
   type LinhaDeEventoExterno,
+  type OQueOcupa,
 } from "./ocupados";
 import type { SituacaoDaConexao, SituacaoDoAgendamento } from "./tipos";
 
@@ -74,17 +112,17 @@ export interface ParametrosDaConsulta {
   /** INJETADO, como em `horariosLivres`. Relógio lido aqui dentro é o defeito que `janela-do-canal.ts` documenta. */
   agora: Date;
   /**
-   * O agendamento sendo REMARCADO, para a coleta de ocupação não vê-lo como
-   * conflito contra si mesmo. Ausente = criação nova (nada a excluir).
+   * Um agendamento que NÃO conta como ocupação — o que está sendo REMARCADO.
    *
-   * Sem isto, remarcar um compromisso para um horário que se sobrepõe ao seu
-   * PRÓPRIO horário atual (a linha antiga ainda não foi atualizada no banco no
-   * momento desta checagem) era recusado por conflito — inclusive movê-lo para
-   * logo depois do próprio fim, quando o intervalo antes/depois do tipo
-   * (`buffer_before_minutes`) alarga a janela de coleta e passa a alcançar o
-   * próprio compromisso de saída.
+   * Ele ocupa o horário de ONDE SAI, não o de DESTINO. Sem o intervalo, o próprio
+   * compromisso já não atrapalhava a si mesmo por acaso: a janela dele não cruza a
+   * janela pedida. Com intervalo, a coleta alarga para trás/para frente e o
+   * horário de saída passa a cruzar a janela do destino — a IA remarcando para
+   * logo depois do próprio fim levava 422 `agenda_horario_indisponivel` por causa
+   * de si mesma (#1084). Quem remarca diz quem remarcar; quem só OFERECE horário
+   * (rota, ferramenta MCP) não passa nada, e a grade segue contando tudo.
    */
-  ignorarAgendamentoId?: string | null;
+  ignorarAgendamentoId?: string;
 }
 
 export type ResultadoDaConsulta =
@@ -109,6 +147,7 @@ export type ResultadoDaConsulta =
        * um agente que o oferece MARCA por cima da cirurgia e confirma ao cliente.
        */
       agendaExternaNuncaLida: boolean;
+      googleCoberturaParcial: boolean;
     }
   | {
       ok: false;
@@ -119,10 +158,23 @@ export type ResultadoDaConsulta =
       motivoParaCliente: string;
     };
 
-/** `YYYY-MM-DD` de um instante, em UTC — a régua que a coluna `date` usa. */
-function diaISO(instante: Date): string {
-  return instante.toISOString().slice(0, 10);
-}
+/**
+ * Um dia em milissegundos — a margem de cada lado com que os dias locais são
+ * visitados, a MESMA de `horarios-livres.ts` (lá `naoAntesDe - DIA` …
+ * `naoDepoisDe + DIA`). A coleta tem que cobrir a visita inteira; margem menor
+ * de um lado devolve dia que a grade pergunta e o mapa não tem.
+ */
+const DIA = 86_400_000;
+
+/**
+ * O intervalo antes/depois do atendimento é regra de OFERTA — quem o aplica é o
+ * motor, inflando cada candidato (`horarios-livres.ts`). A COLETA, porém, precisa
+ * enxergar o que esse intervalo alcança: um compromisso que termina dentro dele
+ * não cruza a janela pedida e ficava invisível. Sem ele, a ESCRITA aceitava o
+ * horário que a LEITURA escondia (issue #876). Alargar só a coleta põe as duas
+ * pontas na mesma régua sem duplicar regra: quem decide continua sendo o motor.
+ */
+const MINUTO = 60_000;
 
 const NAO_OFERECA =
   "Não ofereça horários e não diga que está sem vaga — avise que alguém da equipe confirma o horário.";
@@ -206,85 +258,83 @@ export async function horariosLivresDaOrg(
     return {
       ok: false,
       codigo: "jornada_mal_configurada",
-      motivoParaOperador: `A disponibilidade deste responsável está mal configurada: ${leitura.motivoParaOperador}`,
+      // `leitura.motivoParaOperador` já vem como fragmento pensado para
+      // encaixar aqui ("ainda não foi configurada. Configure em…" ou "está mal
+      // configurada: <motivo>") — ver `lerJornadaDoBanco`. Duas recusas
+      // diferentes ("nunca configurou" vs. "configurou errado") não podem virar
+      // a mesma frase, senão o operador lê "mal configurada" para um caso que é
+      // só "ainda não configurada".
+      motivoParaOperador: `A disponibilidade deste responsável ${leitura.motivoParaOperador}`,
       motivoParaCliente: `${leitura.motivoParaCliente} ${NAO_OFERECA}`,
     };
   }
 
-  // O intervalo antes/depois do tipo é regra de OFERTA — quem o aplica é o
-  // motor (`horariosLivres`), inflando cada candidato. A COLETA de ocupação,
-  // porém, precisa ENXERGAR o que esse intervalo alcança: um compromisso
-  // vizinho que termina dentro do buffer não cruza a janela crua [de, ate) e
-  // ficava invisível — a oferta escondia o horário e a escrita (que consulta
-  // esta mesma função com de/ate = exatamente o slot pedido) o aceitava.
-  // Alargar só a COLETA põe as duas pontas na mesma régua sem duplicar regra.
-  const bufferAntesMs = (tipo.buffer_before_minutes ?? 0) * 60_000;
-  const bufferDepoisMs = (tipo.buffer_after_minutes ?? 0) * 60_000;
-  const coletaDe = new Date(params.de.getTime() - bufferAntesMs).toISOString();
-  const coletaAte = new Date(params.ate.getTime() + bufferDepoisMs).toISOString();
+  // ⚠️ As exceções de data são a MESMA régua de `horariosLivres`: coluna `date`
+  // no Postgres, sem fuso — o dia LOCAL DA REGRA (`leitura.jornada.timezone`),
+  // nunca o dia UTC do instante pedido. Com o dia UTC a coleta começava DEPOIS
+  // do dia pedido num fuso negativo: 21:00 de D em America/Sao_Paulo já é
+  // 00:00Z de D+1, então a exceção de D (folga, feriado, dia inteiro bloqueado)
+  // ficava fora do `.gte()` — e a grade oferecia, e a escrita aceitava, horário
+  // de um dia bloqueado (#878).
+  //
+  // A margem de ±1 dia é a mesma com que `horariosLivres` visita os dias
+  // (`diaLocalISO(naoAntesDe - DIA)` … `diaLocalISO(naoDepoisDe + DIA)`): a
+  // borda de um dia local pode cair no dia UTC vizinho, e a coleta não fica
+  // mais estreita que a visita da grade. Hoje a margem é defesa, não conserto:
+  // os horários dos dias da margem já caem fora de `[naoAntesDe, naoDepoisDe]`
+  // (sem ela, a suíte fica verde — medido na revisão do lote 10). O que fecha
+  // o #878 é buscar pelo dia LOCAL, não a margem.
+  const fusoDaRegra = leitura.jornada.timezone;
+  const primeiroDiaDaRegra = diaLocalISO(new Date(params.de.getTime() - DIA), fusoDaRegra);
+  const ultimoDiaDaRegra = diaLocalISO(new Date(params.ate.getTime() + DIA), fusoDaRegra);
 
-  const [{ data: excecoesRaw, error: erroExc }, { data: agendaRaw, error: erroAg }] =
-    await Promise.all([
-      supabase
-        .from("calendar_availability_exceptions")
-        .select("exception_date, is_unavailable, start_minute, end_minute")
-        .eq("organization_id", organizationId)
-        .eq("user_id", donoId)
-        .gte("exception_date", diaISO(params.de))
-        .lte("exception_date", diaISO(params.ate)),
-      (() => {
-        let q = supabase
-          .from("calendar_appointments")
-          .select("starts_at, ends_at, status")
-          .eq("organization_id", organizationId)
-          .eq("owner_user_id", donoId)
-          .lt("starts_at", coletaAte)
-          .gt("ends_at", coletaDe);
-        // O PRÓPRIO COMPROMISSO OCUPA O HORÁRIO DELE. Remarcando-o, a linha
-        // antiga (ainda com o horário de origem) não pode contar como
-        // conflito contra o horário de destino.
-        if (params.ignorarAgendamentoId) q = q.neq("id", params.ignorarAgendamentoId);
-        return q;
-      })(),
-    ]);
+  const [{ data: excecoesRaw, error: erroExc }, oQueOcupa] = await Promise.all([
+    supabase
+      .from("calendar_availability_exceptions")
+      .select("exception_date, is_unavailable, start_minute, end_minute")
+      .eq("organization_id", organizationId)
+      .eq("user_id", donoId)
+      .gte("exception_date", primeiroDiaDaRegra)
+      .lte("exception_date", ultimoDiaDaRegra),
+    coletaOQueOcupa(supabase, organizationId, {
+      donoId,
+      de: new Date(params.de.getTime() - Number(tipo.buffer_before_minutes ?? 0) * MINUTO),
+      ate: new Date(params.ate.getTime() + Number(tipo.buffer_after_minutes ?? 0) * MINUTO),
+      // Remarcar: o compromisso de saída não é ocupação do destino (#1084). A
+      // janela alargada acima é justamente o que o fazia parecer um vizinho.
+      ignorarAgendamentoId: params.ignorarAgendamentoId,
+    }),
+  ]);
 
-  const erroDeColeta = erroExc ?? erroAg;
-  if (erroDeColeta) {
+  if (erroExc) {
     return {
       ok: false,
       codigo: "erro_interno",
-      motivoParaOperador: erroDeColeta.message,
+      motivoParaOperador: erroExc.message,
       motivoParaCliente: `Não consegui consultar a agenda agora. ${NAO_OFERECA}`,
     };
   }
+  if (!oQueOcupa.ok) {
+    return {
+      ok: false,
+      codigo: "erro_interno",
+      motivoParaOperador: oQueOcupa.erro,
+      motivoParaCliente: `Não consegui consultar a agenda agora. ${NAO_OFERECA}`,
+    };
+  }
+  const { ocupados, fontesDefasadas } = oQueOcupa;
 
-  // `calendar_external_events` NÃO tem `user_id`: o dono vem por
-  // `connection_id → calendar_connections.user_id`. O join traz de carona a
-  // situação da conexão, que decide se o horário sai com aviso de defasagem.
   // A situação das conexões do dono, para distinguir "não tem Google" de "tem
   // Google que nunca foi lido". Sem `.select` de erro: conexão ilegível cai no
   // mesmo lado de "não sei", que é o lado seguro.
-  const { data: conexoesRaw } = await supabase
-    .from("calendar_connections")
-    .select("status, last_sync_at")
-    .eq("organization_id", organizationId)
-    .eq("user_id", donoId);
-
-  const { data: externosRaw, error: erroExt } = await supabase
-    .from("calendar_external_events")
-    .select("starts_at, ends_at, transparency, status, calendar_connections!inner(user_id, status)")
-    .eq("organization_id", organizationId)
-    .eq("calendar_connections.user_id", donoId)
-    .lt("starts_at", coletaAte)
-    .gt("ends_at", coletaDe);
-  if (erroExt) {
-    return {
-      ok: false,
-      codigo: "erro_interno",
-      motivoParaOperador: erroExt.message,
-      motivoParaCliente: `Não consegui consultar a agenda agora. ${NAO_OFERECA}`,
-    };
-  }
+  //
+  // Por RPC, e não direto em `calendar_connections`: a RLS da tabela esconde a
+  // conexão de um Atendente, e "nunca foi lida" passava a ser "não tem Google"
+  // conforme quem perguntava (ver o cabeçalho, issue #879).
+  const { data: conexoesRaw } = await supabase.rpc("fn_agenda_conexoes_google_do_dono", {
+    p_org: organizationId,
+    p_owner: donoId,
+  });
 
   const excecoes: ExcecaoDeData[] = (excecoesRaw ?? []).map((linha) => ({
     // ⚠️ `exception_date` é `date` no Postgres e chega como "YYYY-MM-DD" pelo
@@ -295,20 +345,6 @@ export async function horariosLivresDaOrg(
     inicioMinuto: linha.start_minute,
     fimMinuto: linha.end_minute,
   }));
-
-  const { ocupados, fontesDefasadas } = ocupadosDoDono(
-    (agendaRaw ?? []) as LinhaDeAgendamento[],
-    (externosRaw ?? []).map((linha) => {
-      const conexao = linha.calendar_connections as unknown as { status?: string } | null;
-      return {
-        starts_at: linha.starts_at,
-        ends_at: linha.ends_at,
-        transparency: linha.transparency,
-        status: linha.status,
-        situacaoDaConexao: conexao?.status ?? "error",
-      } satisfies LinhaDeEventoExterno;
-    }),
-  );
 
   const slots = horariosLivres({
     jornada: leitura.jornada,
@@ -327,14 +363,110 @@ export async function horariosLivresDaOrg(
     agora: params.agora,
   });
 
+  let googleCoberturaParcial = true;
+  try { googleCoberturaParcial = Boolean(await googleRpc(supabase, "fn_google_coverage", { p_org: organizationId, p_owner: donoId, p_start: params.de.toISOString(), p_end: params.ate.toISOString() })); } catch { /* leitura incerta não afirma cobertura */ }
   return {
     ok: true,
+    googleCoberturaParcial,
     slots,
     fusoDaRegra: leitura.jornada.timezone,
     publicouHorarios: leitura.publicouHorarios,
     fusoSuposto: leitura.fusoSuposto,
     fontesDefasadas,
     agendaExternaNuncaLida: agendaExternaNuncaLida(conexoesRaw ?? []),
+  };
+}
+
+
+/** Uma linha de `fn_agenda_ocupacao_google_do_dono` — as cinco colunas que a função declara, e só elas. */
+interface LinhaDaOcupacaoDoGoogle {
+  starts_at: string;
+  ends_at: string;
+  transparency: string;
+  status: string;
+  connection_status: string | null;
+}
+
+export interface ParametrosDaOcupacao {
+  donoId: string;
+  de: Date;
+  ate: Date;
+  /**
+   * Um compromisso que NÃO conta: o que está sendo remarcado. Ele ocupa o
+   * horário de onde está saindo, e sem isto se veria como conflito ao ser movido
+   * para perto de si mesmo.
+   */
+  ignorarAgendamentoId?: string;
+}
+
+/**
+ * O QUE OCUPA a agenda de um dono numa janela — a coleta, num lugar só.
+ *
+ * Agendamentos do CRM e eventos do Google Agenda SELECIONADOS, classificados por
+ * `ocupadosDoDono` (que decide status que libera, evento transparente, conexão
+ * caída). Nada de jornada, exceção de data, buffer ou aviso mínimo: isso é regra
+ * da GRADE, e mora em `horariosLivres`.
+ *
+ * ⚠️ DOIS LEITORES, UMA COLETA. A grade (`horariosLivresDaOrg`, logo acima) e o
+ * encaixe fora da grade (`exigeSemSobreposicao`, no handler de agendamentos)
+ * perguntam a mesma coisa — "o que já está tomado?". Quando cada um tinha a sua
+ * consulta, o encaixe olhava só `calendar_appointments` e reescrevia à mão a
+ * lista de status que liberam: uma pessoa marcava em cima de um compromisso do
+ * Google sem aviso nenhum, enquanto a grade escondia aquele mesmo horário.
+ *
+ * O filtro de janela é o cruzamento ESTRITO (`starts_at < ate` e `ends_at > de`),
+ * a mesma régua de `colide`: encostar não é ocupar.
+ */
+export async function coletaOQueOcupa(
+  supabase: SupabaseClient,
+  organizationId: string,
+  params: ParametrosDaOcupacao,
+): Promise<({ ok: true } & OQueOcupa) | { ok: false; erro: string }> {
+  let agendamentos = supabase
+    .from("calendar_appointments")
+    .select("starts_at, ends_at, status")
+    .eq("organization_id", organizationId)
+    .eq("owner_user_id", params.donoId)
+    .lt("starts_at", params.ate.toISOString())
+    .gt("ends_at", params.de.toISOString());
+  if (params.ignorarAgendamentoId) agendamentos = agendamentos.neq("id", params.ignorarAgendamentoId);
+
+  const [{ data: agendaRaw, error: erroAg }, { data: externosRaw, error: erroExt }] = await Promise.all([
+    agendamentos,
+    // `calendar_external_events` NÃO tem `user_id`: o dono vem por
+    // `connection_id → calendar_connections.user_id`, e a situação da conexão
+    // decide se o horário sai com aviso de defasagem.
+    //
+    // ⚠️ POR RPC, e não pelo embed `calendar_connections!inner`: a RLS da conexão
+    // esconde o Google do dono de um Atendente, e a ocupação sumia — da grade E
+    // do encaixe, que é por isso que a leitura mora aqui (issue #879, ver o
+    // cabeçalho). A função confere o pertencimento e devolve só ocupação.
+    supabase.rpc("fn_agenda_ocupacao_google_do_dono", {
+      p_org: organizationId,
+      p_owner: params.donoId,
+      p_de: params.de.toISOString(),
+      p_ate: params.ate.toISOString(),
+    }),
+  ]);
+
+  const erro = erroAg ?? erroExt;
+  if (erro) return { ok: false, erro: erro.message };
+
+  return {
+    ok: true,
+    ...ocupadosDoDono(
+      (agendaRaw ?? []) as LinhaDeAgendamento[],
+      ((externosRaw ?? []) as LinhaDaOcupacaoDoGoogle[]).map(
+        (linha) =>
+          ({
+            starts_at: linha.starts_at,
+            ends_at: linha.ends_at,
+            transparency: linha.transparency,
+            status: linha.status,
+            situacaoDaConexao: linha.connection_status ?? "error",
+          }) satisfies LinhaDeEventoExterno,
+      ),
+    ),
   };
 }
 
@@ -354,6 +486,9 @@ export async function horariosLivresDaOrg(
 // ─────────────────────────────────────────────────────────────────────────────
 
 export interface AgendamentoListado {
+  meetingState?: string;
+  meetingUrl?: string | null;
+  revision?:number;
   id: string;
   titulo: string;
   iniciaEm: string;
@@ -401,14 +536,27 @@ export interface ParametrosDaLista {
 
 export type ResultadoDaLista =
   | { ok: true; agendamentos: AgendamentoListado[] }
-  | { ok: false; codigo: "erro_interno" | "sem_alvo"; motivoParaOperador: string; motivoParaCliente: string };
+  | {
+      ok: false;
+      // `alvo_nao_e_lead`: o id veio no parâmetro `lead_id` e não é um negócio
+      // do funil — quase sempre um id de CONTATO, que é o que o contexto do
+      // turno chama de `lead_id`. Ver o ramo que o emite. (issue #509)
+      codigo: "erro_interno" | "sem_alvo" | "alvo_nao_e_lead";
+      motivoParaOperador: string;
+      motivoParaCliente: string;
+    };
 
-/** O embed do PostgREST vem objeto ou array conforme o gerador de tipos; aceite os dois. */
-function nomeDoContato(
-  c: { name: string | null; display_name: string | null } | { name: string | null; display_name: string | null }[] | null | undefined,
+/**
+ * O embed do PostgREST vem objeto ou array conforme o gerador de tipos; aceite
+ * os dois. A DECISÃO de como a pessoa se chama não mora aqui: era uma segunda
+ * função com o nome `nomeDoContato`, cadeia remontada à mão e sem a guarda de
+ * identificador técnico — ela devolvia `Contato 543134@lid` onde a central
+ * devolve `null`, e esse valor ia para a fala do agente sobre o compromisso.
+ */
+function contatoDoEmbed(
+  c: ContatoNomeavel | ContatoNomeavel[] | null | undefined,
 ): string | null {
-  const alvo = Array.isArray(c) ? c[0] : c;
-  return alvo?.name ?? alvo?.display_name ?? null;
+  return nomeDoContato(Array.isArray(c) ? (c[0] ?? null) : c);
 }
 
 export async function listaAgendamentos(
@@ -451,15 +599,50 @@ export async function listaAgendamentos(
       };
     }
     idsPorLead = (data ?? []).map((l) => String(l.target_id));
-    // Lead sem nenhum vínculo: lista vazia é a resposta CERTA aqui — a pergunta era
-    // "o que este negócio tem marcado?" e a resposta é "nada". Diferente de não saber.
-    if (idsPorLead.length === 0) return { ok: true, agendamentos: [] };
+    if (idsPorLead.length === 0) {
+      // ⚠️ SEM VÍNCULO, HÁ DUAS HISTÓRIAS DIFERENTES — e só uma delas pode ser
+      // contada ao cliente.
+      //
+      // "Este negócio não tem nada marcado" é resposta CERTA, e o comentário
+      // que estava aqui defendia isso com razão. Mas ela era dada TAMBÉM quando
+      // o id nem é um lead — e no motor `leadId` É o `contact_id`
+      // (`inbound-turn.ts:1121`, `get-lead-context.ts:193`), enquanto o campo
+      // publicado no contexto do turno se chama `lead_id`. O modelo passava o
+      // id do contato para cá, a busca por vínculo não achava nada, e o agente
+      // NEGAVA ao cliente um compromisso que ele mesmo tinha acabado de marcar.
+      //
+      // Nada reclamava: consulta válida, lista vazia é legítima, e o modelo não
+      // tinha como suspeitar. A consulta abaixo separa as duas histórias, e só
+      // roda no ramo que já ia devolver vazio. (issue #509)
+      const { data: ehLead } = await supabase
+        .from("crm_leads")
+        .select("id")
+        .eq("organization_id", organizationId)
+        .eq("id", params.leadId)
+        .maybeSingle();
+
+      if (!ehLead) {
+        return {
+          ok: false,
+          codigo: "alvo_nao_e_lead",
+          motivoParaOperador:
+            `o id ${params.leadId} não é um negócio do funil. No contexto do turno, o campo ` +
+            "`lead_id` carrega o id do CONTATO — para consultar os compromissos de uma pessoa, " +
+            "use `contact_id`.",
+          motivoParaCliente:
+            "Não consegui confirmar a agenda dessa pessoa agora. NÃO diga que ela não tem nada " +
+            "marcado — diga que vai confirmar com a equipe.",
+        };
+      }
+      // Lead de verdade, sem nenhum vínculo: "nada marcado" é a resposta certa.
+      return { ok: true, agendamentos: [] };
+    }
   }
 
   let q = supabase
     .from("calendar_appointments")
     .select(
-      "id, title, starts_at, ends_at, time_zone, status, owner_user_id, contact_id, contacts(name, display_name)",
+      "id, title, starts_at, ends_at, time_zone, status, revision, meeting_state, meeting_url, owner_user_id, contact_id, contacts(name, display_name)",
     )
     .eq("organization_id", organizationId)
     .order("starts_at", { ascending: true })
@@ -512,6 +695,9 @@ export async function listaAgendamentos(
     agendamentos: (data ?? []).map((l) => ({
       id: String(l.id),
       titulo: String(l.title),
+      meetingState: l.meeting_state,
+      meetingUrl: l.meeting_state === "ready" ? l.meeting_url : null,
+      revision:Number(l.revision),
       iniciaEm: String(l.starts_at),
       terminaEm: String(l.ends_at),
       fuso: String(l.time_zone),
@@ -521,8 +707,9 @@ export async function listaAgendamentos(
       // O ID sozinho não serve a nenhum dos dois consumidores: a grade precisa do
       // nome para dizer "com quem", e o AGENTE recebia um uuid cru onde devia
       // dizer "você já tem consulta marcada, Maria". Mesma coluna que a tela do
-      // produto lê, mesmo precedente de `name` antes de `display_name`.
-      contatoNome: nomeDoContato(l.contacts),
+      // produto lê, e a MESMA decisão de nome — `lib/contacts/rotulo-do-contato.ts`,
+      // não um precedente copiado de outro arquivo.
+      contatoNome: contatoDoEmbed(l.contacts),
     })),
   };
 }
@@ -548,4 +735,152 @@ export async function idDoTipoPorSlug(
     .eq("slug", slug)
     .maybeSingle();
   return data ? { id: String(data.id), nome: String(data.name) } : null;
+}
+
+
+/**
+ * O que uma organização OFERECE para marcar.
+ *
+ * ⚠️ ESTE COLETOR NASCEU DE QUATRO CÓPIAS. `calendar_event_types` era lida em
+ * quatro lugares independentes, cada um com o seu recorte de colunas: o `GET`
+ * de `/api/v1/agenda/tipos`, a tela de configuração, a tela que marca e o
+ * `marcarAgendamentoHandler`. Nenhuma chamava a outra. É a mesma situação que
+ * o cabeçalho deste arquivo descreve para os horários — e o desfecho seria o
+ * mesmo: a tela e a IA respondendo por regras diferentes sobre o que a clínica
+ * atende.
+ *
+ * ⚠️ `incluirInativos` NÃO é conveniência, é a diferença entre duas perguntas.
+ * *"O que existe de cadastro?"* (tela de configuração, que precisa mostrar o
+ * desativado para alguém poder reativá-lo) e *"o que dá para marcar agora?"*
+ * (a IA e a tela que marca). Oferecer um tipo inativo ao modelo é beco sem
+ * saída garantido: `horariosLivresDaOrg` o encontra e recusa com
+ * `tipo_desativado`. Por isso o default é SÓ ATIVOS — quem quer o outro pede.
+ */
+export interface TipoDeAtendimento {
+  /** Chave de lista e alvo de PATCH/DELETE na TELA. Nunca vai ao modelo (ver a tool). */
+  id: string;
+  nome: string;
+  /** O handle estável que as ferramentas de agenda aceitam em `event_type_slug`. */
+  slug: string;
+  descricao: string | null;
+  categoria: string;
+  duracaoMin: number;
+  localKind: string;
+  localDetalhes: string | null;
+  /** true = o compromisso nasce aguardando o cliente confirmar (`pending`). */
+  precisaConfirmacao: boolean;
+  ativo: boolean;
+  /** Sem dono não há jornada, e sem jornada não há horário (`sem_responsavel`). */
+  donoPadraoId: string | null;
+  /**
+   * Os quatro números da grade. Eles NÃO vão ao modelo — `horariosLivresDaOrg`
+   * já os aplicou antes de devolver os horários, e repassá-los convidaria a IA a
+   * recalcular o que a máquina calculou. Estão aqui porque a rota de
+   * configuração os publica desde antes deste coletor existir, e campo que some
+   * de uma rota `/api/v1/` é quebra de contrato.
+   */
+  bufferAntesMin: number;
+  bufferDepoisMin: number;
+  antecedenciaMinimaMin: number;
+  janelaDeAgendamentoDias: number;
+  /**
+   * O LEMBRETE deste tipo — o que o cron `agenda-reminder` lê para decidir se
+   * manda mensagem, e quantos minutos antes.
+   *
+   * Também NÃO vão ao modelo, e pelo mesmo motivo dos quatro acima: a IA não
+   * dispara lembrete nem tem o que fazer com a antecedência dele. Estão aqui
+   * porque quem administra o cadastro precisa LER o estado antes de mudá-lo —
+   * uma tela que só sabe pedir "ligue" e nunca sabe se está ligado é o mesmo
+   * controle decorativo, invertido.
+   */
+  lembreteLigado: boolean;
+  lembreteAntecedenciaMin: number;
+  /** Degraus ADICIONAIS, somados ao principal. Vazio = um lembrete só. */
+  lembreteDegrausExtras: number[];
+  /** Texto próprio do lembrete principal. null = a frase padrão do cron. */
+  lembreteMensagem: string | null;
+  /** Texto de cada extra, chave = minutos antes. Vazio = nenhum extra tem texto próprio. */
+  lembreteMensagens: Record<string, string>;
+  /** Preço padrão em centavos, ou null quando o negócio digita na hora. */
+  precoPadraoCents: number | null;
+}
+
+export type ResultadoDosTipos =
+  | { ok: true; tipos: TipoDeAtendimento[] }
+  | {
+      ok: false;
+      codigo: "erro_interno";
+      motivoParaOperador: string;
+      motivoParaCliente: string;
+    };
+
+/**
+ * Os tipos de atendimento da organização.
+ *
+ * ⚠️ Erro de leitura NUNCA vira lista vazia. As duas leituras são
+ * indistinguíveis para quem recebe, e significam o oposto: lista vazia diz "a
+ * organização não cadastrou nada" e faria o modelo anunciar ao paciente que a
+ * clínica não atende. A recusa nomeada é o que leva alguém a corrigir.
+ */
+export async function listaTiposDeAtendimento(
+  supabase: SupabaseClient,
+  organizationId: string,
+  opcoes?: { incluirInativos?: boolean },
+): Promise<ResultadoDosTipos> {
+  const incluirInativos = opcoes?.incluirInativos ?? false;
+
+  let q = supabase
+    .from("calendar_event_types")
+    .select(
+      "id, name, slug, description, category, duration_minutes, location_kind, location_details, requires_confirmation, is_active, default_owner_user_id, buffer_before_minutes, buffer_after_minutes, minimum_notice_minutes, booking_window_days, reminder_enabled, reminder_minutes_before, reminder_extra_offsets_minutes, reminder_body, reminder_bodies, default_price_cents",
+    )
+    // Service role bypassa a RLS: este filtro é a única proteção no caminho da
+    // ferramenta MCP (ver o cabeçalho do arquivo).
+    .eq("organization_id", organizationId);
+  if (!incluirInativos) q = q.eq("is_active", true);
+
+  const { data, error } = await q.order("is_active", { ascending: false }).order("name");
+
+  if (error) {
+    return {
+      ok: false,
+      codigo: "erro_interno",
+      motivoParaOperador: error.message,
+      motivoParaCliente: `Não consegui ver o que a agenda oferece agora. ${NAO_OFERECA}`,
+    };
+  }
+
+  return {
+    ok: true,
+    tipos: (data ?? []).map((t) => ({
+      id: String(t.id),
+      nome: String(t.name),
+      slug: String(t.slug),
+      descricao: t.description === null ? null : String(t.description),
+      categoria: String(t.category),
+      duracaoMin: Number(t.duration_minutes),
+      localKind: String(t.location_kind),
+      localDetalhes: t.location_details === null ? null : String(t.location_details),
+      precisaConfirmacao: Boolean(t.requires_confirmation),
+      ativo: Boolean(t.is_active),
+      donoPadraoId: t.default_owner_user_id === null ? null : String(t.default_owner_user_id),
+      bufferAntesMin: Number(t.buffer_before_minutes),
+      bufferDepoisMin: Number(t.buffer_after_minutes),
+      antecedenciaMinimaMin: Number(t.minimum_notice_minutes),
+      janelaDeAgendamentoDias: Number(t.booking_window_days),
+      lembreteLigado: Boolean(t.reminder_enabled),
+      lembreteAntecedenciaMin: Number(t.reminder_minutes_before),
+      lembreteDegrausExtras: Array.isArray(t.reminder_extra_offsets_minutes)
+        ? t.reminder_extra_offsets_minutes.map(Number)
+        : [],
+      lembreteMensagem: t.reminder_body === null || t.reminder_body === undefined
+        ? null
+        : String(t.reminder_body),
+      lembreteMensagens: lerCorposDoLembrete(t.reminder_bodies),
+      precoPadraoCents:
+        t.default_price_cents === null || t.default_price_cents === undefined
+          ? null
+          : Number(t.default_price_cents),
+    })),
+  };
 }

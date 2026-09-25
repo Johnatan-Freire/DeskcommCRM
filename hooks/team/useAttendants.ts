@@ -4,6 +4,7 @@ import { toast } from "sonner";
 
 import { apiClient } from "@/lib/api/client";
 import { showApiError } from "@/components/feedback/ApiErrorToast";
+import { useT } from "@/hooks/i18n/useT";
 import type { AvailabilitySchedule, RoutingConfig } from "@/lib/schemas/routing";
 
 export interface AttendantAvailability {
@@ -15,10 +16,23 @@ export interface AttendantAvailability {
   /** null = atendente ainda sem linha de availability (nunca configurado). */
   capacity: number | null;
   schedule: AvailabilitySchedule;
-  last_heartbeat_at: string | null;
   updated_at: string | null;
   /** Conversas abertas atribuídas (G5-04): a mesma carga que o router usa. */
   current_load: number;
+  /**
+   * Carimbo do último sinal de presença do navegador (issue #996). `null` =
+   * nunca abriu nenhuma tela logado. Vem do emissor
+   * (`hooks/atendimento/useSinalDePresenca`), NÃO do botão de plantão.
+   */
+  last_heartbeat_at: string | null;
+  /**
+   * Tem sinal de presença válido agora. Derivado no SERVIDOR com o prazo de
+   * `lib/atendimento/presenca.ts` — a tela lê, não recalcula.
+   *
+   * Presença é informação, nunca permissão: quem está de plantão continua sendo
+   * `is_available` + jornada (`estaDePlantao`), e nada aqui desliga a chave.
+   */
+  present: boolean;
 }
 
 const ATTENDANTS_KEY = ["team", "attendants"] as const;
@@ -43,6 +57,7 @@ export interface AvailabilityUpdate {
 /** PATCH disponibilidade de um atendente (próprio OU manager+; a API enforça). */
 export function useUpdateAvailability() {
   const qc = useQueryClient();
+  const t = useT();
   return useMutation({
     mutationFn: async ({ userId, patch }: { userId: string; patch: AvailabilityUpdate }) =>
       apiClient.patch<{ data: AttendantAvailability }>(
@@ -51,7 +66,7 @@ export function useUpdateAvailability() {
       ),
     onError: (err) => showApiError(err),
     onSuccess: () => {
-      toast.success("Atendente atualizado.");
+      toast.success(t("Atendente atualizado."));
       qc.invalidateQueries({ queryKey: ATTENDANTS_KEY });
     },
   });
@@ -69,12 +84,13 @@ export function useRoutingConfig() {
 /** PATCH do modo/knobs de roteamento (manager+; a API enforça). */
 export function useUpdateRouting() {
   const qc = useQueryClient();
+  const t = useT();
   return useMutation({
     mutationFn: async (config: RoutingConfig) =>
       apiClient.patch<{ data: RoutingConfig }>("/api/v1/settings/routing", config),
     onError: (err) => showApiError(err),
     onSuccess: () => {
-      toast.success("Roteamento atualizado.");
+      toast.success(t("Roteamento atualizado."));
       qc.invalidateQueries({ queryKey: ROUTING_KEY });
     },
   });

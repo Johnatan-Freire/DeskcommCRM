@@ -1,3 +1,4 @@
+import { requireSupportWrite } from "@/lib/impersonate/support";
 /**
  * POST /api/v1/system/relogio/tick — uma batida do relógio.
  *
@@ -8,8 +9,8 @@ import type { NextRequest } from "next/server";
 
 import { fail, ok } from "@/lib/api/wrappers";
 import { audit } from "@/lib/audit";
-import { loadAuthUser, resolveActiveOrg } from "@/lib/auth/server";
-import { ROLE_RANK } from "@/lib/auth/types";
+import { loadAuthUser } from "@/lib/auth/server";
+import { requireRole } from "@/lib/auth/require-role";
 import { env } from "@/lib/env";
 import { executarTickDoRelogio } from "@/lib/relogio/executar";
 
@@ -42,18 +43,28 @@ function bearerValido(req: NextRequest): boolean {
   });
 }
 
-async function sessaoAdmin(): Promise<boolean> {
-  const user = await loadAuthUser();
-  if (!user) return false;
-  if (user.is_platform_admin) return true;
-  const org = await resolveActiveOrg(user);
-  return Boolean(org && ROLE_RANK[org.role] >= ROLE_RANK.admin);
+/**
+ * Via `requireRole`, e não a comparação manual de antes: ganha o gate de MFA
+ * de graça — uma sessão admin `aal1` não deve conseguir disparar manualmente
+ * um tick de produção só porque tem o rank. `allowPlatformAdmin` replica o
+ * bypass que já existia aqui.
+ */
+async function sessaoAdmin(requestId: string): Promise<boolean> {
+  const authz = await requireRole("admin", {
+    requestId,
+    resource: "system_relogio_tick",
+    allowPlatformAdmin: true,
+  });
+  return authz.ok;
 }
 
 export async function POST(req: NextRequest): Promise<Response> {
+  const supportDenied = await requireSupportWrite();
+  if (supportDenied) return supportDenied;
+
   const requestId = randomUUID();
   const porSegredo = bearerValido(req);
-  if (!porSegredo && !(await sessaoAdmin())) {
+  if (!porSegredo && !(await sessaoAdmin(requestId))) {
     return fail("forbidden", "Cron secret missing or invalid.", 403, { requestId });
   }
 

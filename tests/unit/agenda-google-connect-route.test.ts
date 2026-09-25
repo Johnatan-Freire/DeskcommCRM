@@ -16,13 +16,9 @@ import type { ActiveOrg, AuthUser } from "@/lib/auth/types";
 
 vi.mock("@/lib/auth/require-role", () => ({ requireRole: vi.fn() }));
 vi.mock("@/lib/audit", () => ({ audit: vi.fn(async () => undefined), isServiceRoleConfigured: vi.fn(() => true) }));
-
-// A rota resolve a config pelo banco ANTES do `.env` (migration 0201) — sem
-// este dublê, os dois primeiros casos fazem uma chamada de rede DE VERDADE
-// contra `NEXT_PUBLIC_SUPABASE_URL` (o placeholder `.invalid` do setup
-// global) e medem a paciência da rede (DNS lento) em vez do código. Medido:
-// >15s sob carga. Precedência banco vs. `.env` tem cerca própria em
-// `agenda-google-credencial-do-banco.test.ts` — aqui só "sem linha" importa.
+// O contrato da rota é testado contra as variáveis passadas ao cenário. Sem
+// dublê, uma credencial salva no banco da máquina de quem roda a suíte vence o
+// ambiente e torna os casos "sem chave" dependentes do estado local.
 vi.mock("@/lib/supabase/admin", () => ({
   createAdminClient: () => ({
     from: () => ({
@@ -44,6 +40,7 @@ const usuario: AuthUser = {
   full_name: "Ana",
   avatar_url: null,
   is_platform_admin: false,
+  idioma: "pt-BR" as const,
   // `organizations` é obrigatório em `AuthUser` e o dublê não o tinha — o
   // typecheck da árvore integrada pegou, o vitest não pegaria nunca: esbuild
   // apaga tipo sem conferir. É o motivo de `pnpm typecheck` não ser opcional.
@@ -54,6 +51,12 @@ const orgAtiva: ActiveOrg = { orgId: ORG, name: "Clínica", role: "agent" };
 function pedido(): NextRequest {
   return new NextRequest("https://crm.exemplo/api/v1/agenda/google/connect", {
     headers: { "x-request-id": "req-1" },
+  });
+}
+
+function pedidoLocal(): NextRequest {
+  return new NextRequest("http://localhost:3001/api/v1/agenda/google/connect", {
+    headers: { "x-request-id": "req-local", host: "localhost:3001" },
   });
 }
 
@@ -76,7 +79,7 @@ beforeEach(() => {
 });
 
 describe("GET /api/v1/agenda/google/connect", () => {
-  it("manda para o consentimento do Google com offline + consent + state", async () => {
+  it("manda para o consentimento do Google com offline + consent + select_account + state", async () => {
     const { GET } = await rotaComEnv(CONFIGURADO);
     const res = await GET(pedido());
 
@@ -84,11 +87,24 @@ describe("GET /api/v1/agenda/google/connect", () => {
     const destino = new URL(res.headers.get("location") ?? "");
     expect(destino.origin + destino.pathname).toBe("https://accounts.google.com/o/oauth2/v2/auth");
     expect(destino.searchParams.get("access_type")).toBe("offline");
-    expect(destino.searchParams.get("prompt")).toBe("consent");
+    // Os dois de uma vez: `consent` garante o refresh_token na reconexão e
+    // `select_account` mantém o seletor de contas de pé — sem ele o Google
+    // autoriza direto a conta do `login_hint`, e quem tem a agenda num e-mail
+    // diferente do login do CRM não tem como conectá-la (issue #929).
+    expect(destino.searchParams.get("prompt")?.split(" ").sort()).toEqual(["consent", "select_account"]);
     expect(destino.searchParams.get("state")).toBeTruthy();
     // Sugerir a conta evita autorizar com a conta pessoal que já estava logada
-    // no navegador e ver a agenda errada aparecer no CRM.
+    // no navegador e ver a agenda errada aparecer no CRM — e sugerir não fecha a
+    // porta: o seletor do Google continua sendo oferecido (assert acima), então
+    // quem tem a agenda noutro e-mail escolhe a dele ali.
     expect(destino.searchParams.get("login_hint")).toBe("ana@clinica.com.br");
+  });
+
+  it("usa localhost como callback quando o navegador abre a instalação local por localhost", async () => {
+    const { GET } = await rotaComEnv({ ...CONFIGURADO, NEXT_PUBLIC_APP_URL: "http://192.168.0.21:3001" });
+    const res = await GET(pedidoLocal());
+    const destino = new URL(res.headers.get("location") ?? "");
+    expect(destino.searchParams.get("redirect_uri")).toBe("http://localhost:3001/api/v1/agenda/google/callback");
   });
 
   it("o `state` carrega a PESSOA, não só a organização", async () => {
@@ -150,3 +166,10 @@ describe("GET /api/v1/agenda/google/connect", () => {
     expect(requireRole).toHaveBeenCalledWith("agent", expect.objectContaining({ resource: "calendar_connections" }));
   });
 });
+
+// Este teste isola o handler; autoridade de suporte é exercitada na suíte própria.
+vi.mock("@/lib/impersonate/support", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/lib/impersonate/support")>(),
+  requireSupportWrite: vi.fn(async () => null),
+  authenticatedSessionId: vi.fn(async () => "f2200000-0000-4000-8000-000000000099"),
+}));

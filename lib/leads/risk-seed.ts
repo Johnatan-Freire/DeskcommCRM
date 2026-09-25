@@ -1,3 +1,4 @@
+import { protecaoAgendaSupabase } from "@/lib/agenda/protecao-followup";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { classifyRisk, resolveStageWindow, type RiskBucket } from "@/lib/leads/risk-radar";
@@ -144,6 +145,8 @@ async function coletaEClassifica(
     }
   }
 
+  const agenda = await protecaoAgendaSupabase(admin, organizationId, contactIds, now);
+  if ([...agenda.values()].some(p => p.motivo === "leitura_indisponivel")) throw new Error("risk_agenda_indisponivel");
   const estados: EstadoCalculado[] = [];
   let semRelogio = 0;
 
@@ -160,12 +163,16 @@ async function coletaEClassifica(
       now,
       inFlight: l.contact_id ? followupPorContato.has(l.contact_id) : false,
       window,
+      agenda: l.contact_id ? agenda.get(l.contact_id) : undefined,
     });
     estados.push({
       leadId: l.id,
       contactId: l.contact_id,
       bucket,
-      since: sinceDoBucket(bucket, lastActivityAt, window),
+      // O MESMO `now` que classificou. Um `new Date()` aqui seria um segundo
+      // relogio dentro da mesma passada, e a diferenca entre os dois e
+      // exatamente o tipo de deriva que ja violou a constraint antes.
+      since: sinceDoBucket(bucket, lastActivityAt, window, now),
       coldHours: window.coldHours,
     });
   }

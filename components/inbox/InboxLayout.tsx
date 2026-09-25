@@ -1,9 +1,12 @@
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useT } from "@/hooks/i18n/useT";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/hooks/auth/AuthProvider";
+import { fonteDeTemplates } from "@/lib/channels/templates-fonte";
 import { estadoDaJanela, formatarDecorrido } from "@/lib/channels/janela";
 import { JanelaFechadaAviso } from "@/components/inbox/JanelaFechadaAviso";
+import { NumeroForaDoAr } from "@/components/inbox/NumeroForaDoAr";
 import { useClaimConversation } from "@/hooks/inbox/useClaimConversation";
 import { useCloseConversation } from "@/hooks/inbox/useCloseConversation";
 import { useMarkAsRead } from "@/hooks/inbox/useMarkAsRead";
@@ -22,15 +25,17 @@ import { RetentionNotice } from "./RetentionNotice";
 import { CRMSidePanel } from "./CRMSidePanel";
 import type { Message as ConversationMensagem } from "@/lib/types/messaging";
 import { InboxKeyboardShortcuts } from "./InboxKeyboardShortcuts";
-import { CONVERSATION_QUEUE_STATUSES } from "@/lib/schemas";
 
 import { ShortcutsHelpDialog } from "./ShortcutsHelpDialog";
 import { OpenConversationProvider } from "@/hooks/notifications/OpenConversationContext";
 // ADR-05: ícone de feature sai do mapa canônico, nunca do pacote direto.
-import { CaretLeft, IdentificationCard } from "@/lib/ui/icons";
+import { CaretLeft, ChatCircle, IdentificationCard } from "@/lib/ui/icons";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
+import { comandosDaFila } from "@/lib/inbox/comando-da-conversa";
+import { buscaValeConsulta } from "@/lib/inbox/termo-de-busca";
+import { useAutomaticoAtivo } from "@/hooks/ai/useAutomaticoAtivo";
 
 /**
  * QUAL COLUNA APARECE NO CELULAR — as duas saem da MESMA pergunta.
@@ -62,15 +67,23 @@ export function colunasDoCelular(temSelecao: boolean): { lista: string; conversa
  * que este mapa já teve (Minhas mostrando tudo que o atendente fechou) não
  * aparece em nenhuma tela até alguém reclamar, então vale prender por teste.
  */
-export function tabToFilter(tab: InboxFiltersValue["tab"]): Partial<ConversationsFilters> {
+export function tabToFilter(
+  tab: InboxFiltersValue["tab"],
+  automaticoDaOrg?: boolean,
+): Partial<ConversationsFilters> {
   switch (tab) {
     case "unassigned":
-      // Os DOIS estados de espera, não só `open`. A conversa que o automático
-      // escalou é `pending` e não aparecia em aba nenhuma que o atendente vê —
-      // "Fila" pedia `open`, "Minhas" exige dono, "IA" filtra `ai_handling` e
-      // "Todas" é escondida do papel `agent` fora do modo `all`. A conversa que
-      // mais precisa de uma pessoa era a única invisível.
-      return { assigned_to: "unassigned", status: [...CONVERSATION_QUEUE_STATUSES] };
+      // A FILA PERGUNTA POR QUEM MANDA, NÃO POR STATUS.
+      //
+      // Antes ela pedia `assigned_to=unassigned` + os dois estados de espera. Só
+      // que "sem dono e aberta" é também a conversa que o robô está atendendo
+      // agora — medido na VPS em 2026-08-30, a aba dizia 83 e 47 daquelas tinham
+      // o automático no comando. O atendente abria a Fila e via como trabalho
+      // dele quase tudo que já estava sendo respondido.
+      //
+      // `comandosDaFila` é quem cruza isso com o fato org-wide: numa instalação
+      // sem nenhum agente no ar, `automatico` também é "esperando gente".
+      return { comando: comandosDaFila(automaticoDaOrg) };
     case "mine":
       // Sem `exclude_finished` a aba mostra tudo que o atendente JÁ atendeu —
       // `Fechar` muda o status mas não solta o dono (de propósito: quem atendeu
@@ -78,15 +91,27 @@ export function tabToFilter(tab: InboxFiltersValue["tab"]): Partial<Conversation
       return { assigned_to: "me", exclude_finished: true };
     case "closed":
       return { status: "closed" };
+    case "archived":
+      // O ARQUIVO É UM ESTADO SÓ ELE, não `in(terminais)`.
+      //
+      // `CONVERSATION_TERMINAL_STATUSES` responde outra pergunta ("o que sai do
+      // fluxo vivo", usada pelo `exclude_finished` de Minhas). Reaproveitá-la
+      // aqui faria a aba Arquivadas listar também as fechadas — duas abas com a
+      // mesma lista e badges diferentes, que é a mentira de tela que o mapa
+      // abaixo existe para impedir.
+      return { status: "archived" };
     case "ai":
-      return { status: "ai_handling" };
+      // `ai_handling` é escrito por UM caminho só em produção (a volta pelo botão
+      // "Devolver ao automático"), então a aba vivia mostrando 2 enquanto o robô
+      // atendia 47. Agora ela pergunta a régua do MOTOR.
+      return { comando: ["automatico"] };
     case "all":
     default:
       return {};
   }
 }
 
-const FILTER_TABS: InboxTab[] = ["unassigned", "mine", "all", "closed", "ai"];
+const FILTER_TABS: InboxTab[] = ["unassigned", "mine", "all", "closed", "archived", "ai"];
 
 /**
  * Lê ?filter= (G4-02, deep-link). ?filter=all é HONRADO mesmo para agent — a
@@ -101,7 +126,9 @@ interface InboxLayoutProps {
 }
 
 export function InboxLayout({ initialSelectedId = null }: InboxLayoutProps = {}) {
-  const { activeOrg } = useAuth();
+  const t = useT();
+  const { activeOrg, user } = useAuth();
+  const supportReadonly = user.support?.access_mode === "support_readonly";
   const orgId = activeOrg?.orgId ?? null;
 
   const router = useRouter();
@@ -128,6 +155,12 @@ export function InboxLayout({ initialSelectedId = null }: InboxLayoutProps = {})
     [tab, searchParams, router, pathname],
   );
 
+  // Desliga só os AUXILIARES e mantém a aba: a aba é onde a pessoa está, e
+  // limpá-la junto a tiraria do lugar sem ela ter pedido.
+  const limparFiltrosAuxiliares = useCallback(() => {
+    setFilterValue({ tab, search: "", onlyUnread: false });
+  }, [tab, setFilterValue]);
+
   const [selectedId, setSelectedId] = useState<string | null>(initialSelectedId);
   const [visibleIds, setVisibleIds] = useState<string[]>([]);
   const [helpOpen, setHelpOpen] = useState(false);
@@ -140,25 +173,44 @@ export function InboxLayout({ initialSelectedId = null }: InboxLayoutProps = {})
    * quem MOSTRA é o composer — são irmãos, e o estado comum é do pai.
    */
   const [respondendo, setRespondendo] = useState<ConversationMensagem | null>(null);
+
+  /**
+   * A ORG tem automático de pé? Sobe para cá porque agora é a ABA que precisa —
+   * `ConversationList` e `ConversationHeader` continuam lendo o mesmo hook, e o
+   * react-query dedupa: segue sendo uma requisição só.
+   *
+   * `undefined` enquanto carrega, e `comandosDaFila` trata isso como "assume que
+   * há" — a mesma convenção da regra. Numa org SEM automático a Fila nasce menor
+   * e completa quando a resposta chega; a janela é de ~200ms e o rótulo nunca
+   * discorda do filtro, porque os dois usam a mesma convenção.
+   */
+  const { data: automaticoDaOrg } = useAutomaticoAtivo();
   const composerRef = useRef<ComposerHandle | null>(null);
 
   const filters: ConversationsFilters = useMemo(
     () => ({
-      ...tabToFilter(filterValue.tab),
-      search: filterValue.search || undefined,
+      ...tabToFilter(filterValue.tab, automaticoDaOrg),
+      // A tela NÃO pede o que a rota recusa: o hook trata falha com
+      // `showApiError`, então digitar a primeira letra de qualquer busca faria
+      // piscar um erro na cara de quem digita. A regra é a MESMA que o schema
+      // usa (`lib/inbox/termo-de-busca.ts`) — nunca repetida aqui.
+      search: buscaValeConsulta(filterValue.search)
+        ? filterValue.search
+        : undefined,
       channel_session_id: filterValue.channel_session_id,
       tag: filterValue.tag,
+      unread: filterValue.onlyUnread || undefined,
     }),
-    [filterValue.tab, filterValue.search, filterValue.channel_session_id, filterValue.tag],
+    [
+      filterValue.tab,
+      automaticoDaOrg,
+      filterValue.search,
+      filterValue.channel_session_id,
+      filterValue.tag,
+      filterValue.onlyUnread,
+    ],
   );
 
-  const clientFilter = useMemo(
-    () =>
-      filterValue.onlyUnread
-        ? (c: ConversationWithContact) => (c.unread_count_for_assignee ?? 0) > 0
-        : undefined,
-    [filterValue.onlyUnread],
-  );
 
   // We need the selected conversation object for header / composer / side panel.
   // Source it from the same query the list uses to avoid an extra request.
@@ -171,7 +223,35 @@ export function InboxLayout({ initialSelectedId = null }: InboxLayoutProps = {})
   // Deep-link para conversa fora do filtro atual (ou fora do escopo do agent):
   // busca única RLS-scoped. 404/vazio ⇒ inacessível ⇒ estado vazio claro (GAP D),
   // nunca stack trace. A RLS (G4-01) é quem garante o não-vazamento.
-  const needsFetch = !!selectedId && !inList && !listQ.isLoading;
+  //
+  // ⚠️ ELA NÃO ESPERA A LISTA — e a espera custava DUAS voltas de rede inteiras.
+  //
+  // A condição tinha um terceiro termo, `&& !listQ.isLoading`, para poupar uma
+  // requisição quando a conversa fosse aparecer na lista de qualquer jeito. O
+  // preço real, medido no trace do CI (run 34226618108, deep-link para uma
+  // conversa FECHADA — que nenhuma aba da Fila devolve, então a busca única é a
+  // única fonte do objeto):
+  //
+  //   46.725  GET conversations?comando=aguardando               1091ms
+  //   48.275  GET conversations?comando=aguardando,automatico     896ms
+  //   49.183  GET conversations/<id>                              565ms
+  //   49.775  GET contacts/<id>/crm-summary                    (>1034ms)
+  //
+  // São QUATRO idas em série depois do documento. A lista é pedida duas vezes
+  // porque a `queryKey` muda quando `useAutomaticoAtivo` responde (ver
+  // `comandosDaFila`), e `isLoading` volta a ser verdadeiro na chave nova — ou
+  // seja, o gate segurava a busca única até a SEGUNDA lista assentar, e só
+  // então o painel do contato podia começar a carregar. O painel do contato
+  // aparecia ~4,7s depois da navegação, e é assim que `encerramento-atendimento`
+  // ficou intermitente: a Memória do contato chegava ~0,1–0,6s DEPOIS dos 5s da
+  // asserção (o screenshot de falha, tirado logo em seguida, já a mostra).
+  //
+  // Sem o gate, a busca única sai na primeira leva, em paralelo com a lista, e o
+  // objeto existe uma volta depois do documento em vez de três. O custo é UMA
+  // requisição extra por deep-link cuja conversa acabe aparecendo na lista —
+  // clicar numa conversa da lista já carregada continua sem pedir nada, porque
+  // aí `inList` já a tem no primeiro render.
+  const needsFetch = !!selectedId && !inList;
   const single = useConversation(selectedId, needsFetch);
   const selectedConversation: ConversationWithContact | null = inList ?? single.data ?? null;
   const selectionNotFound =
@@ -242,15 +322,17 @@ export function InboxLayout({ initialSelectedId = null }: InboxLayoutProps = {})
   );
   const motivoDaJanela =
     janela.tipo === "fechada"
-      ? janela.fechadaHaMs === null
-        ? "O cliente ainda não escreveu — a janela de 24h nunca abriu. Só um modelo aprovado sai daqui."
-        : `A janela de 24h fechou há ${formatarDecorrido(janela.fechadaHaMs)}. Só um modelo aprovado sai daqui — texto livre é recusado pela plataforma.`
+      ? fonteDeTemplates(selectedConversation?.channel_sessions?.provider) === null
+        ? t("Aguarde uma nova mensagem do cliente para reabrir o atendimento nesta rede.")
+        : janela.fechadaHaMs === null
+        ? t("O cliente ainda não escreveu — a janela de 24h nunca abriu. Só um modelo aprovado sai daqui.")
+        : `${t("A janela de 24h fechou há")} ${formatarDecorrido(janela.fechadaHaMs)}. ${t("Só um modelo aprovado sai daqui — texto livre é recusado pela plataforma.")}`
       : null;
 
   const blockedReason = selectedConversation?.contacts?.is_blocked
-    ? "Contato bloqueado — envio de mensagens desabilitado."
+    ? t("Contato bloqueado — envio de mensagens desabilitado.")
     : selectedConversation?.contacts?.is_anonymized
-      ? "Contato anonimizado — não é possível enviar mensagens."
+      ? t("Contato anonimizado — não é possível enviar mensagens.")
       : null;
 
   // Altura da grade: a conta desconta TUDO que fica acima e abaixo dela.
@@ -262,9 +344,12 @@ export function InboxLayout({ initialSelectedId = null }: InboxLayoutProps = {})
   // parcialmente abaixo da borda, atrapalhando justo na hora de escrever.
   //
   // As duas parcelas NÃO estão na mesma unidade, e por isso o padding entra pelo
-  // token e não como `3rem`: o `tailwind.config.ts` remapeia a escala de spacing
-  // para `var(--space-N)` — `--space-6` é `24px` LITERAL (app/globals.css) —, mas
-  // não remapeia o `14`, que segue sendo `3.5rem` de verdade. Escrever a soma como
+  // token e não como `3rem`: o `@theme inline` de `app/globals.css` remapeia a
+  // escala de spacing para `var(--space-N)` — `--space-6` é `24px` LITERAL —, mas
+  // não remapeia o `14`, que o Tailwind 4 calcula pelo multiplicador `--spacing`
+  // e segue sendo `3.5rem` de verdade. (Até o Tailwind 4 quem remapeava era o
+  // `tailwind.config.ts`; o arquivo não existe mais, o efeito é o mesmo.)
+  // Escrever a soma como
   // `6.5rem` só acerta enquanto a raiz for 16px; com acessibilidade de fonte maior
   // ou menor o composer sai da tela de novo. Pelo token, a conta se auto-corrige
   // se a escala de espaçamento mudar.
@@ -293,7 +378,7 @@ export function InboxLayout({ initialSelectedId = null }: InboxLayoutProps = {})
   return (
     <OpenConversationProvider conversationId={selectedId}>
     <div
-      className="grid h-[calc(100dvh-3.5rem-2*var(--space-6))] w-full grid-cols-1 md:grid-cols-[300px_1fr] xl:grid-cols-[272px_1fr_296px] 2xl:grid-cols-[300px_1fr_320px]"
+      className="grid h-[calc(100dvh-3.5rem-var(--space-6)-max(var(--space-6),var(--rodape-ocupado,0px)))] w-full grid-cols-1 md:grid-cols-[300px_1fr] xl:grid-cols-[272px_1fr_296px] 2xl:grid-cols-[300px_1fr_320px]"
       /*
        * O ESTADO DO TEMPO REAL, LEGÍVEL DE FORA — mesmo par que o dossiê do lead
        * já publica (`LeadDossier`), e pela mesma razão: quando a entrega morre,
@@ -343,8 +428,8 @@ export function InboxLayout({ initialSelectedId = null }: InboxLayoutProps = {})
             filters={filters}
             selectedId={selectedId}
             onSelect={handleSelect}
-            clientFilter={clientFilter}
             onVisibleChange={handleVisibleChange}
+            onLimparFiltros={limparFiltrosAuxiliares}
           />
         </div>
       </div>
@@ -363,7 +448,7 @@ export function InboxLayout({ initialSelectedId = null }: InboxLayoutProps = {})
       */}
       <div
         className={cn(
-          "h-full min-h-0 flex-col md:flex",
+          "h-full min-h-0 min-w-0 flex-col md:flex",
           colunas.conversa,
         )}
       >
@@ -382,7 +467,7 @@ export function InboxLayout({ initialSelectedId = null }: InboxLayoutProps = {})
               onClick={() => handleSelect(null)}
             >
               <CaretLeft size={16} />
-              Conversas
+              {t("Conversas")}
             </Button>
             <div className="flex-1" />
             {selectedConversation && (
@@ -390,11 +475,11 @@ export function InboxLayout({ initialSelectedId = null }: InboxLayoutProps = {})
                 <SheetTrigger asChild>
                   <Button variant="ghost" size="sm" className="h-9 gap-1 px-2 xl:hidden">
                     <IdentificationCard size={16} />
-                    Ficha
+                    {t("Ficha")}
                   </Button>
                 </SheetTrigger>
                 <SheetContent side="right" className="w-[min(22rem,90vw)] overflow-y-auto p-0">
-                  <SheetTitle className="sr-only">Ficha do contato</SheetTitle>
+                  <SheetTitle className="sr-only">{t("Ficha do contato")}</SheetTitle>
                   <CRMSidePanel conversation={selectedConversation} />
                 </SheetContent>
               </Sheet>
@@ -403,11 +488,39 @@ export function InboxLayout({ initialSelectedId = null }: InboxLayoutProps = {})
         )}
         {selectedConversation ? (
           <>
-            <ConversationHeader conversation={selectedConversation} />
+            {/* `key`: trocar de conversa desmonta a confirmação de Fechar/Arquivar
+                aberta — senão o clique de dentro agiria sobre a conversa nova. */}
+            <ConversationHeader
+              key={selectedConversation.id}
+              conversation={selectedConversation}
+              onAbrirConversa={handleSelect}
+            />
             <div className="min-h-0 flex-1 overflow-hidden">
-              <ChatThread conversationId={selectedConversation.id} onResponder={setRespondendo} />
+              <ChatThread
+                conversationId={selectedConversation.id}
+                onResponder={setRespondendo}
+                // O cartão da passagem escolhe o gesto a partir de quem é o dono
+                // da conversa: sem dono convida a assumir, com outro dono diz
+                // quem atende. Sem estes dois campos ele cairia no estado mais
+                // conservador e ficaria mudo justamente para quem mais precisa.
+                dono={{
+                  userId: selectedConversation.assigned_to_user_id ?? null,
+                  nome: selectedConversation.assigned_to_user_name ?? null,
+                }}
+                contatoId={selectedConversation.contacts?.id ?? null}
+              />
             </div>
             <RetentionNotice conversationId={selectedConversation.id} />
+            {selectedConversation.contacts?.id && (
+              <NumeroForaDoAr
+                key={`numero:${selectedConversation.id}`}
+                conversationId={selectedConversation.id}
+                channelSessionId={selectedConversation.channel_session_id}
+                contactId={selectedConversation.contacts.id}
+                contactPhone={selectedConversation.contacts.phone_number ?? null}
+                onAbrirConversa={handleSelect}
+              />
+            )}
             {motivoDaJanela && (
               <JanelaFechadaAviso
                 conversationId={selectedConversation.id}
@@ -418,7 +531,7 @@ export function InboxLayout({ initialSelectedId = null }: InboxLayoutProps = {})
             <Composer
               ref={composerRef}
               conversationId={selectedConversation.id}
-              blockedReason={blockedReason}
+              blockedReason={supportReadonly ? "Acompanhamento somente leitura" : blockedReason}
               janelaFechada={motivoDaJanela}
               disabled={selectedConversation.status === "closed"}
               contactName={selectedConversation.contacts?.name ?? null}
@@ -429,11 +542,13 @@ export function InboxLayout({ initialSelectedId = null }: InboxLayoutProps = {})
           </>
         ) : selectionNotFound ? (
           <div className="flex h-full items-center justify-center px-6 text-center text-sm text-muted-foreground">
-            Conversa não encontrada ou fora do seu acesso.
+            {t("Conversa não encontrada ou fora do seu acesso.")}
           </div>
         ) : (
-          <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-            Selecione uma conversa
+          <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
+            <ChatCircle size={36} weight="thin" className="text-text-subtle" aria-hidden />
+            <p className="text-sm font-medium text-text-muted">{t("Selecione uma conversa")}</p>
+            <p className="text-xs text-text-muted">{t("Ou navegue com J e K")}</p>
           </div>
         )}
       </div>
@@ -447,8 +562,8 @@ export function InboxLayout({ initialSelectedId = null }: InboxLayoutProps = {})
         selectedId={selectedId}
         onSelect={handleSelect}
         onFocusReply={handleFocusReply}
-        onClaim={handleClaim}
-        onClose={handleClose}
+        onClaim={supportReadonly ? () => {} : handleClaim}
+        onClose={supportReadonly ? () => {} : handleClose}
         onToggleHelp={() => setHelpOpen((v) => !v)}
       />
       <ShortcutsHelpDialog open={helpOpen} onOpenChange={setHelpOpen} />

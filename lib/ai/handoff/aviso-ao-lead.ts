@@ -1,3 +1,4 @@
+import type { ServiceBoundary } from "@/lib/atendimento/fronteira";
 /**
  * O ENVIO do aviso de escalação — lado do CRM (`supabase-js`).
  *
@@ -43,16 +44,22 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { sendMessageHandler } from "@/app/api/v1/messages/_handler";
 import { motivoDoAviso, textoDoAviso } from "@/lib/escalacao/aviso-ao-lead";
-import {
-  quemPodeAssumirAgoraViaSupabase,
-  type QuemPodeAssumir,
-} from "@/lib/escalacao/disponibilidade";
+import { carregarRosterDeAtendimento, podeAssumirAgora } from "@/lib/escalacao/atendentes";
+// Dois `MotivoDoAviso` no repositório: o de `escalacao/aviso-ao-lead` diz QUE
+// FRASE o cliente lê; este diz POR QUE ele não leu nada. O apelido impede a
+// confusão numa leitura rápida.
+import type {
+  DesfechoDoAvisoAoCliente,
+  MotivoDoAviso as MotivoDoAvisoDaPassagem,
+} from "@/lib/escalacao/passagem";
+import type { QuemPodeAssumir } from "@/lib/escalacao/disponibilidade";
 import { logger } from "@/lib/logger";
 
 /** Ator do envio — é o automático falando, não uma pessoa. */
 const ATOR_DO_AVISO = "handoff-orchestrator";
 
 export interface AvisoDoCrmInput {
+  serviceBoundary?: ServiceBoundary;
   organizationId: string;
   conversationId: string;
   /** `contacts.id` — semente da variante do texto (nada dele aparece na frase). */
@@ -62,24 +69,53 @@ export interface AvisoDoCrmInput {
 }
 
 /**
+ * O desfecho do aviso. É o MESMO tipo do outro emissor, por definição — ver
+ * `DesfechoDoAvisoAoCliente`: enquanto eram dois, este lado tinha um
+ * `{ avisado: boolean }` solto, e foi por essa folga que "avisado: true" passou
+ * sem ninguém olhar o status da mensagem.
+ */
+export type DesfechoDoAvisoDoCrm = DesfechoDoAvisoAoCliente;
+
+/**
+ * `messages.error_code` → o motivo fechado. Parcial de propósito: código que não
+ * está aqui vira "não avisado, motivo desconhecido", que é a verdade disponível.
+ */
+const CODIGO_DO_ERRO: Readonly<Record<string, MotivoDoAvisoDaPassagem>> = {
+  pre_go_live: "pre_go_live",
+  pre_go_live_indisponivel: "pre_go_live",
+  channel_archived: "canal_arquivado",
+  missing_phone_number: "sem_telefone",
+};
+
+/**
  * Avisa o lead. NUNCA lança: o orquestrador inteiro é fire-and-forget por
  * contrato ("nunca propaga exceção pro caller"), e um erro aqui não pode impedir
  * a passagem que ele antecede.
+ *
+ * ⚠️ **O QUE MUDOU, e por que era grave.** Esta função devolvia `avisado: true`
+ * sempre que `sendMessageHandler` não LANÇAVA — e ele quase nunca lança: canal
+ * em modo de teste, canal arquivado, contato sem telefone e recusa do transporte
+ * viram `status='failed'` DENTRO da linha da mensagem, com `error_code`, e a
+ * chamada volta normal. O resultado é que a Central afirmava "O cliente JÁ FOI
+ * avisado" para uma pessoa que não recebeu nada, e o atendente abria a conversa
+ * respondendo a alguém que não sabia que ele vinha. Agora o desfecho é lido do
+ * `status` da mensagem devolvida, que é o único lugar onde ele existe.
  */
 export async function avisarLeadDoCrm(
   admin: SupabaseClient,
   input: AvisoDoCrmInput,
-): Promise<{ avisado: boolean; porque?: string }> {
+): Promise<DesfechoDoAvisoDoCrm> {
   try {
     const body = textoDoAviso(
       motivoDoAviso(input.reason),
       await quemPodeAssumir(admin, input.organizationId),
       input.contactId,
     );
-    await sendMessageHandler(
+    const mensagem = await sendMessageHandler(
       admin,
       {
         organization_id: input.organizationId,
+        serviceBoundary: input.serviceBoundary,
         actor: { type: "ai_agent", id: ATOR_DO_AVISO, role: "manager" },
         requestId: `handoff-aviso-${input.conversationId}`,
       },
@@ -95,7 +131,20 @@ export async function avisarLeadDoCrm(
         metadata: { aviso_de_escalacao: true, handoff_reason: input.reason },
       },
     );
-    return { avisado: true };
+    if (mensagem.status === "sent") return { avisado: true };
+    if (mensagem.status === "queued") {
+      // `queued` é canal fora do ar OU instalação sem transporte configurado —
+      // nos dois casos o cliente não recebeu nada e pode nunca receber. Chamar
+      // isso de "avisado" é a promessa que quebrava a primeira frase de quem
+      // assume a conversa.
+      return {
+        avisado: false,
+        porque: "na_fila_canal_fora",
+        motivoCodigo: "na_fila_canal_fora",
+      };
+    }
+    const codigo = CODIGO_DO_ERRO[mensagem.error_code ?? ""] ?? "falhou_no_envio";
+    return { avisado: false, porque: mensagem.error_code ?? "falhou_no_envio", motivoCodigo: codigo };
   } catch (err) {
     // PII fora do log: só o motivo da falha.
     const porque = err instanceof Error ? err.name : "erro_desconhecido";
@@ -111,9 +160,10 @@ export async function avisarLeadDoCrm(
 /**
  * Quantos podem assumir agora, no vocabulário que o texto espera.
  *
- * Reusa `quemPodeAssumirAgoraViaSupabase`: a mesma leitura e a mesma regra do
- * MCP de handoff. Assim a frase recebe também as agendas e sabe distinguir
- * fila cheia de horário declarado encerrado.
+ * Reusa `carregarRosterDeAtendimento` + `podeAssumirAgora` — o par supabase-js
+ * que a rota do painel e a capacidade do agente já usam. Não é um terceiro
+ * leitor: é o MESMO predicado (`isAttendantEligible`) que o motor lê por `pg` em
+ * `quemPodeAssumirAgora`. Duas portas, uma régua.
  *
  * `null` quando a leitura falha — e `textoDoAviso` lê `null` como "não prometa
  * prazo", que é a direção certa do erro.
@@ -123,7 +173,12 @@ async function quemPodeAssumir(
   organizationId: string,
 ): Promise<QuemPodeAssumir | null> {
   try {
-    return await quemPodeAssumirAgoraViaSupabase(admin, organizationId, new Date());
+    const agora = new Date();
+    const roster = await carregarRosterDeAtendimento(admin, organizationId, agora);
+    return {
+      total: roster.length,
+      disponiveis: roster.filter((a) => podeAssumirAgora(a, agora)).length,
+    };
   } catch (err) {
     logger.warn("[handoff-orchestrator] disponibilidade não lida — aviso sem prazo", {
       organization_id: organizationId,

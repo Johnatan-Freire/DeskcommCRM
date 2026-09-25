@@ -8,12 +8,13 @@ interface AnonymizeResponse {
   data: {
     contact_id: string;
     anonymized_at: string | null;
-    // "resumed": o contato já estava anonimizado, mas leads/atividades ainda
-    // não — a chamada completou o que faltava. Antes disto voltava
-    // "already_anonymized" mesmo tendo feito trabalho, e o diálogo mostrava a
-    // frase que descreve exatamente o defeito ("Contato já estava
-    // anonimizado."), sem dizer que algo tinha sido corrigido agora.
-    action: "anonymized" | "already_anonymized" | "resumed";
+    /**
+     * `resumed` é o desfecho que faltava: o contato já constava anonimizado e a
+     * cascata completou o que tinha ficado para trás. Sem ele, esse caso caía em
+     * `already_anonymized` e a tela dizia que nada acontecera bem na hora em que
+     * a redação pendente acontecia.
+     */
+    action: "anonymized" | "resumed" | "already_anonymized";
     redacted_lead_ids: string[];
     redacted_activities: number;
   };

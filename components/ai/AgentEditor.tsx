@@ -1,4 +1,6 @@
 "use client";
+
+import { useTagDeIdioma } from "@/hooks/i18n/useLocaleDeData";
 import * as React from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -18,9 +20,12 @@ import { Textarea } from "@/components/ui/textarea";
 import { GuardrailsEditor } from "@/components/ai/GuardrailsEditor";
 import { SystemPromptEditor } from "@/components/ai/SystemPromptEditor";
 import { useAgent, useUpdateAgent, type AgentRow } from "@/hooks/ai/useAgent";
+import { useT } from "@/hooks/i18n/useT";
 import {
   AGENT_CONFIG_DEFAULTS,
   AGENT_MODELS,
+  AGENT_VOICE_MODEL_OPTIONS,
+  AGENT_VOICE_OPTIONS,
   agentConfigSchema,
   agentPatchSchema,
   guardrailsSchema,
@@ -89,6 +94,8 @@ function diffPatch(initial: FormState, current: FormState): AgentPatch {
 }
 
 export function AgentEditor({ agentId, initialData, readOnly = false }: Props) {
+  const tagDoIdioma = useTagDeIdioma();
+  const t = useT();
   const query = useAgent(agentId, { initialData });
   const update = useUpdateAgent(agentId);
 
@@ -109,7 +116,7 @@ export function AgentEditor({ agentId, initialData, readOnly = false }: Props) {
   }, [agent]);
 
   if (!agent || !formState || !baselineState) {
-    return <p className="text-sm text-muted-foreground">Carregando agent…</p>;
+    return <p className="text-sm text-muted-foreground">{t("Carregando agent…")}</p>;
   }
 
   const dirty = JSON.stringify(formState) !== JSON.stringify(baselineState);
@@ -130,14 +137,14 @@ export function AgentEditor({ agentId, initialData, readOnly = false }: Props) {
     if (!grCheck.success) {
       const flat = grCheck.error.flatten();
       const firstErr =
-        Object.values(flat.fieldErrors)[0]?.[0] ?? flat.formErrors[0] ?? "Guardrails inválidos.";
-      toast.error(`Guardrails inválidos: ${firstErr}`);
+        Object.values(flat.fieldErrors)[0]?.[0] ?? flat.formErrors[0] ?? t("Guardrails inválidos.");
+      toast.error(`${t("Guardrails inválidos")}: ${firstErr}`);
       return;
     }
 
     const patch = diffPatch(baselineState, formState);
     if (Object.keys(patch).length === 0) {
-      toast.info("Nada para salvar.");
+      toast.info(t("Nada para salvar."));
       return;
     }
 
@@ -145,8 +152,8 @@ export function AgentEditor({ agentId, initialData, readOnly = false }: Props) {
     if (!validated.success) {
       const flat = validated.error.flatten();
       const firstErr =
-        Object.values(flat.fieldErrors)[0]?.[0] ?? flat.formErrors[0] ?? "Campos inválidos.";
-      toast.error(`Erro ao salvar: ${firstErr}`);
+        Object.values(flat.fieldErrors)[0]?.[0] ?? flat.formErrors[0] ?? t("Campos inválidos.");
+      toast.error(`${t("Erro ao salvar")}: ${firstErr}`);
       return;
     }
 
@@ -172,32 +179,33 @@ export function AgentEditor({ agentId, initialData, readOnly = false }: Props) {
         <div>
           <h2 className="text-xl font-semibold tracking-tight">{agent.name}</h2>
           <p className="text-xs text-muted-foreground">
-            {agent.is_default ? "Agent default · " : ""}Criado em{" "}
-            {new Date(agent.created_at).toLocaleDateString("pt-BR")}
+            {agent.is_default ? `${t("Agent default")} · ` : ""}
+            {t("Criado em")} {new Date(agent.created_at).toLocaleDateString(tagDoIdioma)}
           </p>
         </div>
         <div className="flex gap-2">
           <Button variant="outline" onClick={handleReset} disabled={!dirty || disabled}>
-            Descartar
+            {t("Descartar")}
           </Button>
           <Button onClick={handleSave} disabled={!dirty || disabled}>
-            {update.isPending ? "Salvando…" : "Salvar"}
+            {update.isPending ? t("Salvando…") : t("Salvar")}
           </Button>
         </div>
       </div>
 
       <Tabs defaultValue="general">
         <TabsList>
-          <TabsTrigger value="general">Geral</TabsTrigger>
-          <TabsTrigger value="model">Modelo</TabsTrigger>
+          <TabsTrigger value="general">{t("Geral")}</TabsTrigger>
+          <TabsTrigger value="model">{t("Modelo")}</TabsTrigger>
           <TabsTrigger value="rag">RAG</TabsTrigger>
+          {agent.channel === "voice" && <TabsTrigger value="voz">{t("Voz")}</TabsTrigger>}
           <TabsTrigger value="guardrails">Guardrails</TabsTrigger>
         </TabsList>
 
         <TabsContent value="general">
           <Card className="space-y-4 p-4">
             <div className="space-y-1">
-              <Label htmlFor="name">Nome</Label>
+              <Label htmlFor="name">{t("Nome")}</Label>
               <Input
                 id="name"
                 value={formState.name}
@@ -207,7 +215,7 @@ export function AgentEditor({ agentId, initialData, readOnly = false }: Props) {
               />
             </div>
             <div className="space-y-1">
-              <Label htmlFor="description">Descrição</Label>
+              <Label htmlFor="description">{t("Descrição")}</Label>
               <Textarea
                 id="description"
                 value={formState.description}
@@ -215,7 +223,7 @@ export function AgentEditor({ agentId, initialData, readOnly = false }: Props) {
                 disabled={disabled}
                 rows={3}
                 maxLength={500}
-                placeholder="Descrição interna do agent"
+                placeholder={t("Descrição interna do agent")}
               />
             </div>
             <div className="flex items-center gap-3">
@@ -225,36 +233,43 @@ export function AgentEditor({ agentId, initialData, readOnly = false }: Props) {
                 disabled={disabled}
                 id="is_active"
               />
-              <Label htmlFor="is_active">Agent ativo</Label>
+              <Label htmlFor="is_active">{t("Agent ativo")}</Label>
             </div>
             <div className="rounded-md bg-muted/40 p-3 text-xs text-muted-foreground">
-              <strong>Default:</strong> {agent.is_default ? "Sim" : "Não"} (read-only — gerenciado
-              pelo backend).
+              <strong>{t("Default:")}</strong> {agent.is_default ? t("Sim") : t("Não")} ({t("read-only — gerenciado pelo backend")}).
             </div>
           </Card>
         </TabsContent>
 
         <TabsContent value="model">
           <Card className="space-y-4 p-4">
-            <div className="space-y-1">
-              <Label>Modelo</Label>
-              <Select
-                value={formState.model}
-                onValueChange={(v) => patchForm({ model: v as AgentModel })}
-                disabled={disabled}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {AGENT_MODELS.map((m) => (
-                    <SelectItem key={m} value={m}>
-                      {m}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+            {agent.channel === "voice" ? (
+              <p className="rounded-md bg-muted/40 p-3 text-xs text-muted-foreground">
+                {t(
+                  "Este agente fala pela Realtime API da OpenAI -- o modelo de voz se escolhe na aba Voz, não aqui.",
+                )}
+              </p>
+            ) : (
+              <div className="space-y-1">
+                <Label>{t("Modelo")}</Label>
+                <Select
+                  value={formState.model}
+                  onValueChange={(v) => patchForm({ model: v as AgentModel })}
+                  disabled={disabled}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {AGENT_MODELS.map((m) => (
+                      <SelectItem key={m} value={m}>
+                        {m}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
 
             <SystemPromptEditor
               value={formState.system_prompt}
@@ -288,7 +303,7 @@ export function AgentEditor({ agentId, initialData, readOnly = false }: Props) {
                 />
               </div>
               <div className="space-y-1">
-                <Label>Janela de contexto (msgs, 1–50)</Label>
+                <Label>{t("Janela de contexto (msgs, 1–50)")}</Label>
                 <Input
                   type="number"
                   step="1"
@@ -350,11 +365,76 @@ export function AgentEditor({ agentId, initialData, readOnly = false }: Props) {
               </div>
             </div>
             <p className="text-xs text-muted-foreground">
-              Top K = quantos trechos buscar. Similarity threshold = mínimo de relevância
-              (cosine). Confidence = limiar abaixo do qual o agent escala para humano.
+              {t(
+                "Top K = quantos trechos buscar. Similarity threshold = mínimo de relevância (cosine). Confidence = limiar abaixo do qual o agent escala para humano.",
+              )}
             </p>
           </Card>
         </TabsContent>
+
+        {agent.channel === "voice" && (
+          <TabsContent value="voz">
+            <Card className="space-y-4 p-4">
+              <div className="space-y-1">
+                <Label>{t("Modelo de voz")}</Label>
+                <Select
+                  value={formState.config.voice_model}
+                  onValueChange={(v) => patchConfig({ voice_model: v as AgentConfig["voice_model"] })}
+                  disabled={disabled}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {AGENT_VOICE_MODEL_OPTIONS.map((m) => (
+                      <SelectItem key={m} value={m}>
+                        {m}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                <div className="space-y-1">
+                  <Label>{t("Voz do modelo")}</Label>
+                  <Select
+                    value={formState.config.voice}
+                    onValueChange={(v) => patchConfig({ voice: v as AgentConfig["voice"] })}
+                    disabled={disabled}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {AGENT_VOICE_OPTIONS.map((v) => (
+                        <SelectItem key={v} value={v}>
+                          {v}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1">
+                  <Label>{t("Velocidade da fala (0,25–1,5)")}</Label>
+                  <Input
+                    type="number"
+                    step="0.05"
+                    min={0.25}
+                    max={1.5}
+                    value={formState.config.voice_speed}
+                    onChange={(e) => patchConfig({ voice_speed: Number(e.target.value) })}
+                    disabled={disabled}
+                  />
+                </div>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {t(
+                  "1,0 é a velocidade padrão do modelo — abaixo disso fala mais devagar, acima fala mais rápido. Vale a partir da próxima ligação.",
+                )}
+              </p>
+            </Card>
+          </TabsContent>
+        )}
 
         <TabsContent value="guardrails">
           <Card className="p-4">

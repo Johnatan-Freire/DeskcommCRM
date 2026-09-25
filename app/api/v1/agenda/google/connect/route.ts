@@ -1,3 +1,4 @@
+import { requireSupportWrite, authenticatedSessionId } from "@/lib/impersonate/support";
 /**
  * GET /api/v1/agenda/google/connect — começa a conexão da agenda do Google.
  *
@@ -33,7 +34,7 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { audit } from "@/lib/audit";
 import { requireRole } from "@/lib/auth/require-role";
-import { CAMINHO_DO_CALLBACK, configuracaoDoGoogle } from "@/lib/agenda/google/config";
+import { CAMINHO_DO_CALLBACK, configuracaoDoGoogle, origemLocalDosCabecalhos } from "@/lib/agenda/google/config";
 import { emitirEstado } from "@/lib/agenda/google/estado";
 import { assinarVinculo, NOME_DO_VINCULO, VALIDADE_DO_VINCULO_S } from "@/lib/agenda/google/vinculo";
 import { cookieSecure } from "@/lib/supabase/cookie-secure";
@@ -49,13 +50,15 @@ function voltarComErro(codigo: string): NextResponse {
 }
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
+  const supportDenied = await requireSupportWrite();
+  if (supportDenied) return supportDenied;
   const requestId = req.headers.get("x-request-id") ?? undefined;
 
   const autorizado = await requireRole("agent", { requestId, resource: "calendar_connections" });
   if (!autorizado.ok) return autorizado.response;
   const { user, org } = autorizado;
 
-  const app = await configuracaoDoGoogle();
+  const app = await configuracaoDoGoogle(origemLocalDosCabecalhos(req.headers) ?? undefined);
   if (!app) {
     // Não audita: não houve tentativa de conectar nada, e encher o audit log de
     // "a instalação não tem chave" é ruído numa tabela que se paga por linha.
@@ -71,7 +74,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   let state: string;
   try {
     state = emitirEstado(
-      { organizationId: org.orgId, userId: user.id },
+      { organizationId: org.orgId, userId: user.id, authSessionId: await authenticatedSessionId() },
       { segredo: env.INTERNAL_SECRET, agora: new Date(), nonce },
     );
   } catch {

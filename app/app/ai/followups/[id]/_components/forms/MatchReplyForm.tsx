@@ -1,5 +1,7 @@
 "use client";
 
+import { useT } from "@/hooks/i18n/useT";
+
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -34,6 +36,7 @@ export function MatchReplyForm({
   config: ConfigOf<"match_reply">;
   onChange: (c: ConfigOf<"match_reply">) => void;
 }) {
+  const t = useT();
   const [branches, setBranches] = useState(config.branches);
   const [graceMin, setGraceMin] = useState(msToMin(config.grace_timeout_ms));
   const [saveTo, setSaveTo] = useState<ReplySaveTo | undefined>(config.save_to);
@@ -72,14 +75,14 @@ export function MatchReplyForm({
   return (
     <div className="space-y-3">
       <div className="space-y-2">
-        <Label>Regras de texto</Label>
+        <Label>{t("Regras de texto")}</Label>
         {branches.map((branch, index) => (
           <div key={branch.id} className="space-y-2 rounded-md border border-border p-2">
             <Input
               aria-label={`Rótulo da regra ${index + 1}`}
               value={branch.label}
               onChange={(e) => atualizar(index, { label: e.target.value })}
-              placeholder="Rótulo"
+              placeholder={t("Rótulo")}
             />
             <div className="flex gap-2">
               <Select
@@ -90,8 +93,8 @@ export function MatchReplyForm({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="contains">Contém</SelectItem>
-                  <SelectItem value="eq">É igual a</SelectItem>
+                  <SelectItem value="contains">{t("Contém")}</SelectItem>
+                  <SelectItem value="eq">{t("É igual a")}</SelectItem>
                 </SelectContent>
               </Select>
               <Input
@@ -137,7 +140,7 @@ export function MatchReplyForm({
         )}
       </div>
       <div className="space-y-2">
-        <Label htmlFor="match-reply-grace">{ESPERA_PELA_RESPOSTA.rotulo}</Label>
+        <Label htmlFor="match-reply-grace">{t(ESPERA_PELA_RESPOSTA.rotulo)}</Label>
         <Input
           id="match-reply-grace"
           type="number"
@@ -149,10 +152,10 @@ export function MatchReplyForm({
             commit({ branches, graceMin: v, saveTo, ifExists });
           }}
         />
-        <p className="text-xs text-text-muted">{ESPERA_PELA_RESPOSTA.ajuda}</p>
+        <p className="text-xs text-text-muted">{ESPERA_PELA_RESPOSTA.ajuda(t)}</p>
       </div>
       <div className="space-y-2">
-        <Label htmlFor="match-reply-save">Gravar a resposta em</Label>
+        <Label htmlFor="match-reply-save">{t("Gravar a resposta em")}</Label>
         <Select
           value={
             saveTo?.kind === "contact_name"
@@ -174,22 +177,22 @@ export function MatchReplyForm({
           }}
         >
           <SelectTrigger id="match-reply-save">
-            <SelectValue placeholder="Não gravar" />
+            <SelectValue placeholder={t("Não gravar")} />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="__none__">Não gravar</SelectItem>
-            <SelectItem value="__contact_name__">Nome do contato</SelectItem>
+            <SelectItem value="__none__">{t("Não gravar")}</SelectItem>
+            <SelectItem value="__contact_name__">{t("Nome do contato")}</SelectItem>
             {camposUnicos.map((c) => (
               <SelectItem key={c.key} value={c.key}>
                 {c.label} ({c.key})
               </SelectItem>
             ))}
-            <SelectItem value="__livre__">Chave livre (use {"{{volta}}"} no laço)</SelectItem>
+            <SelectItem value="__livre__">{t("Chave livre (use")} {t("{{volta}}")} {t("no laço)")}</SelectItem>
           </SelectContent>
         </Select>
         {saveTo?.kind === "lead_custom" && !camposUnicos.some((c) => c.key === saveTo.key) && (
           <Input
-            aria-label="Chave do campo personalizado"
+            aria-label={t("Chave do campo personalizado")}
             value={saveTo.key}
             onChange={(e) => {
               const next: ReplySaveTo = { kind: "lead_custom", key: e.target.value };
@@ -200,7 +203,7 @@ export function MatchReplyForm({
         )}
         {saveTo && (
           <div className="space-y-2">
-            <Label htmlFor="match-reply-if-exists">{SE_INFORMACAO_JA_EXISTIR.rotulo}</Label>
+            <Label htmlFor="match-reply-if-exists">{t(SE_INFORMACAO_JA_EXISTIR.rotulo)}</Label>
             <Select
               value={ifExists}
               onValueChange={(v) => {
@@ -213,16 +216,16 @@ export function MatchReplyForm({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="skip">{SE_INFORMACAO_JA_EXISTIR.skip}</SelectItem>
-                <SelectItem value="overwrite">{SE_INFORMACAO_JA_EXISTIR.overwrite}</SelectItem>
-                <SelectItem value="confirm">{SE_INFORMACAO_JA_EXISTIR.confirm}</SelectItem>
+                <SelectItem value="skip">{t(SE_INFORMACAO_JA_EXISTIR.skip)}</SelectItem>
+                <SelectItem value="overwrite">{t(SE_INFORMACAO_JA_EXISTIR.overwrite)}</SelectItem>
+                <SelectItem value="confirm">{t(SE_INFORMACAO_JA_EXISTIR.confirm)}</SelectItem>
               </SelectContent>
             </Select>
-            <p className="text-xs text-text-muted">{SE_INFORMACAO_JA_EXISTIR.ajuda}</p>
+            <p className="text-xs text-text-muted">{t(SE_INFORMACAO_JA_EXISTIR.ajuda)}</p>
           </div>
         )}
         <p className="text-xs text-text-muted">
-          Crie os campos em Configurações → Funis. A resposta só grava quando o contato responde (não no timeout).
+          {t("Crie os campos em Configurações → Funis. A resposta só grava quando o contato responde (não no timeout).")}
         </p>
       </div>
       {error && <p className="text-xs text-error-fg">{error}</p>}

@@ -149,11 +149,27 @@ export interface PontoDeIa {
    * mostra o cadeado junto da razão: sem ela, o operador conclui que o produto
    * é limitado, em vez de entender que a troca quebraria algo em silêncio.
    */
-  fixo?: { razao: string };
+  /**
+   * Ponto que o produto resolve sozinho — a escolha do painel não se aplica.
+   * `usa` diz o que ele de fato chama: sem isso a tela caía na cadeia de
+   * resolução dos pontos de conversa e anunciava um modelo de chat num ponto
+   * que fala com a API de transcrição.
+   */
+  fixo?: { razao: string; usa?: { provider: string; modelId: string } };
   registraEm: DestinoDeTelemetria;
 }
 
 export const PONTOS_DE_IA: readonly PontoDeIa[] = [
+  {
+    id: "agent_preview",
+    rotulo: "Testar ou revisar resposta",
+    oQueFaz: "Prepara uma resposta com a versão e o conhecimento do agente, sem aplicar alterações ao cliente.",
+    papel: "atender",
+    exige: {tools:true,imagem:true},
+    emissor: "lib/agent-engine/agent/inbound-turn.ts",
+    sintomaDeFalha: "O teste ou a sugestão não consegue preparar a resposta para revisão.",
+    registraEm: "llm_calls",
+  },
   // ─────────────────────────── Atender o cliente ───────────────────────────
   {
     id: "agent_turn",
@@ -191,6 +207,16 @@ export const PONTOS_DE_IA: readonly PontoDeIa[] = [
     emissor: "lib/agent-engine/agent/abordagem-de-formulario.ts",
     sintomaDeFalha:
       "O lead entra pelo formulário, a automação roda, e a mensagem de abordagem nunca é escrita — o contato fica no funil sem ninguém falar com ele.",
+    registraEm: "llm_calls",
+  },
+  {
+    id: "prospecting_agent_setup_chat",
+    rotulo: "Montar agente por conversa",
+    oQueFaz: "Conversa com o administrador e prepara uma proposta de agente para uma campanha. A criação depende da confirmação no resumo.",
+    papel: "melhorar",
+    exige: {},
+    emissor: "lib/prospecting/agent-chat.ts",
+    sintomaDeFalha: "A conversa de configuração mostra um erro e preserva o que foi escrito; nenhum agente é criado.",
     registraEm: "llm_calls",
   },
   {
@@ -244,6 +270,24 @@ export const PONTOS_DE_IA: readonly PontoDeIa[] = [
     registraEm: "llm_calls",
   },
   {
+    id: "case_chat",
+    rotulo: "Conversar sobre o caso com a equipe",
+    oQueFaz:
+      "Responde às perguntas de quem vai decidir um caso: lê o caso, o que a equipe já decidiu e a " +
+      "conversa com o cliente, e explica em português. Nunca fala com o cliente nem mexe no caso.",
+    papel: "entender",
+    // `exige: {}` porque o ponto roda SEM FERRAMENTA NENHUMA: o servidor monta o
+    // contexto inteiro antes de chamar o modelo. Ferramenta de leitura
+    // alcançaria outros casos e outros contatos da organização; ferramenta de
+    // efeito faria a consulta virar ação. Sem exigência, qualquer modelo barato
+    // serve — e a tela não recusa a escolha por falta de ferramentas.
+    exige: {},
+    emissor: "lib/agent-engine/agent/conversa-do-caso.ts",
+    sintomaDeFalha:
+      "Quem vai decidir o caso pergunta e não recebe resposta — decide sem o contexto, ou larga o caso na fila.",
+    registraEm: "llm_calls",
+  },
+  {
     id: "sentiment_classify",
     rotulo: "Medir o clima da conversa",
     oQueFaz:
@@ -276,6 +320,19 @@ export const PONTOS_DE_IA: readonly PontoDeIa[] = [
     emissor: "lib/agent-engine/agent/followup-flow-classify.ts",
     sintomaDeFalha:
       "As retomadas saem todas no mesmo horário fixo, sem respeitar o ritmo de cada cliente.",
+    registraEm: "llm_calls",
+  },
+
+  {
+    id: "flow_validate",
+    rotulo: "Validar a resposta do fluxo",
+    oQueFaz:
+      "Quando o fluxo está esperando uma resposta, lê a mensagem do cliente com o contexto da conversa e devolve SÓ o dado que deve ser salvo — ou diz que ele não respondeu.",
+    papel: "entender",
+    exige: {},
+    emissor: "lib/agent-engine/agent/flow-validate.ts",
+    sintomaDeFalha:
+      "Dado errado entra no cadastro do cliente (ex.: o modelo grava a resposta na pergunta errada) ou o cliente fica sem a pergunta seguinte.",
     registraEm: "llm_calls",
   },
 
@@ -390,6 +447,20 @@ export const PONTOS_DE_IA: readonly PontoDeIa[] = [
     fixo: {
       razao:
         "Usa o padrão de transcrição da OpenAI, que é o formato que os serviços do mercado implementam. Aceita apontar para outro serviço compatível — inclusive um rodando na sua própria máquina — mas exige uma chave desse serviço, separada da chave do modelo de conversa.",
+      // ⚠️ O QUE ELE USA DE VERDADE, e por que precisa estar escrito aqui.
+      //
+      // A tela mostrava `claude-sonnet-5` neste ponto, com "usando o padrão da
+      // organização" — porque um ponto `fixo` percorria a mesma cadeia de
+      // resolução dos pontos de conversa e caía no último degrau. O texto ao
+      // lado dizia "usa o padrão de transcrição da OpenAI", então a mesma tela
+      // afirmava duas coisas incompatíveis sobre o mesmo ponto.
+      //
+      // Um modelo de conversa NÃO transcreve áudio. Anunciar um ali é dizer a
+      // quem opera que o áudio está sendo ouvido pelo modelo errado — e mandá-lo
+      // caçar um problema que não existe, ou trocar um modelo que não é o que
+      // faz o trabalho. `lib/messaging/media/transcription.ts` manda para
+      // `/v1/audio/transcriptions` com `whisper-1`.
+      usa: { provider: "openai", modelId: "whisper-1" },
     },
     sintomaDeFalha:
       "O cliente manda áudio e o agente responde como se não tivesse recebido nada.",

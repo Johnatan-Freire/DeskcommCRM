@@ -13,12 +13,13 @@
  *      e a sessão parada — o envio exige WORKING, então inbound e auto-resposta
  *      morrem até alguém clicar Reconectar. FAILED não entra: pode ser banimento,
  *      e religar sozinho piora; SCAN_QR_CODE também não — tem gente no celular.
- *   3. REDRIVE: mensagens `sent_via='ai'` presas em `queued` cuja sessão está
+ *   3. REDRIVE: mensagens `sent_via in ('ai','automation','system')` presas em `queued` cuja sessão está
  *      WORKING são reenviadas pelo WAHA (com espaçamento anti-rajada) e marcadas
  *      `sent`. Só linhas ainda `queued` entram, então nada é reenviado duas vezes
- *      pelo mesmo caminho — e o eco da mensagem reenviada não fica duplicado na
- *      conversa nem prende a mensagem em `queued` (ver `markRedriveSent` e
- *      `removeRedriveEcho`).
+ *      pelo mesmo caminho — e, desde 14/09/2026, o eco da mensagem reenviada não
+ *      fica duplicado na conversa nem prende a mensagem em `queued` (ver
+ *      `markRedriveSent` e `removeRedriveEcho`). Antes esta linha dizia "nunca
+ *      duplicadas", e o eco provava o contrário.
  *
  * Regra dura nº 4 respeitada: message-plane nunca fala com o WAHA — este módulo
  * é o WATCHDOG (admin-plane), o único lugar do engine autorizado a falar com o
@@ -27,6 +28,7 @@
 import type pg from 'pg';
 
 import { parseWahaMessageId, wahaEchoExternalIds } from '@/lib/waha/message-id';
+import { lerNumerosDeTeste, numeroPodeTestar, preGoLiveAtivo } from '@/lib/ai/elegibilidade/pre-go-live';
 
 import type { Logger } from '../../obs/logger';
 
@@ -187,14 +189,13 @@ function chatIdOf(m: QueuedRow): string | null {
 /**
  * Marca `sent` a mensagem que o WAHA acabou de aceitar.
  *
- * Devolve `true` quando o id NÃO pôde ser gravado porque o eco dela já o
- * ocupa. No WEBJS o eco grava o `_serialized`, exatamente a string que o envio
- * devolve, e o unique `messages_org_external_id_unique`
- * `(organization_id, external_id)` recusa uma segunda linha com o mesmo id.
- * Sem tratar isto, essa recusa caía no `catch` do laço como erro transiente —
- * a mensagem ficava `queued` e o watchdog a reenviava ao cliente a cada tick.
- * Aqui ela sai `sent` sem o id, e quem o grava é `stampExternalIdAfterEcho`,
- * depois que o eco sai.
+ * Devolve `true` quando o id NÃO pôde ser gravado porque o eco dela já o ocupa.
+ * No WEBJS o eco grava o `_serialized`, exatamente a string que o envio devolve,
+ * e o unique `(organization_id, external_id)` recusa uma segunda linha com o
+ * mesmo id. Antes, essa recusa caía no `catch` do laço como "erro transiente —
+ * mantida queued", e o cliente recebia a mesma mensagem de novo a cada tick — a
+ * armadilha medida na issue #196 do DeskcommCRM. Aqui a mensagem sai `sent` sem
+ * o id, e quem o grava é `stampExternalIdAfterEcho`, depois que o eco sai.
  *
  * Qualquer outro erro sobe como antes: sem conseguir escrever no banco, não há
  * como marcar nada daqui.
@@ -230,15 +231,14 @@ async function markRedriveSent(
 /**
  * Apaga a linha que o webhook criou para o eco desta mensagem reenviada.
  *
- * Escopo estreito, o mesmo de `removerEcoDoProprioEnvio`
- * (`app/api/v1/messages/_handler.ts`): mesma organização, mesma conversa, só o
- * que veio do celular (`external_device`), nunca a própria linha. O id cru do
- * WhatsApp pode colidir entre mensagens diferentes; restringir à conversa
- * mantém o estrago de uma colisão no único lugar onde ela seria de fato esta
- * mensagem.
+ * O escopo é o mesmo, e deliberadamente estreito, da limpeza do envio normal:
+ * mesma organização, mesma conversa, só o que veio do celular
+ * (`external_device`) e nunca a própria linha. O id cru do WhatsApp pode colidir
+ * entre mensagens diferentes; restringir à conversa mantém o estrago de uma
+ * colisão no único lugar onde ela seria de fato esta mensagem.
  *
  * BLINDADO: a mensagem já saiu e já está `sent`. Não conseguir apagar deixa a
- * duplicata na tela, que é o mundo de antes deste conserto — deixar a exceção
+ * duplicata na tela, que é o mundo de antes desta função — deixar a exceção
  * subir faria o laço registrar como falha uma entrega que deu certo.
  */
 async function removeRedriveEcho(
@@ -269,13 +269,13 @@ async function removeRedriveEcho(
 /**
  * Grava o id que o eco ocupava, agora que o eco saiu.
  *
- * Sem o id, o `message.ack` do webhook nunca encontra a linha e a mensagem
- * trava em `sent`: sem entregue, sem lida. `external_id is null` garante que
- * isto nunca sobrescreve um id que outro caminho já gravou.
+ * Sem o id, o `message.ack` do webhook nunca encontra a linha e a mensagem trava
+ * em `sent`: sem entregue, sem lida. `external_id is null` garante que isto nunca
+ * sobrescreve um id que outro caminho já gravou.
  *
- * BLINDADO pelo mesmo motivo de `removeRedriveEcho`. Se o eco não saiu (a
- * remoção falhou), o unique recusa de novo e a mensagem fica `sent` sem id:
- * sem ack e com a duplicata na tela — mas sem reenvio.
+ * BLINDADO pelo mesmo motivo de `removeRedriveEcho`. Se o eco não saiu (a remoção
+ * falhou), o unique recusa de novo e a mensagem fica `sent` sem id: sem ack e com
+ * a duplicata na tela — mas sem reenvio.
  */
 async function stampExternalIdAfterEcho(
   pool: pg.Pool,
@@ -307,10 +307,10 @@ export async function redriveQueued(
     `select m.id, m.organization_id, m.conversation_id, m.body, s.waha_session_name,
             c.wa_identity, c.wa_lid, c.phone_number, v.is_group, v.group_chat_id
      from messages m
-     join channel_sessions s on s.id = m.channel_session_id
-     join conversations v on v.id = m.conversation_id
-     join contacts c on c.id = m.contact_id
-     where m.sent_via = 'ai' and m.status = 'queued'
+     join channel_sessions s on s.id = m.channel_session_id and s.organization_id = m.organization_id
+     join conversations v on v.id = m.conversation_id and v.organization_id = m.organization_id
+     join contacts c on c.id = m.contact_id and c.organization_id = m.organization_id
+     where m.sent_via in ('ai', 'automation', 'system') and m.status = 'queued'
        and s.status = 'WORKING'
        and c.is_blocked = false
        -- ─── Só as sessões que ESTE resgate consegue alcançar ───────────────
@@ -339,7 +339,7 @@ export async function redriveQueued(
     `select count(*)::text as n
      from messages m
      join channel_sessions s on s.id = m.channel_session_id
-     where m.sent_via = 'ai' and m.status = 'queued'
+     where m.sent_via in ('ai', 'automation', 'system') and m.status = 'queued'
        and s.status = 'WORKING'
        and s.waha_session_name is null
        and m.created_at < now() - make_interval(secs => $1 / 1000.0)`,
@@ -359,7 +359,37 @@ export async function redriveQueued(
       log.warn('watchdog: queued sem destino/corpo — pulada', { message_id: m.id });
       continue;
     }
+    // `jaSaiu` separa os dois desfechos que o `catch` de baixo confundia: a
+    // mensagem que nunca saiu (reenviar é certo) e a que JÁ chegou ao cliente
+    // (reenviar é mandar duas vezes). Declarado FORA do `try` porque é lá que o
+    // `catch` o lê — dentro, ele não existiria para o tratamento do erro, e foi
+    // exatamente isso que o `pnpm typecheck` pegou na primeira versão deste
+    // conserto (TS2304: Cannot find name 'jaSaiu').
+    let jaSaiu = false;
     try {
+      // A lista pode mudar enquanto a mensagem espera ou entre itens do lote.
+      // Este redrive fala direto com o WAHA, portanto também precisa da guarda
+      // do sink. Falha de leitura cai no catch e NÃO envia.
+      const { rows: acesso } = await pool.query<{ metadata: unknown; phone_number: string | null }>(
+        `select s.metadata, c.phone_number
+         from messages m
+         join channel_sessions s on s.id = m.channel_session_id and s.organization_id = m.organization_id
+         join contacts c on c.id = m.contact_id and c.organization_id = m.organization_id
+         where m.id = $1 and m.organization_id = $2 and m.status = 'queued'`,
+        [m.id, m.organization_id],
+      );
+      const atual = acesso[0];
+      if (!atual) continue;
+      if (preGoLiveAtivo(atual.metadata) && !numeroPodeTestar(atual.phone_number ?? '', lerNumerosDeTeste(atual.metadata))) {
+        await pool.query(
+          `update messages set status = 'failed', error_code = 'pre_go_live',
+             error_message = 'Envio automático bloqueado pelo modo de teste do canal.'
+           where id = $1 and organization_id = $2 and status = 'queued'`,
+          [m.id, m.organization_id],
+        );
+        log.info('watchdog: reenvio bloqueado pelo modo de teste', { message_id: m.id });
+        continue;
+      }
       const res = await fetch(`${cfg.wahaBaseUrl}/api/sendText`, {
         method: 'POST',
         headers: { 'X-Api-Key': cfg.wahaApiKey, 'Content-Type': 'application/json' },
@@ -373,29 +403,45 @@ export async function redriveQueued(
         });
         continue;
       }
+      jaSaiu = true;
       const data = (await res.json().catch(() => null)) as unknown;
       const externalId = parseWahaMessageId(data);
-      // Daqui em diante a mensagem JÁ SAIU para o cliente. Devolvê-la a
-      // `queued` é o pior desfecho possível: o `catch` de baixo a trataria
-      // como falha transiente e o próximo tick a mandaria de novo — a cada
-      // tick, sem limite (o caso WEBJS da issue #196 do upstream).
+      // Daqui em diante a mensagem JÁ SAIU para o cliente. Devolvê-la a `queued`
+      // é o pior desfecho possível: o `catch` de baixo a trata como falha
+      // transiente e o próximo tick a manda de novo — a cada tick, sem limite.
       const idTakenByEcho = await markRedriveSent(pool, m, externalId);
       if (externalId !== null) {
         // O eco desta mensagem pode ter chegado pelo webhook ANTES de a linha
-        // acima gravar o id: não casou com nada e virou uma segunda linha com
-        // a mesma frase. Mesma limpeza que o envio normal faz
-        // (`removerEcoDoProprioEnvio` em `app/api/v1/messages/_handler.ts`),
-        // com a mesma lista de ids.
+        // acima gravar o id: não casou com nada e virou uma segunda linha com a
+        // mesma frase. Mesma limpeza que o envio normal faz
+        // (`removerEcoDoProprioEnvio` em `app/api/v1/messages/_handler.ts`), com
+        // a mesma lista de ids.
         await removeRedriveEcho(pool, m, externalId, chatId, log);
         if (idTakenByEcho) await stampExternalIdAfterEcho(pool, m, externalId, log);
       }
       sent += 1;
       log.info('watchdog: mensagem presa reenviada', { message_id: m.id, has_external_id: externalId !== null });
     } catch (err) {
-      log.warn('watchdog: redrive com erro transiente — mantida queued', {
-        message_id: m.id,
-        error: (err instanceof Error ? err.message : String(err)).slice(0, 120),
-      });
+      const erro = (err instanceof Error ? err.message : String(err)).slice(0, 120);
+      if (jaSaiu) {
+        // O comentário acima promete que a mensagem que já saiu não volta para
+        // `queued`. A promessa vale para o `23505` (tratado em
+        // `markRedriveSent`) e NÃO vale para qualquer outra falha de banco: ali
+        // a linha continua `queued` e o próximo tick reenvia ao cliente uma
+        // mensagem que ele já recebeu. Não há como consertar daqui — se o banco
+        // não aceita escrita, nenhuma marcação passa —, então o mínimo honesto é
+        // não chamar isso de transiente e dizer, no nível certo, o que está em
+        // risco.
+        log.error('watchdog: a mensagem SAIU para o cliente e o banco não registrou — o próximo tick pode reenviar', {
+          message_id: m.id,
+          error: erro,
+        });
+      } else {
+        log.warn('watchdog: redrive com erro transiente — mantida queued', {
+          message_id: m.id,
+          error: erro,
+        });
+      }
     }
     // espaçamento anti-rajada entre reenvios
     await new Promise((r) => setTimeout(r, cfg.redriveSpacingMs + Math.random() * cfg.redriveSpacingMs));

@@ -31,6 +31,7 @@ function fakeDb(pointer: Row) {
     ai_agent_versions: [],
   };
   return {
+    rpc: async () => ({ data: { organization_id: ORG, contact_id: CONTACT, conversation_id: "conv-1", service_revision: 1, demanda_id: null, demanda_revision: null, status: "open", demanda_fechada_em: null }, error: null }),
     from(table: string) {
       const filters: Array<[string, unknown]> = [];
       let mode: "select" | "insert" = "select";
@@ -102,5 +103,24 @@ describe("enrollFollowupFlow", () => {
     });
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.code).toBe("flow_not_active");
+  });
+
+  it("recusa roteiro de atendimento — ele começa na conversa, não por inscrição", async () => {
+    const db = fakeDb({
+      id: POINTER,
+      organization_id: ORG,
+      status: "active",
+      active_version_id: VERSION,
+      surface: "atendimento",
+    });
+    const result = await enrollFollowupFlow(db as never, {
+      organizationId: ORG,
+      pointerId: POINTER,
+      contactId: CONTACT,
+      actorUserId: null,
+      requestId: "r1",
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.code).toBe("flow_not_enrollable");
   });
 });

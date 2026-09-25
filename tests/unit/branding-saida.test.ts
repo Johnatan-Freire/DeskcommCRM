@@ -75,9 +75,24 @@ beforeEach(() => {
   respostaDaOrganizacao = { data: null, error: null };
   clienteExplode = false;
   linhaDaInstalacao = null;
+  // A marca do OPERADOR nao pode decidir o resultado destes testes: eles
+  // afirmam o piso DO PRODUTO. O mock acima cobre `marcaDaInstalacao`, mas
+  // `lib/branding/resolve.ts` tambem le `APP_NAME`/`APP_ACCENT_HEX` do `.env`
+  // — e numa instalacao white-label essas chaves vem PREENCHIDAS, que e o caso
+  // normal deste repo (docs/white-label.md). Sem os stubs abaixo, quem troca a
+  // marca pelo caminho documentado herda tres testes vermelhos que nao tem
+  // relacao nenhuma com a mudanca dele.
+  //
+  // Vazio e nao `delete`: chave declarada e vazia e exatamente o estado que o
+  // `install.sh` grava quando o operador aperta Enter, e `resolve.ts` ja o
+  // trata como "ninguem configurou". Stubar com o valor real do caminho real
+  // prova o piso sem inventar um terceiro estado.
+  vi.stubEnv("APP_NAME", "");
+  vi.stubEnv("APP_ACCENT_HEX", "");
 });
 
 afterEach(() => {
+  vi.unstubAllEnvs();
   vi.restoreAllMocks();
 });
 
@@ -224,7 +239,7 @@ describe("emailDeSuporte", () => {
     const original = process.env.SUPPORT_EMAIL;
     delete process.env.SUPPORT_EMAIL;
     const { emailDeSuporte } = await carregar();
-    expect(emailDeSuporte()).toBe("");
+    expect(await emailDeSuporte()).toBe("");
     if (original !== undefined) process.env.SUPPORT_EMAIL = original;
   });
 
@@ -232,7 +247,7 @@ describe("emailDeSuporte", () => {
     const original = process.env.SUPPORT_EMAIL;
     process.env.SUPPORT_EMAIL = "  ajuda@revenda.com.br  ";
     const { emailDeSuporte } = await carregar();
-    expect(emailDeSuporte()).toBe("ajuda@revenda.com.br");
+    expect(await emailDeSuporte()).toBe("ajuda@revenda.com.br");
     if (original === undefined) delete process.env.SUPPORT_EMAIL;
     else process.env.SUPPORT_EMAIL = original;
   });

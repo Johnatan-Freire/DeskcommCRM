@@ -2,9 +2,10 @@
 import { useCallback, useMemo, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useT } from "@/hooks/i18n/useT";
 import { useBoard } from "@/hooks/kanban/useBoard";
 
-function formatError(err: unknown): string {
+function formatError(err: unknown, t: (texto: string) => string): string {
   if (err instanceof Error) return err.message;
   if (err && typeof err === "object") {
     const obj = err as { message?: unknown; code?: unknown; details?: unknown; hint?: unknown };
@@ -15,7 +16,7 @@ function formatError(err: unknown): string {
     try {
       return JSON.stringify(err);
     } catch {
-      return "Erro desconhecido";
+      return t("Erro desconhecido");
     }
   }
   return String(err);
@@ -36,6 +37,7 @@ export function PipelinePageClient({
   pipelineId: string;
   initialName: string;
 }) {
+  const t = useT();
   const { data, isLoading, error, pulses, realtimeStatus, seguranca } = useBoard(pipelineId);
   const router = useRouter();
   const pathname = usePathname();
@@ -52,6 +54,17 @@ export function PipelinePageClient({
   const [newOpen, setNewOpen] = useState(false);
 
   const filteredLeads = data ? applyFilters(data.leads, filters) : [];
+  // NÃO é a conta do FilterBar: o seletor de filtro lista as três caixas
+  // (`marcadoresDoCard`: negócio, contato e conversa), e esta lista, a da tag em
+  // lote, só `lead.tags` — é lá que a ação em lote grava (#852). O `useMemo` é o
+  // mesmo cuidado de lá: solta no corpo, a conta roda em toda renderização
+  // e devolve um array NOVO a cada vez. E esta página re-renderiza a cada tecla
+  // da busca (o debounce do FilterBar mexe na query string) e a cada mudança de
+  // seleção de card.
+  const tagsDoQuadro = useMemo(
+    () => [...new Set((data?.leads ?? []).flatMap((l) => l.tags))].sort(),
+    [data?.leads],
+  );
 
   return (
     <div
@@ -75,24 +88,29 @@ export function PipelinePageClient({
       data-refetch-divergencias={seguranca.divergencias}
       data-refetch-em={seguranca.ultimaVerificacao ?? ""}
     >
-      {/* `flex-col` no mobile: nome de funil comprido e as ações não
-          podem empurrar o botão para fora da viewport. */}
+      {/* `flex-col` no mobile: nome de funil comprido (é texto livre, sem
+          limite curto) + botão na mesma linha sem quebra empurrava o botão pra
+          fora da viewport em telas estreitas. De `sm:` pra cima volta a ser
+          uma linha só, como sempre foi. */}
       <header className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex min-w-0 items-center gap-3">
+          {/* Sem isto, quem abre um board direto (link salvo, deep link) não
+              descobre que dá pra criar/renomear/arquivar outros funis — a
+              lista "Funis" (/app/kanban) fica sem porta de saída visível. */}
           <Link
             href="/app/kanban"
             data-testid="pipeline-voltar-funis"
-            className="flex items-center gap-1 text-sm text-text-muted hover:text-accent"
+            className="flex shrink-0 items-center gap-1 text-sm text-text-muted hover:text-accent"
           >
-            <CaretLeft size={16} /> Funis
+            <CaretLeft size={16} /> {t("Funis")}
           </Link>
-          <span className="text-border">/</span>
+          <span className="shrink-0 text-border">/</span>
           <h1 className="min-w-0 truncate text-2xl font-semibold tracking-tight">
             {data?.pipeline.name ?? initialName}
           </h1>
         </div>
         <Button onClick={() => setNewOpen(true)} disabled={!data} className="shrink-0">
-          <Plus size={16} className="mr-2" /> Novo Lead
+          <Plus size={16} className="mr-2" /> {t("Novo Lead")}
         </Button>
       </header>
       {data && (
@@ -106,12 +124,11 @@ export function PipelinePageClient({
       <FilterBar filters={filters} onChange={setFilters} leads={data?.leads ?? []} />
       {error ? (
         <div className="rounded-md border border-destructive/30 bg-destructive/10 p-4 text-sm">
-          Não consegui carregar este funil:{" "}
-          {formatError(error)}
+          {t("Não consegui carregar este funil:")} {formatError(error, t)}
         </div>
       ) : isLoading || !data ? (
         <div className="flex flex-1 animate-pulse items-center justify-center text-muted-foreground">
-          Carregando…
+          {t("Carregando…")}
         </div>
       ) : (
         <KanbanBoard
@@ -129,6 +146,8 @@ export function PipelinePageClient({
         selectedIds={selectedIds}
         stages={data?.stages ?? []}
         pipelineId={pipelineId}
+        vocabulary={data?.pipeline.vocabulary ?? null}
+        tagsExistentes={tagsDoQuadro}
         onClear={() => setSelectedIds([])}
       />
     </div>

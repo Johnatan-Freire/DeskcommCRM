@@ -6,7 +6,7 @@
  * DELETE /api/v1/settings/sistema-escolar — remove a integração da organização (admin).
  *
  * A tabela nasceu com `revoke select ... from authenticated, anon` (migration
- * 0169) — nenhum caminho de browser lê `api_key_encrypted/iv/tag` nem aqui: as
+ * 0399) — nenhum caminho de browser lê `api_key_encrypted/iv/tag` nem aqui: as
  * três funções usadas (`lerConfigSegura`, `salvarConfig`, `removerConfig`) só
  * selecionam colunas seguras ou nunca devolvem a linha. `organization_id` vem
  * sempre do cookie validado por `requireRole`, nunca do body.
@@ -18,6 +18,7 @@ import { z } from "zod";
 import { ok, fail } from "@/lib/api/wrappers";
 import { audit } from "@/lib/audit";
 import { requireRole } from "@/lib/auth/require-role";
+import { requireSupportWrite } from "@/lib/impersonate/support";
 import {
   lerConfigSegura,
   salvarConfig,
@@ -47,6 +48,8 @@ export async function GET(): Promise<Response> {
 }
 
 export async function PUT(req: NextRequest): Promise<Response> {
+  const support = await requireSupportWrite();
+  if (support) return support;
   const requestId = randomUUID();
   const authz = await requireRole("admin", { requestId, resource: "org_sistema_escolar_config" });
   if (!authz.ok) return authz.response;
@@ -107,6 +110,8 @@ export async function PUT(req: NextRequest): Promise<Response> {
 }
 
 export async function DELETE(): Promise<Response> {
+  const support = await requireSupportWrite();
+  if (support) return support;
   const requestId = randomUUID();
   const authz = await requireRole("admin", { requestId, resource: "org_sistema_escolar_config" });
   if (!authz.ok) return authz.response;

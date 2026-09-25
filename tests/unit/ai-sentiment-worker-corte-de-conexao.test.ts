@@ -1,5 +1,5 @@
 /**
- * Corte de conexão (migration 0281) — `workers/ai-sentiment-worker.ts`.
+ * Corte de conexão (migration 0398) — `workers/ai-sentiment-worker.ts`.
  *
  * O achado mais grave da auditoria pré-conexão: `ai.sentiment_alert` (emitido
  * por este worker) dispara `workers/ai-handoff-from-sentiment.handler.ts` →
@@ -92,7 +92,7 @@ beforeEach(() => {
 
 const CONECTOU_EM = "2026-09-21T10:00:00.000Z";
 
-describe("corte de conexão (migration 0281) — ai-sentiment-worker", () => {
+describe("corte de conexão (migration 0398) — ai-sentiment-worker", () => {
   it("mensagem anterior à conexão: skip 'message_before_connection', ANTES de chamar o LLM", async () => {
     const queried: string[] = [];
     vi.mocked(createAdminClient).mockReturnValue(
@@ -114,7 +114,7 @@ describe("corte de conexão (migration 0281) — ai-sentiment-worker", () => {
     expect(queried).not.toContain("ai_agents");
   });
 
-  it("sessão sem first_connected_at (já conectada antes da migration 0281): nenhum corte", async () => {
+  it("sessão sem first_connected_at (já conectada antes da migration 0398): nenhum corte", async () => {
     const queried: string[] = [];
     vi.mocked(createAdminClient).mockReturnValue(
       makeAdminStub(

@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
+import { useT } from "@/hooks/i18n/useT";
 
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -27,6 +28,7 @@ interface Turno {
 const EXEMPLO = "Oi! Vocês atendem hoje? Queria saber o preço.";
 
 export function TestarClient({ nome, agenteId, versaoId }: Props) {
+  const t = useT();
   const [mensagem, setMensagem] = useState(EXEMPLO);
   const [desfecho, setDesfecho] = useState<Desfecho | null>(null);
   const [carregando, setCarregando] = useState(false);
@@ -39,7 +41,7 @@ export function TestarClient({ nome, agenteId, versaoId }: Props) {
    */
   const [transcript, setTranscript] = useState<Turno[]>([]);
 
-  const funcionario = nome ?? "seu funcionário";
+  const funcionario = nome ?? t("seu funcionário");
 
   // Três estados possíveis, e nenhum deles pode virar uma tela vazia: sem
   // agente (a pessoa pulou o treinamento), agente em rascunho (não tem versão
@@ -70,7 +72,7 @@ export function TestarClient({ nome, agenteId, versaoId }: Props) {
         // "não foi possível testar" não diz se falta chave, saldo ou modelo.
         setDesfecho({
           tipo: "erro",
-          mensagem: json.error?.message ?? `O ensaio falhou (HTTP ${res.status}).`,
+          mensagem: json.error?.message ?? `${t("O ensaio falhou")} (HTTP ${res.status}).`,
         });
         return;
       }
@@ -83,7 +85,7 @@ export function TestarClient({ nome, agenteId, versaoId }: Props) {
       if (d?.status && d.status !== "completed") {
         setDesfecho({
           tipo: "erro",
-          mensagem: d.error_message ?? d.error_code ?? `o ensaio terminou como "${d.status}"`,
+          mensagem: d.error_message ?? d.error_code ?? `${t("o ensaio terminou como")} "${d.status}"`,
         });
         return;
       }
@@ -97,7 +99,7 @@ export function TestarClient({ nome, agenteId, versaoId }: Props) {
         ]);
         setMensagem("");
       } else {
-        setDesfecho({ tipo: "erro", mensagem: "Ele executou, mas não devolveu texto nenhum." });
+        setDesfecho({ tipo: "erro", mensagem: t("Ele executou, mas não devolveu texto nenhum.") });
       }
     } catch (err) {
       setDesfecho({ tipo: "erro", mensagem: err instanceof Error ? err.message : String(err) });
@@ -110,10 +112,11 @@ export function TestarClient({ nome, agenteId, versaoId }: Props) {
     <div className="space-y-4">
       {semAgente && (
         <div className="rounded-lg border bg-background p-6" role="status">
-          <p className="text-sm font-medium">Você ainda não montou seu funcionário.</p>
+          <p className="text-sm font-medium">{t("Você ainda não montou seu funcionário.")}</p>
           <p className="mt-1 text-sm text-muted-foreground">
-            Sem ninguém treinado, não há o que testar. Dá para voltar ao passo anterior
-            agora ou fazer isso depois, em IA › Agentes.
+            {t(
+              "Sem ninguém treinado, não há o que testar. Dá para voltar ao passo anterior agora ou fazer isso depois, em IA › Agentes.",
+            )}
           </p>
         </div>
       )}
@@ -121,11 +124,12 @@ export function TestarClient({ nome, agenteId, versaoId }: Props) {
       {rascunho && (
         <div className="rounded-lg border bg-background p-6" role="status">
           <p className="text-sm font-medium">
-            {funcionario} está como <strong>rascunho</strong> — ainda não foi para o ar.
+            {funcionario} {t("está como")} <strong>{t("rascunho")}</strong> — {t("ainda não foi para o ar.")}
           </p>
           <p className="mt-1 text-sm text-muted-foreground">
-            Rascunho não responde mensagem, então não há o que ensaiar. O passo anterior
-            explicou o que falta; você pode resolver depois em IA › Agentes.
+            {t(
+              "Rascunho não responde mensagem, então não há o que ensaiar. O passo anterior explicou o que falta; você pode resolver depois em IA › Agentes.",
+            )}
           </p>
         </div>
       )}
@@ -133,7 +137,7 @@ export function TestarClient({ nome, agenteId, versaoId }: Props) {
       {!semAgente && !rascunho && (
         <div className="space-y-4 rounded-lg border bg-background p-6">
           <div className="space-y-2">
-            <Label htmlFor="mensagem">Escreva como se fosse um cliente</Label>
+            <Label htmlFor="mensagem">{t("Escreva como se fosse um cliente")}</Label>
             <Textarea
               id="mensagem"
               value={mensagem}
@@ -142,7 +146,7 @@ export function TestarClient({ nome, agenteId, versaoId }: Props) {
               maxLength={4000}
             />
           </div>
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center justify-between gap-2">
             {transcript.length > 0 ? (
               <Button
                 type="button"
@@ -154,7 +158,7 @@ export function TestarClient({ nome, agenteId, versaoId }: Props) {
                   setDesfecho(null);
                 }}
               >
-                Reiniciar conversa
+                {t("Reiniciar conversa")}
               </Button>
             ) : (
               <span />
@@ -166,10 +170,10 @@ export function TestarClient({ nome, agenteId, versaoId }: Props) {
               className="w-full sm:w-auto"
             >
               {carregando
-                ? "Ele está pensando..."
+                ? t("Ele está pensando...")
                 : transcript.length > 0
-                  ? "Mandar mais uma mensagem"
-                  : "Mandar mensagem"}
+                  ? t("Mandar mais uma mensagem")
+                  : t("Mandar mensagem")}
             </Button>
           </div>
 
@@ -184,7 +188,7 @@ export function TestarClient({ nome, agenteId, versaoId }: Props) {
               {transcript.slice(0, -2).map((turno, i) => (
                 <p key={i} className="whitespace-pre-wrap">
                   <span className="font-medium">
-                    {turno.role === "user" ? "Você: " : `${funcionario}: `}
+                    {turno.role === "user" ? t("Você: ") : `${funcionario}: `}
                   </span>
                   {turno.content}
                 </p>
@@ -195,11 +199,11 @@ export function TestarClient({ nome, agenteId, versaoId }: Props) {
           {desfecho?.tipo === "resposta" && (
             <div className="space-y-2 rounded-md border bg-muted/40 p-4">
               <p className="text-xs uppercase tracking-wider text-muted-foreground">
-                {funcionario} respondeu
+                {funcionario} {t("respondeu")}
               </p>
               <p className="whitespace-pre-wrap text-sm">{desfecho.texto}</p>
               <p className="text-xs text-muted-foreground">
-                Esta conversa não foi enviada a ninguém e não aparece no seu inbox.
+                {t("Esta conversa não foi enviada a ninguém e não aparece no seu inbox.")}
               </p>
             </div>
           )}
@@ -210,16 +214,19 @@ export function TestarClient({ nome, agenteId, versaoId }: Props) {
               className="space-y-2 rounded-md border border-amber-300/60 bg-amber-50 p-4 dark:border-amber-500/30 dark:bg-amber-950/20"
             >
               <p className="text-sm font-medium">
-                Ele não conseguiu responder — e é melhor descobrir isso agora do que com
-                um cliente de verdade.
+                {t(
+                  "Ele não conseguiu responder — e é melhor descobrir isso agora do que com um cliente de verdade.",
+                )}
               </p>
               <p className="text-xs text-muted-foreground">
-                Motivo: <code className="break-all">{desfecho.mensagem}</code>
+                {t("Motivo:")} <code className="break-all">{desfecho.mensagem}</code>
               </p>
               <p className="text-sm">
-                As causas mais comuns são a chave da empresa de IA sem saldo ou o modelo
-                indisponível. Dá para conferir em <strong>IA › Credenciais</strong> e seguir
-                daqui mesmo — o que você montou está salvo.
+                {t(
+                  "As causas mais comuns são a chave da empresa de IA sem saldo ou o modelo indisponível. Dá para conferir em",
+                )}{" "}
+                <strong>{t("IA › Credenciais")}</strong>{" "}
+                {t("e seguir daqui mesmo — o que você montou está salvo.")}
               </p>
             </div>
           )}
@@ -233,7 +240,7 @@ export function TestarClient({ nome, agenteId, versaoId }: Props) {
           disabled={pending}
           onClick={() => startTransition(() => void pularTeste())}
         >
-          Pular
+          {t("Pular")}
         </Button>
         <Button
           type="button"
@@ -250,12 +257,12 @@ export function TestarClient({ nome, agenteId, versaoId }: Props) {
                 await marcarTesteFeito(desfecho?.tipo === "resposta");
               } catch (err) {
                 if (err instanceof Error && err.message.startsWith("NEXT_REDIRECT")) throw err;
-                toast.error("Não consegui salvar este passo.");
+                toast.error(t("Não consegui salvar este passo."));
               }
             })
           }
         >
-          Continuar
+          {t("Continuar")}
         </Button>
       </div>
     </div>

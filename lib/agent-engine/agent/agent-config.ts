@@ -18,6 +18,9 @@ import type pg from 'pg';
 import { lerJanelaDeAtendimento, type JanelaDeAtendimento } from './janela-de-atendimento';
 
 export interface PublishedAgentConfig {
+  operationMode?: 'automatic' | 'assisted';
+  pausedAt?: string | null;
+  operationRevision?: string;
   agentId: string;
   versionId: string;
   agentName: string;
@@ -46,6 +49,16 @@ export interface PublishedAgentConfig {
    * exige a org ter a integração configurada — ver `sistema-escolar-gate.ts`.
    */
   sistemaEscolarToolIds: string[];
+  /**
+   * Autorização para `update_lead_state` marcar `stage=won` (migration 0401).
+   * `false` bloqueia — inclusive quando `agentConfig` inteiro está ausente
+   * (fail-closed no chamador, `verificarAutorizacaoTerminal` em
+   * `lead-state.ts`). `won` move o card real sem nenhuma verificação de
+   * pagamento própria; a permissão explícita é o único controle que existe.
+   */
+  canMarkWon: boolean;
+  /** Mesma proteção de `canMarkWon`, para `stage=lost`. */
+  canMarkLost: boolean;
   /**
    * Materiais que ESTE agente consulta (`ai_agent_versions.knowledge_source_ids`).
    * Vazio = NENHUM: a ferramenta de busca some do turno.
@@ -96,6 +109,9 @@ export interface PublishedAgentConfig {
 }
 
 interface Row {
+  operation_mode: 'automatic' | 'assisted';
+  paused_at: string | null;
+  operation_revision: string;
   agent_id: string;
   version_id: string;
   agent_name: string;
@@ -114,6 +130,8 @@ interface Row {
   cases_enabled: boolean;
   tool_ids: string[] | null;
   sistema_escolar_tool_ids: string[] | null;
+  can_mark_won: boolean | null;
+  can_mark_lost: boolean | null;
   active_kb_version_id: string | null;
   config: Record<string, unknown> | null;
   operator_enabled: boolean | null;
@@ -126,7 +144,7 @@ interface Row {
   agent_created_by: string | null;
 }
 
-const SELECT_AGENT_CONFIG_COLUMNS = `a.id as agent_id,
+const SELECT_AGENT_CONFIG_COLUMNS = `a.operation_mode,a.paused_at,a.operation_revision::text,a.id as agent_id,
             v.id as version_id,
             a.name as agent_name,
             v.system_prompt,
@@ -144,6 +162,8 @@ const SELECT_AGENT_CONFIG_COLUMNS = `a.id as agent_id,
             v.cases_enabled,
             v.tool_ids,
             v.sistema_escolar_tool_ids,
+            v.can_mark_won,
+            v.can_mark_lost,
             a.active_kb_version_id,
             a.config,
             v.operator_enabled,
@@ -160,18 +180,26 @@ const SELECT_AGENT_CONFIG_COLUMNS = `a.id as agent_id,
 function mapAgentConfigRow(r: Row): PublishedAgentConfig {
   const cfg = (r.config ?? {}) as { rag_top_k?: unknown; rag_similarity_threshold?: unknown };
   const ragTopK =
-    typeof cfg.rag_top_k === 'number' && Number.isInteger(cfg.rag_top_k) && cfg.rag_top_k >= 1 && cfg.rag_top_k <= 20
+    typeof cfg.rag_top_k === 'number' &&
+    Number.isInteger(cfg.rag_top_k) &&
+    cfg.rag_top_k >= 1 &&
+    cfg.rag_top_k <= 20
       ? cfg.rag_top_k
       : 5;
   const ragSimilarityThreshold =
-    typeof cfg.rag_similarity_threshold === 'number' && cfg.rag_similarity_threshold >= 0 && cfg.rag_similarity_threshold <= 1
+    typeof cfg.rag_similarity_threshold === 'number' &&
+    cfg.rag_similarity_threshold >= 0 &&
+    cfg.rag_similarity_threshold <= 1
       ? cfg.rag_similarity_threshold
-      // 0.40 e nao 0.72: o valor foi CALIBRADO com medicao na migration 0097 (pergunta literal 0.849, parafrase 0.49-0.65, irrelevante 0.27).
-      // Com 0.72 toda parafrase — que e como o cliente escreve — era descartada, e o RAG parecia quebrado funcionando.
-      // O banco moveu o default; estes tres sitios de codigo ficaram para tras e venciam o banco, porque quem corta pelo limiar e o TypeScript.
-      : 0.4;
+      : // 0.40 e nao 0.72: o valor foi CALIBRADO com medicao na migration 0097 (pergunta literal 0.849, parafrase 0.49-0.65, irrelevante 0.27).
+        // Com 0.72 toda parafrase — que e como o cliente escreve — era descartada, e o RAG parecia quebrado funcionando.
+        // O banco moveu o default; estes tres sitios de codigo ficaram para tras e venciam o banco, porque quem corta pelo limiar e o TypeScript.
+        0.4;
 
   return {
+    operationMode: r.operation_mode,
+    pausedAt: r.paused_at,
+    operationRevision: r.operation_revision,
     agentId: r.agent_id,
     versionId: r.version_id,
     agentName: r.agent_name,
@@ -182,7 +210,9 @@ function mapAgentConfigRow(r: Row): PublishedAgentConfig {
     maxSteps: r.max_steps,
     historyMessageWindow: r.history_message_window,
     historyTokenWindow: r.history_token_window,
-    handoffKeywords: (r.handoff_keywords ?? []).map((k) => k.toLowerCase().trim()).filter((k) => k !== ''),
+    handoffKeywords: (r.handoff_keywords ?? [])
+      .map((k) => k.toLowerCase().trim())
+      .filter((k) => k !== ''),
     handoffToolEnabled: r.handoff_tool_enabled,
     splitMessages: r.split_messages,
     splitMaxChars: r.split_max_chars,
@@ -193,6 +223,14 @@ function mapAgentConfigRow(r: Row): PublishedAgentConfig {
     // tool de sistema escolar em vez de quebrar a query — mesma direção segura
     // de `operatorToolIds`/`pipelineIds` logo abaixo (agir de menos).
     sistemaEscolarToolIds: r.sistema_escolar_tool_ids ?? [],
+    // `?? false` — NUNCA `?? true` — cobre o clone sem a 0401: coluna ausente
+    // vem como null/undefined, e a direção fail-closed é NÃO autorizar won/lost
+    // por default, mesmo que o DEFAULT do SQL (para preservar versão antiga já
+    // migrada) seja `true`. `agentConfig` ausente por completo já bloqueia no
+    // chamador (`verificarAutorizacaoTerminal`); esta linha cobre o caso de
+    // `agentConfig` presente mas com a coluna faltando.
+    canMarkWon: r.can_mark_won ?? false,
+    canMarkLost: r.can_mark_lost ?? false,
     // `?? []` cobre o clone sem a 0181: sem a coluna, o agente cai no ponteiro
     // legado abaixo em vez de ficar sem material nenhum.
     knowledgeSourceIds: r.knowledge_source_ids ?? [],
@@ -229,11 +267,9 @@ export async function loadPublishedAgentConfig(
      join ai_agent_versions v on v.id = a.published_version_id
      where a.organization_id = $1
        and a.archived_at is null
-       -- is_active agora vale pros DOIS kinds: pause manual (botão "Pausar",
-       -- sem tocar em published_version_id) tem que tirar o agente do ar na
-       -- hora, sem exigir republish nem canal online pra voltar — ver
-       -- pauseAgentAction/unpauseAgentAction em app/app/ai/agents/_actions.ts.
-       and a.is_active
+       -- is_active é semântica do rag_bot legado; para mcp_agent "ativo" =
+       -- published_version_id preenchido + não arquivado (mesmo critério do
+       -- dispatcher nativo do CRM — pausar = despublicar).
        and v.status = 'published'
        and v.channel_session_id = $2
      order by a.priority desc, a.created_at asc
@@ -262,7 +298,6 @@ export async function loadPublishedAgentConfigById(
      join ai_agent_versions v on v.id = a.published_version_id
      where a.organization_id = $1
        and a.archived_at is null
-       and a.is_active
        and v.status = 'published'
        and a.id = $2`,
     [organizationId, agentId],
@@ -281,4 +316,36 @@ export function matchesHandoffKeyword(signal: string, keywords: readonly string[
   if (keywords.length === 0) return false;
   const lower = signal.toLowerCase();
   return keywords.some((k) => lower.includes(k));
+}
+
+/** Exact authenticated version, including a draft: uses the production projection. */
+export async function loadAgentVersionConfig(
+  db: pg.Pool,
+  organizationId: string,
+  agentId: string,
+  versionId: string,
+): Promise<PublishedAgentConfig | null> {
+  const { rows } = await db.query<Row>(
+    `select ${SELECT_AGENT_CONFIG_COLUMNS} from ai_agents a
+ join ai_agent_versions v on v.organization_id=a.organization_id and v.agent_id=a.id
+ where a.organization_id=$1 and a.id=$2 and v.id=$3 and a.archived_at is null`,
+    [organizationId, agentId, versionId],
+  );
+  return rows[0] ? mapAgentConfigRow(rows[0]) : null;
+}
+
+/** Read-only selection for assistance: honor an existing conversation owner. */
+export async function loadConversationAgentConfig(
+  pool: pg.Pool,
+  organizationId: string,
+  conversationId: string,
+  channelId: string,
+) {
+  const { rows } = await pool.query<{ active_ai_agent_id: string | null }>(
+    'select active_ai_agent_id from conversations where organization_id=$1 and id=$2 and channel_session_id=$3',
+    [organizationId, conversationId, channelId],
+  );
+  return rows[0]?.active_ai_agent_id
+    ? loadPublishedAgentConfigById(pool, organizationId, rows[0].active_ai_agent_id)
+    : loadPublishedAgentConfig(pool, organizationId, channelId);
 }

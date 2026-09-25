@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
 vi.mock("@/lib/auth/require-role", () => ({ requireRole: vi.fn() }));
+vi.mock("@/lib/impersonate/support", () => ({ requireSupportWrite: vi.fn() }));
 vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: vi.fn(() => ({})) }));
 vi.mock("@/lib/audit", () => ({ audit: vi.fn(async () => undefined) }));
 vi.mock("@/lib/integracoes/sistema-escolar-config", () => ({
@@ -12,6 +13,7 @@ vi.mock("@/lib/integracoes/sistema-escolar-config", () => ({
 }));
 
 import { requireRole } from "@/lib/auth/require-role";
+import { requireSupportWrite } from "@/lib/impersonate/support";
 import { audit } from "@/lib/audit";
 import {
   lerConfigSegura,
@@ -56,6 +58,7 @@ function putReq(body: unknown): NextRequest {
 
 beforeEach(() => {
   vi.mocked(requireRole).mockReset();
+  vi.mocked(requireSupportWrite).mockReset().mockResolvedValue(null);
   vi.mocked(lerConfigSegura).mockReset().mockResolvedValue(CONFIG_VAZIA);
   vi.mocked(salvarConfig).mockReset().mockResolvedValue({ ok: true });
   vi.mocked(removerConfig).mockReset().mockResolvedValue(undefined);
@@ -91,6 +94,14 @@ describe("GET /api/v1/settings/sistema-escolar", () => {
 });
 
 describe("PUT /api/v1/settings/sistema-escolar", () => {
+  it("recusa acompanhamento administrativo somente-leitura antes de checar role", async () => {
+    vi.mocked(requireSupportWrite).mockResolvedValue(new Response("readonly", { status: 403 }));
+    const r = await PUT(putReq({ base_url: "https://escola.example", api_key: "chave-123456", is_active: true }));
+    expect(r.status).toBe(403);
+    expect(requireRole).not.toHaveBeenCalled();
+    expect(salvarConfig).not.toHaveBeenCalled();
+  });
+
   it("recusa quem não é admin", async () => {
     authzNegada();
     const r = await PUT(putReq({ base_url: "https://escola.example", api_key: "chave-123456", is_active: true }));
@@ -161,6 +172,14 @@ describe("PUT /api/v1/settings/sistema-escolar", () => {
 });
 
 describe("DELETE /api/v1/settings/sistema-escolar", () => {
+  it("recusa acompanhamento administrativo somente-leitura antes de checar role", async () => {
+    vi.mocked(requireSupportWrite).mockResolvedValue(new Response("readonly", { status: 403 }));
+    const r = await DELETE();
+    expect(r.status).toBe(403);
+    expect(requireRole).not.toHaveBeenCalled();
+    expect(removerConfig).not.toHaveBeenCalled();
+  });
+
   it("recusa quem não é admin", async () => {
     authzNegada();
     const r = await DELETE();

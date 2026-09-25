@@ -24,7 +24,7 @@ export const DUPLICATE_AGENT_COLUMNS =
  * basta, se o INSERT não a escreve a cópia nasce com o default do banco.
  */
 export const DUPLICATE_VERSION_COLUMNS =
-  "id, organization_id, agent_id, version_number, system_prompt, provider, model, credential_id, tool_ids, trigger_config, channel_session_id, max_steps, token_budget, cost_budget_cents, history_message_window, history_token_window, handoff_keywords, handoff_tool_enabled, cases_enabled, split_messages, split_max_chars, followup, operator_enabled, operator_model, operator_tool_ids, status, published_at, superseded_at, created_at, created_by,pipeline_ids,knowledge_source_ids,sistema_escolar_tool_ids";
+  "id, organization_id, agent_id, version_number, system_prompt, provider, model, credential_id, tool_ids, trigger_config, channel_session_id, max_steps, token_budget, cost_budget_cents, history_message_window, history_token_window, handoff_keywords, handoff_tool_enabled, cases_enabled, split_messages, split_max_chars, followup, operator_enabled, operator_model, operator_tool_ids, status, published_at, superseded_at, created_at, created_by,pipeline_ids,knowledge_source_ids,provisioning_origin,sistema_escolar_tool_ids,can_mark_won,can_mark_lost";
 
 export type DuplicateAgentError =
   | "not_found"
@@ -90,6 +90,13 @@ function versionPayloadFrom(src: Record<string, unknown>) {
     // sistema escolar marcado produzia um clone que nasce sem nenhuma das duas
     // tools, mesmo numa org com a integração configurada.
     sistema_escolar_tool_ids: src.sistema_escolar_tool_ids ?? [],
+    // Capability terminal (0401) HERDA da origem — não reseta pra `true` do
+    // default do banco, nem pra `false` de "agente novo": duplicar um agente
+    // que já foi explicitamente restringido não pode devolver a autoridade que
+    // alguém tirou dele de propósito. `?? false` só cobre o clone sem a
+    // migration (coluna ausente) — mesma direção segura das linhas acima.
+    can_mark_won: src.can_mark_won ?? false,
+    can_mark_lost: src.can_mark_lost ?? false,
   };
 }
 

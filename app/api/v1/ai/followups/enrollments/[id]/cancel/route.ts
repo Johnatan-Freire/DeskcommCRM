@@ -1,3 +1,4 @@
+import { requireSupportWrite } from "@/lib/impersonate/support";
 /**
  * POST /api/v1/ai/followups/enrollments/:id/cancel (manager+) — encerra um
  *   enrollment VIVO (active|waiting_reply|paused_handoff) manualmente pela
@@ -16,6 +17,7 @@ import { audit } from "@/lib/audit";
 import { requireRole } from "@/lib/auth/require-role";
 import { logger } from "@/lib/logger";
 import { createClient } from "@/lib/supabase/server";
+import { traduzir } from "@/lib/i18n/dicionario";
 
 export const dynamic = "force-dynamic";
 
@@ -23,11 +25,16 @@ const UUID_RX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 // `paused_manual` (0145) é cancelável: quem pausou tem o direito de desistir sem
 // ter de retomar antes só para poder encerrar — retomar reagendaria o próximo
 // passo, e entre o retomar e o cancelar o motor poderia mandar a mensagem.
-const LIVE_STATUSES = ["active", "waiting_reply", "paused_handoff", "paused_manual"];
+// `coletando` (0394) é o roteiro de atendimento em andamento: quem opera pode
+// encerrá-lo pela fila — antes, a rota devolvia 409 como se já tivesse acabado.
+const LIVE_STATUSES = ["active", "waiting_reply", "paused_handoff", "paused_manual", "coletando"];
 
 type RouteCtx = { params: Promise<{ id: string }> };
 
 export async function POST(_req: NextRequest, ctx: RouteCtx): Promise<Response> {
+  const supportDenied = await requireSupportWrite();
+  if (supportDenied) return supportDenied;
+
   const requestId = randomUUID();
   const { id } = await ctx.params;
   if (!UUID_RX.test(id)) {
@@ -36,6 +43,7 @@ export async function POST(_req: NextRequest, ctx: RouteCtx): Promise<Response> 
 
   const authz = await requireRole("manager", { requestId, resource: "followup_enrollments" });
   if (!authz.ok) return authz.response;
+  const t = (texto: string) => traduzir(texto, authz.user.idioma);
   const { user, org: activeOrg } = authz;
 
   const supabase = await createClient();
@@ -46,10 +54,10 @@ export async function POST(_req: NextRequest, ctx: RouteCtx): Promise<Response> 
     .eq("organization_id", activeOrg.orgId)
     .maybeSingle();
   if (fetchErr) return fail("internal_error", fetchErr.message, 500, { requestId });
-  if (!existing) return fail("not_found", "Enrollment não encontrado.", 404, { requestId });
+  if (!existing) return fail("not_found", t("Enrollment não encontrado."), 404, { requestId });
 
   if (!LIVE_STATUSES.includes(existing.status)) {
-    return fail("already_terminal", "Enrollment já está encerrado.", 409, { requestId });
+    return fail("already_terminal", t("Enrollment já está encerrado."), 409, { requestId });
   }
 
   const { data: updated, error: updErr } = await supabase

@@ -53,8 +53,22 @@ async function entrar(page: import("@playwright/test").Page, creds: Creds) {
   await page.goto("/login");
   await page.getByLabel(/e-?mail/i).fill(usuario.email);
   await page.getByLabel(/senha/i).fill(creds.password);
-  await page.getByRole("button", { name: /entrar/i }).click();
+  await page.getByRole("button", { name: "Entrar", exact: true }).click();
   await page.waitForURL(/\/app(\/|$)/, { timeout: 20_000 });
+}
+
+/**
+ * O destino que a página-ponte manda o navegador seguir.
+ *
+ * A volta do callback é 200 + HTML com `location.replace("…")`, e não mais um
+ * 307 com header `Location` — ver o comentário em `voltar()`
+ * (`app/api/v1/agenda/google/callback/route.ts`). Ler o corpo é o que mantém
+ * estas asserções medindo o DESTINO em vez da forma da resposta.
+ */
+async function destinoDaPonte(resposta: { text(): Promise<string> }): Promise<string> {
+  const corpo = await resposta.text();
+  const m = /location\.replace\((["'])(.*?)\1\)/.exec(corpo);
+  return m?.[2] ?? corpo;
 }
 
 test.describe("a volta do consentimento do Google chega ao sistema", () => {
@@ -69,10 +83,16 @@ test.describe("a volta do consentimento do Google chega ao sistema", () => {
         "Google não completa em instalação nenhuma",
     ).not.toBe(401);
 
-    // Recusa do usuário no Google é um caminho legítimo: tem de virar redirect
+    // Recusa do usuário no Google é um caminho legítimo: tem de levar de volta
     // para a Agenda com o motivo, nunca um erro cru de API.
-    expect(r.status()).toBe(307);
-    expect(r.headers()["location"] ?? "").toContain("/app/agenda?erro=conexao_cancelada");
+    //
+    // 200 e não 307: a volta é uma PÁGINA-PONTE. O 307 daqui herdava a cadeia
+    // iniciada no Google, o cookie `SameSite=Strict` não viajava, e a pessoa
+    // caía no `/login` achando que tinha sido deslogada. O que esta asserção
+    // mede — "recusar não vira erro de API, vira volta para a Agenda com o
+    // motivo" — continua igual; mudou onde o destino é lido.
+    expect(r.status()).toBe(200);
+    expect(await destinoDaPonte(r)).toContain("/app/agenda?erro=conexao_cancelada");
   });
 
   test("a ida emite o vínculo, e a volta com ele é reconhecida", async ({ page, context }) => {
@@ -109,7 +129,17 @@ test.describe("a volta do consentimento do Google chega ao sistema", () => {
     });
 
     expect(volta.status(), "a volta foi barrada — o conserto do proxy regrediu").not.toBe(401);
-    const destinoDaVolta = volta.headers()["location"] ?? "";
+    // ⚠️ O DESTINO SAI DO CORPO, E NÃO DO HEADER `location`.
+    //
+    // A volta deixou de ser um 307: ela é uma PÁGINA-PONTE 200 que navega por
+    // `location.replace`. A mudança não é de estilo — um 307 daqui herda a
+    // cadeia iniciada no Google, o cookie `SameSite=Strict` não viaja, e a
+    // pessoa cai no `/login` achando que foi deslogada (medido em navegador
+    // em `agenda-google-volta-nao-desloga.spec.ts`).
+    //
+    // Esta spec continua medindo o que media — QUAL destino a volta escolhe —,
+    // só que lendo onde ele agora está.
+    const destinoDaVolta = await destinoDaPonte(volta);
 
     // O que NÃO pode aparecer: a mensagem de "não consigo verificar quem voltou".
     // Ela é o desfecho de vínculo ausente ou não-casando, e o vínculo está aqui.
@@ -129,7 +159,8 @@ test.describe("a volta do consentimento do Google chega ao sistema", () => {
     // abrir não é liberar: sem o cookie que a ida emitiu, a volta continua
     // recusada — só que agora com a mensagem da Agenda, e não com 401 de API.
     const r = await request.get(`${CALLBACK}?code=x&state=forjado`, { maxRedirects: 0 });
-    expect(r.status()).toBe(307);
-    expect(r.headers()["location"] ?? "").toContain("erro=retorno_nao_verificavel");
+    // 200 e não 307: página-ponte. Ver o comentário do caso acima.
+    expect(r.status()).toBe(200);
+    expect(await destinoDaPonte(r)).toContain("erro=retorno_nao_verificavel");
   });
 });

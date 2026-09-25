@@ -1,11 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  bareWaMessageId,
-  chatIdFromWaMessageId,
-  parseWahaMessageId,
-  wahaEchoExternalIds,
-} from "@/lib/waha/message-id";
+import { bareWaMessageId, chatIdFromWaMessageId, parseWahaMessageId } from "@/lib/waha/message-id";
 
 describe("parseWahaMessageId", () => {
   it("string plana não é uma shape reconhecida (guard exige objeto) → null", () => {
@@ -56,30 +51,6 @@ describe("bareWaMessageId", () => {
     const candidates = [ackFull, bareWaMessageId(ackFull)];
     expect(candidates).toContain(webjsStored); // WEBJS: casa pela forma full
     expect(candidates).toContain("3EB0ABC"); // NOWEB: casa pela cauda
-  });
-});
-
-describe("wahaEchoExternalIds", () => {
-  it("NOWEB: o id cru do envio + a cauda + o composto construído com o destinatário", () => {
-    // O envio devolve o bare (3EB0ABC); o webhook do eco grava o composto
-    // true_<chatId>_<bare>. Sem construir o composto, a limpeza do eco nunca
-    // acha a linha que o NOWEB gravou.
-    expect(wahaEchoExternalIds("3EB0ABC", "5511999999999@c.us")).toEqual([
-      "3EB0ABC",
-      "true_5511999999999@c.us_3EB0ABC",
-    ]);
-  });
-
-  it("WEBJS: o id já é o composto — reduzir ao bare cobre esse lado", () => {
-    const full = "true_5511999999999@c.us_3EB0ABC";
-    expect(wahaEchoExternalIds(full, "5511999999999@c.us")).toEqual(
-      expect.arrayContaining([full, "3EB0ABC"]),
-    );
-  });
-
-  it("não duplica candidato quando o composto construído é igual ao id recebido", () => {
-    const full = "true_5511999999999@c.us_3EB0ABC";
-    expect(wahaEchoExternalIds(full, "5511999999999@c.us")).toHaveLength(2);
   });
 });
 

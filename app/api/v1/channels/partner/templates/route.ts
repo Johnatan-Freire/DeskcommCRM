@@ -1,3 +1,4 @@
+import { requireSupportWrite } from "@/lib/impersonate/support";
 /**
  * As definições aprovadas do canal INTERMEDIADO — listar, sincronizar, criar.
  *
@@ -22,13 +23,22 @@
  *
  * `channel_session_id` é o que permite responder "o que posso usar NESTA
  * conexão?". Sem ele, dois números do mesmo provider dividiriam a mesma lista.
+ *
+ * ─── Quem pode ──────────────────────────────────────────────────────────────
+ *
+ * Ler (`agent`): é a lista que o seletor do inbox usa, e quem atende precisa
+ * dela. Sincronizar e criar (`admin`): escreve na conta da empresa na
+ * plataforma, como a gestão de modelos do canal oficial. Antes daqui a rota só
+ * pedia login — qualquer membro, inclusive `viewer`, criava modelo, e o gate de
+ * MFA (que mora em `requireRole`) não era consultado.
  */
 import { randomUUID } from "node:crypto";
 import type { NextRequest } from "next/server";
+import { z } from "zod";
 
 import { fail, ok } from "@/lib/api/wrappers";
 import { audit } from "@/lib/audit";
-import { loadAuthUser, resolveActiveOrg } from "@/lib/auth/server";
+import { requireRole } from "@/lib/auth/require-role";
 import {
   CHANNEL_SESSION_REF_COLUMNS,
   DEFAULT_CHANNEL_PROVIDER,
@@ -38,16 +48,36 @@ import {
   type ChannelSessionRef,
 } from "@/lib/channels";
 import { findPartnerSession } from "@/lib/channels/connect";
+import { traduzir } from "@/lib/i18n/dicionario";
+import type { Idioma } from "@/lib/i18n/idiomas";
 import { logger } from "@/lib/logger";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export const dynamic = "force-dynamic";
 
+/**
+ * O corpo do POST. `components` viaja cru até a plataforma — ela é quem valida
+ * o formato e devolve o motivo; aqui só se garante a forma e o vocabulário
+ * fechado da categoria.
+ */
+const corpoSchema = z.discriminatedUnion("acao", [
+  z.object({ acao: z.literal("sincronizar") }),
+  z.object({
+    acao: z.literal("criar"),
+    name: z.string().trim().min(1).max(512),
+    language: z.string().trim().min(2).max(15),
+    category: z.enum(["AUTHENTICATION", "MARKETING", "UTILITY"]).default("UTILITY"),
+    components: z.array(z.record(z.string(), z.unknown())).min(1).max(10),
+  }),
+]);
+
 interface Contexto {
   orgId: string;
+  userId: string;
   sessionId: string;
   sessionRef: string;
   provider: ChannelProvider;
+  idioma: Idioma;
 }
 
 /**
@@ -58,18 +88,21 @@ interface Contexto {
  */
 async function contexto(
   requestId: string,
+  papel: "agent" | "admin",
 ): Promise<{ ok: true; ctx: Contexto } | { ok: false; res: Response }> {
-  const user = await loadAuthUser();
-  if (!user) return { ok: false, res: fail("unauthenticated", "Faça login.", 401, { requestId }) };
-  const org = await resolveActiveOrg(user);
-  if (!org) return { ok: false, res: fail("forbidden", "Sem organização ativa.", 403, { requestId }) };
+  // O papel ANTES da conexão: o 404 de "sem conexão" diria a quem não pode
+  // nada se a organização tem ou não o canal.
+  const authz = await requireRole(papel, { requestId, resource: "channel_templates" });
+  if (!authz.ok) return { ok: false, res: authz.response };
+  const { user, org } = authz;
+  const t = (texto: string) => traduzir(texto, user.idioma);
 
   const admin = createAdminClient();
   const sessao = await findPartnerSession(admin, org.orgId);
   if (!sessao || sessao.archivedAt) {
     return {
       ok: false,
-      res: fail("not_found", "Nenhuma conexão de parceiro ativa.", 404, { requestId }),
+      res: fail("not_found", t("Nenhuma conexão de parceiro ativa."), 404, { requestId }),
     };
   }
 
@@ -79,6 +112,7 @@ async function contexto(
     // — e o `lint:channels` reprovou a primeira versão deste arquivo por isso,
     // que é a catraca funcionando.
     .select(`id, ${CHANNEL_SESSION_REF_COLUMNS}`)
+    .eq("organization_id", org.orgId)
     .eq("id", sessao.id)
     .maybeSingle();
 
@@ -87,17 +121,20 @@ async function contexto(
   if (!sessionRef) {
     return {
       ok: false,
-      res: fail("failed_precondition", "Conexão sem identificador utilizável.", 409, { requestId }),
+      res: fail("failed_precondition", t("Conexão sem identificador utilizável."), 409, { requestId }),
     };
   }
 
-  return { ok: true, ctx: { orgId: org.orgId, sessionId: sessao.id, sessionRef, provider } };
+  return {
+    ok: true,
+    ctx: { orgId: org.orgId, userId: user.id, sessionId: sessao.id, sessionRef, provider, idioma: user.idioma },
+  };
 }
 
 /** Lista o que está ESPELHADO. Rápido, e é o que a tela mostra. */
 export async function GET(): Promise<Response> {
   const requestId = randomUUID();
-  const r = await contexto(requestId);
+  const r = await contexto(requestId, "agent");
   if (!r.ok) return r.res;
 
   const admin = createAdminClient();
@@ -137,28 +174,27 @@ export async function GET(): Promise<Response> {
  * e separá-las obrigaria a tela a saber que criar também sincroniza.
  */
 export async function POST(req: NextRequest): Promise<Response> {
+  const supportDenied = await requireSupportWrite();
+  if (supportDenied) return supportDenied;
+
   const requestId = randomUUID();
-  const r = await contexto(requestId);
+  const r = await contexto(requestId, "admin");
   if (!r.ok) return r.res;
+  const t = (texto: string) => traduzir(texto, r.ctx.idioma);
+
+  const parsed = corpoSchema.safeParse(await req.json().catch(() => null));
+  if (!parsed.success) {
+    return fail("invalid_request", t("Faltam nome, idioma ou conteúdo."), 422, { requestId });
+  }
+  const corpo = parsed.data;
 
   const adapter = getAdapter(r.ctx.provider);
   if (!adapter.templates) {
-    return fail("not_implemented", "Este canal não gerencia definições.", 501, { requestId });
+    return fail("not_implemented", t("Este canal não gerencia definições."), 501, { requestId });
   }
-
-  const corpo = (await req.json().catch(() => ({}))) as {
-    acao?: string;
-    name?: string;
-    language?: string;
-    category?: string;
-    components?: unknown[];
-  };
 
   try {
     if (corpo.acao === "criar") {
-      if (!corpo.name || !corpo.language || !Array.isArray(corpo.components)) {
-        return fail("invalid_request", "Faltam nome, idioma ou conteúdo.", 400, { requestId });
-      }
       // A plataforma valida o formato do nome e devolve o motivo com código. Não
       // duplicamos a regra: regra copiada envelhece separado da fonte.
       await adapter.templates.create({
@@ -167,12 +203,13 @@ export async function POST(req: NextRequest): Promise<Response> {
         draft: {
           name: corpo.name,
           language: corpo.language,
-          category: (corpo.category ?? "UTILITY") as "AUTHENTICATION" | "MARKETING" | "UTILITY",
+          category: corpo.category,
           components: corpo.components,
         },
       });
       await audit({
         action: "template.created",
+        actorUserId: r.ctx.userId,
         organizationId: r.ctx.orgId,
         resourceType: "channel_session",
         resourceId: r.ctx.sessionId,

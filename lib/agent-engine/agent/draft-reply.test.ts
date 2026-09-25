@@ -42,7 +42,6 @@ const AGENT: PublishedAgentConfig = {
   multimodalInput: false,
   casesEnabled: false,
   toolIds: [],
-  sistemaEscolarToolIds: [],
   knowledgeSourceIds: [],
   activeKbVersionId: null,
   ragTopK: 5,

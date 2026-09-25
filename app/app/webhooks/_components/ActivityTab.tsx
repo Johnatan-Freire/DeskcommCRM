@@ -1,8 +1,13 @@
 "use client";
+
+import { useTagDeIdioma } from "@/hooks/i18n/useLocaleDeData";
+
+import { useLocaleDeData } from "@/hooks/i18n/useLocaleDeData";
+
+import type { Locale } from "date-fns";
 import * as React from "react";
 import { toast } from "sonner";
 import { formatDistanceToNowStrict } from "date-fns";
-import { ptBR } from "date-fns/locale";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -24,13 +29,14 @@ import {
   type AutomationRuleRunActionResult,
 } from "@/hooks/webhooks/useAutomationRules";
 import { ACTION_LABELS, type ActionType } from "./labels";
+import { useT } from "@/hooks/i18n/useT";
 
-function actionLabel(type: string): string {
-  return ACTION_LABELS[type as ActionType] ?? type;
+function actionLabel(type: string, t: (texto: string) => string): string {
+  return t(ACTION_LABELS[type as ActionType] ?? type);
 }
 
-function relativeCreatedAt(iso: string): string {
-  return formatDistanceToNowStrict(new Date(iso), { addSuffix: true, locale: ptBR });
+function relativeCreatedAt(iso: string, locale: Locale): string {
+  return formatDistanceToNowStrict(new Date(iso), { addSuffix: true, locale: locale });
 }
 
 function statusBadgeVariant(
@@ -42,16 +48,16 @@ function statusBadgeVariant(
   return "warning";
 }
 
-function statusBadgeLabel(status: AutomationRuleRunRow["status"]): string {
-  if (status === "success") return "Sucesso";
-  if (status === "failed") return "Falhou";
+function statusBadgeLabel(status: AutomationRuleRunRow["status"], t: (texto: string) => string): string {
+  if (status === "success") return t("Sucesso");
+  if (status === "failed") return t("Falhou");
   // "Aguardando envio", e não "Aguardando horário": desde que o agregador passou
   // a marcar `adiado` também quando a mensagem ficou na fila do canal (número
   // desconectado, transporte não configurado), o rótulo antigo afirmava uma
   // causa — o relógio — que muitas vezes não é a certa. A causa exata aparece
   // na linha da ação, logo abaixo, onde ela pode ser específica.
-  if (status === "adiado") return "Aguardando envio";
-  return "Parcial";
+  if (status === "adiado") return t("Aguardando envio");
+  return t("Parcial");
 }
 
 /**
@@ -77,25 +83,102 @@ const MOTIVO_DA_PARADA: Record<string, string> = {
   ia_indisponivel:
     "A IA não está configurada nesta instalação — cadastre uma chave em Provedores de IA.",
   texto_vazio: "A IA não devolveu texto. Revise o contexto que você escreveu para ela.",
+  /*
+   * Os motivos abaixo chegam à tela pelos mesmos dois canais que os de cima
+   * (`detail.reason` e `action.error`) e NÃO tinham frase: quem opera a
+   * automação lia o código cru. A lista não é mantida a olho —
+   * `tests/unit/motivo-de-parada-tem-frase.test.ts` varre o que as ações emitem
+   * e reprova motivo sem frase aqui, com arquivo e linha de quem o emitiu.
+   */
+  membro_indeterminado:
+    "Não deu para saber quem atende este contato: a consulta ao sistema falhou na hora (rede ou banco), e não é erro de configuração. Tente de novo em alguns minutos.",
+  user_not_in_org:
+    "A pessoa escolhida como responsável não é atendente desta equipe. Escolha outra pessoa na automação.",
+  invalid_owner:
+    "A pessoa escolhida como responsável não pode atender — o papel dela é só de visualização. Escolha um atendente.",
+  missing_input:
+    "A ação não recebeu o que precisava (o lead do evento ou a pessoa configurada). Abra a automação e revise.",
+  no_tags: "Esta ação não tem nenhuma etiqueta escolhida. Abra a automação e escolha pelo menos uma.",
+  no_target: "O evento que disparou a regra não trouxe um lead nem um contato para etiquetar.",
+  no_lead_or_contact: "O evento que disparou a regra não trouxe um lead para criar ou mover.",
+  cross_pipeline_move_not_allowed: "Mover um lead para outro funil está desligado nesta organização.",
+  flow_not_active:
+    "O funil escolhido não está ativo, então a inscrição não foi feita. Ative o funil ou escolha outro na automação.",
+  live_enrollment_exists: "O contato já está em um funil ativo — esta ação não inscreve duas vezes.",
+  consent_declined: "O contato não autorizou o recebimento de mensagens de marketing.",
+  fora_do_pre_go_live:
+    "O número deste canal ainda não entrou no pré-go-live, então a mensagem escrita pela IA não sai por ele.",
+  numero_de_teste: "Este número está marcado como número de teste do canal.",
+  fora_da_lista_de_teste:
+    "Este número está fora da lista de teste do canal, então a mensagem escrita pela IA não sai por ele.",
+  elegibilidade_indeterminada:
+    "Não deu para saber se este número pode receber a mensagem da IA: a consulta falhou na hora (rede ou banco), e não é erro de configuração. Tente de novo em alguns minutos.",
+  missing_url: "Esta ação de webhook não tem endereço configurado. Abra a automação e preencha.",
+  unknown_action:
+    "A regra usa um tipo de ação que esta instalação não tem (pode ter saído em uma atualização). Abra a automação e escolha outra ação.",
 };
 
-function explicacaoDe(action: AutomationRuleRunActionResult): string | null {
+function explicacaoDe(
+  action: AutomationRuleRunActionResult,
+  t: (texto: string) => string,
+): string | null {
   const detail = action.detail ?? {};
-  if (typeof detail.explicacao === "string") return detail.explicacao;
-  const reason = typeof detail.reason === "string" ? detail.reason : null;
-  if (reason && MOTIVO_DA_PARADA[reason]) return MOTIVO_DA_PARADA[reason];
-  return reason;
+  if (typeof detail.explicacao === "string") return t(detail.explicacao);
+  // O motivo chega por DOIS canais: `detail.reason` (quem monta o detalhe) e
+  // `action.error` (quem devolve só o código — `user_not_in_org` e
+  // `invalid_owner` são assim). Consultar só o primeiro deixava esses dois como
+  // código cru na tela, mesmo com frase no mapa (issue #1090).
+  const doDetalhe = typeof detail.reason === "string" ? detail.reason : null;
+  const doErro = typeof action.error === "string" ? action.error : null;
+  const motivo = doDetalhe ?? doErro;
+  if (motivo && MOTIVO_DA_PARADA[motivo]) return t(MOTIVO_DA_PARADA[motivo]);
+  return motivo;
 }
 
-function horarioDeRetorno(action: AutomationRuleRunActionResult): string | null {
+/**
+ * O detalhe TÉCNICO da execução — a mensagem crua que a ação guardou.
+ *
+ * ─── DECISÃO DA ISSUE #1090: ele APARECE, para quem dá suporte ──────────────
+ *
+ * O critério, escrito para quem revisar:
+ *
+ *   - QUEM LÊ: a aba Atividade é de quem opera a automação dentro do produto,
+ *     não é tela de cliente. Para essa pessoa, "não deu para saber quem atende"
+ *     sem o motivo é beco sem saída: é a mensagem que separa "a infraestrutura
+ *     caiu" (tente de novo) de "o cadastro está errado" (conserte o cadastro), e
+ *     é ela que o suporte leva ao time técnico;
+ *   - O QUE É: mensagem de erro de infraestrutura que a própria ação capturou
+ *     (`TypeError: fetch failed`) — não é dado pessoal nem segredo, e o mesmo
+ *     texto já está em `automation_rule_runs.actions_result`, na resposta da API
+ *     que a própria tela consome;
+ *   - ORDEM E PESO: a frase em português continua sendo a leitura principal —
+ *     ela vem primeiro, e o texto técnico vem rotulado e em corpo menor. É o que
+ *     impede o detalhe de voltar a ACUSAR a configuração, que foi o defeito
+ *     consertado a montante (PR #1010).
+ *
+ * As duas grafias são aceitas porque as ações usam as duas (`detail.erro` em
+ * `assign_owner`, `detail.error` nas demais).
+ */
+function detalheTecnicoDe(action: AutomationRuleRunActionResult): string | null {
+  const detail = action.detail ?? {};
+  for (const chave of ["erro", "error"]) {
+    const valor = detail[chave];
+    if (typeof valor === "string" && valor.trim()) return valor.trim();
+  }
+  return null;
+}
+
+function horarioDeRetorno(action: AutomationRuleRunActionResult, idioma: string): string | null {
   const retryAt = action.detail?.retry_at;
   if (typeof retryAt !== "string") return null;
   const quando = new Date(retryAt);
   if (Number.isNaN(quando.getTime())) return null;
-  return quando.toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
+  return quando.toLocaleString(idioma, { dateStyle: "short", timeStyle: "short" });
 }
 
 function ActionLine({ action, run }: { action: AutomationRuleRunActionResult; run: AutomationRuleRunRow }) {
+  const tagDoIdioma = useTagDeIdioma();
+  const t = useT();
   const resend = useResendAutomationRun();
 
   const icon =
@@ -114,28 +197,38 @@ function ActionLine({ action, run }: { action: AutomationRuleRunActionResult; ru
   // chegam em `action.error` como CÓDIGO, o ramo de falha imprime `error` cru, e
   // o mapa de frases logo acima nunca era consultado. Escrever as frases e não
   // ligá-las é o mesmo que não tê-las.
-  const explicacao = explicacaoDe(action);
-  const retorno = horarioDeRetorno(action);
+  const explicacao = explicacaoDe(action, t);
+  const detalheTecnico = detalheTecnicoDe(action);
+  const retorno = horarioDeRetorno(action, tagDoIdioma);
 
   return (
     <div className="space-y-1">
       <div className="flex items-center gap-2 text-sm">
         {icon}
-        <span>{actionLabel(action.type)}</span>
+        <span>{actionLabel(action.type, t)}</span>
       </div>
       {action.status === "failed" ? (
         // `action.error` é texto de fora (resposta do webhook externo) — sem
         // tamanho garantido. `flex-wrap` + `break-words` impedem que um erro
         // comprido empurre o botão "Reenviar" pra fora da tela.
         <div className="ml-6 flex flex-wrap items-center justify-between gap-2 rounded-sm bg-muted px-2 py-1.5">
-          <p className="min-w-0 break-words text-xs text-muted-foreground">
-            {/* A frase ANTES do código cru. `action.error` já é texto de gente
-                nas falhas de envio (desfechoDoEnvio traduz), mas nas falhas da
-                IA ele é o código (`sem_agente_publicado`) — e é para esses que
-                `explicacao` existe. O `??` mantém o erro do webhook externo,
-                que não tem tradução possível e é a única pista real. */}
-            {explicacao ?? action.error ?? "Essa ação não funcionou."}
-          </p>
+          <div className="min-w-0 space-y-0.5">
+            <p className="break-words text-xs text-muted-foreground">
+              {/* A frase ANTES do código cru. `action.error` já é texto de gente
+                  nas falhas de envio (desfechoDoEnvio traduz), mas nas falhas da
+                  IA ele é o código (`sem_agente_publicado`) — e é para esses que
+                  `explicacao` existe. O `??` mantém o erro do webhook externo,
+                  que não tem tradução possível e é a única pista real. */}
+              {explicacao ?? action.error ?? t("Essa ação não funcionou.")}
+            </p>
+            {detalheTecnico ? (
+              // Subordinado à frase, e não no lugar dela: ver a decisão escrita
+              // em `detalheTecnicoDe`.
+              <p className="break-words text-[11px] text-muted-foreground">
+                {t("Detalhe técnico:")} {detalheTecnico}
+              </p>
+            ) : null}
+          </div>
           {action.type === "call_webhook" ? (
             <Button
               type="button"
@@ -145,11 +238,11 @@ function ActionLine({ action, run }: { action: AutomationRuleRunActionResult; ru
               disabled={resend.isPending}
               onClick={() =>
                 resend.mutate(run.id, {
-                  onSuccess: () => toast.success("Reenviado."),
+                  onSuccess: () => toast.success(t("Reenviado.")),
                 })
               }
             >
-              <PaperPlaneTilt /> Reenviar
+              <PaperPlaneTilt /> {t("Reenviar")}
             </Button>
           ) : null}
         </div>
@@ -159,8 +252,13 @@ function ActionLine({ action, run }: { action: AutomationRuleRunActionResult; ru
         <div className="ml-6 rounded-sm bg-muted px-2 py-1.5">
           <p className="break-words text-xs text-muted-foreground">
             {explicacao}
-            {retorno ? ` Nova tentativa em ${retorno}.` : null}
+            {retorno ? ` ${t("Nova tentativa em")} ${retorno}.` : null}
           </p>
+          {detalheTecnico ? (
+            <p className="break-words text-[11px] text-muted-foreground">
+              {t("Detalhe técnico:")} {detalheTecnico}
+            </p>
+          ) : null}
         </div>
       ) : null}
     </div>
@@ -168,6 +266,8 @@ function ActionLine({ action, run }: { action: AutomationRuleRunActionResult; ru
 }
 
 export function ActivityTab() {
+  const localeDaData = useLocaleDeData();
+  const t = useT();
   const { data, isLoading, refetch, isRefetching } = useAutomationRuns();
   const runs = data?.data ?? [];
 
@@ -181,7 +281,7 @@ export function ActivityTab() {
           disabled={isRefetching}
           className="w-full sm:w-auto"
         >
-          <ArrowsClockwise className={cn(isRefetching && "animate-spin")} /> Atualizar
+          <ArrowsClockwise className={cn(isRefetching && "animate-spin")} /> {t("Atualizar")}
         </Button>
       </div>
 
@@ -194,8 +294,9 @@ export function ActivityTab() {
         <div className="flex justify-center pt-10">
           <Card className="max-w-md">
             <CardContent className="pt-6 text-center text-sm text-muted-foreground">
-              Nenhuma automação rodou ainda. Assim que uma regra ligada disparar, o histórico
-              aparece aqui.
+              {t(
+                "Nenhuma automação rodou ainda. Assim que uma regra ligada disparar, o histórico aparece aqui.",
+              )}
             </CardContent>
           </Card>
         </div>
@@ -206,11 +307,11 @@ export function ActivityTab() {
               <CardHeader className="space-y-1">
                 <div className="flex items-center justify-between gap-2">
                   <CardTitle className="truncate text-sm">
-                    {run.automation_rules?.name ?? "Automação removida"}
+                    {run.automation_rules?.name ?? t("Automação removida")}
                   </CardTitle>
-                  <Badge variant={statusBadgeVariant(run.status)}>{statusBadgeLabel(run.status)}</Badge>
+                  <Badge variant={statusBadgeVariant(run.status)}>{statusBadgeLabel(run.status, t)}</Badge>
                 </div>
-                <p className="text-xs text-muted-foreground">{relativeCreatedAt(run.created_at)}</p>
+                <p className="text-xs text-muted-foreground">{relativeCreatedAt(run.created_at, localeDaData)}</p>
               </CardHeader>
               <CardContent className="space-y-2">
                 {run.actions_result.map((action, idx) => (

@@ -41,9 +41,14 @@ import type { JobRow } from "@/lib/agent-engine/queue/queue";
 
 // O parâmetro é DECLARADO para que `mock.calls[0][0]` exista para o typechecker:
 // sem ele o vitest infere a tupla vazia e o `pnpm typecheck` reprova o arquivo.
+// `outcome` com `kind`, e não `{}`: a cadeia real SEMPRE devolve um desfecho
+// nomeado, e quem chama passou a decidir por ele (`sent`/`deferred`/`skipped`).
+// Um dublê sem `kind` fazia o chamador cair fora do switch e devolver
+// `undefined` — um estado que a produção não tem, e que mascarava justamente o
+// desfecho que este teste não exercita.
 const runBeforeSend = vi.fn(async (_args: Record<string, unknown>) => ({
   status: "sent",
-  outcome: {},
+  outcome: { kind: "sent" },
   trace: [],
 }));
 vi.mock("@/lib/agent-engine/guardrails/before-send", () => ({ runBeforeSend }));
@@ -74,6 +79,8 @@ const LEAD = "lead-1";
 const CONVERSA = "conversa-1";
 const CANAL = "canal-1";
 
+const boundary = { organization_id: ORG, contact_id: LEAD, conversation_id: CONVERSA, service_revision: 1, demanda_id: null, demanda_revision: null };
+
 function job(payload: Record<string, unknown>): JobRow {
   return {
     id: "job-1",
@@ -81,7 +88,7 @@ function job(payload: Record<string, unknown>): JobRow {
     contact_id: LEAD,
     kind: "followup_turn",
     source_event_id: null,
-    payload,
+    payload: { ...payload, service_boundary: boundary },
     status: "running",
     priority: 0,
     run_after: new Date(),
@@ -97,11 +104,12 @@ function job(payload: Record<string, unknown>): JobRow {
 /** Pool mínimo: resolve a conversa e devolve a escolha da organização. */
 function fakePool(camadaDaOrg: boolean) {
   const query = vi.fn(async (sql: string): Promise<{ rows: Array<Record<string, unknown>> }> => {
+    if (sql.includes("d.fechada_em::text")) return { rows: [{ ...boundary, status: "open", demanda_fechada_em: null }] };
     if (/from org_guardrail_layers/.test(sql)) {
       return { rows: [{ layer: "promessa_semantica", enabled: camadaDaOrg }] };
     }
     if (/from conversations/.test(sql)) {
-      return { rows: [{ id: CONVERSA, channel_session_id: CANAL, channel_archived_at: null }] };
+      return { rows: [{ id: CONVERSA, channel_session_id: CANAL, archived_at: null }] };
     }
     return { rows: [] };
   });

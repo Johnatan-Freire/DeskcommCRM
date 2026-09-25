@@ -3,6 +3,7 @@ import { useT } from "@/hooks/i18n/useT";
 import {
   forwardRef,
   useImperativeHandle,
+  useEffect,
   useRef,
   useState,
   type ClipboardEvent,
@@ -14,7 +15,7 @@ import { AttachMenu } from "@/components/inbox/composer/AttachMenu";
 import { AttachmentPreviewDialog } from "@/components/inbox/composer/AttachmentPreviewDialog";
 import { ContactPickerDialog } from "@/components/inbox/composer/ContactPickerDialog";
 import { AudioRecorder } from "@/components/inbox/composer/AudioRecorder";
-import { DraftReplyButton } from "@/components/inbox/composer/DraftReplyButton";
+import { ReplyReviewPanel } from "@/components/inbox/composer/ReplyReviewPanel";
 import { EmojiButton } from "@/components/inbox/composer/EmojiButton";
 import { resolveSlash, TemplateMenu } from "@/components/inbox/composer/TemplateMenu";
 import { useCreateNote } from "@/hooks/inbox/useCreateNote";
@@ -32,6 +33,10 @@ export interface ComposerHandle {
 
 interface Props {
   conversationId: string;
+  initialDraft?: string;
+  initialMode?: "reply" | "note";
+  onDraftChange?: (text: string, mode: "reply" | "note") => void;
+  active?: boolean;
   disabled?: boolean;
   /** Set true when contact is blocked / anonymized — explanation shown. */
   blockedReason?: string | null;
@@ -63,6 +68,10 @@ interface Props {
 export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   {
     conversationId,
+    initialDraft = "",
+    initialMode = "reply",
+    active = true,
+    onDraftChange,
     disabled,
     blockedReason,
     janelaFechada,
@@ -74,11 +83,14 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   ref,
 ) {
   const t = useT();
-  const [text, setText] = useState("");
+  const [text, setText] = useState(initialDraft);
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [contactPickerOpen, setContactPickerOpen] = useState(false);
   const [menuDismissed, setMenuDismissed] = useState(false);
-  const [mode, setMode] = useState<"reply" | "note">("reply");
+  const [mode, setMode] = useState<"reply" | "note">(initialMode);
+  useEffect(() => {
+    onDraftChange?.(text, mode);
+  }, [text, mode, onDraftChange]);
   const taRef = useRef<HTMLTextAreaElement | null>(null);
   const send = useSendMessage();
   const upload = useUploadMedia();
@@ -114,7 +126,8 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
     requestAnimationFrame(() => autoresize());
 
     const restoreOnError = () => {
-      setText(body);
+      // Se a pessoa já começou a próxima resposta, preserve os dois textos.
+      setText((current) => (current ? `${body}\n${current}` : body));
       requestAnimationFrame(() => autoresize());
     };
 
@@ -131,7 +144,6 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
       },
       {
         onSuccess: () => {
-          setText("");
           // A citação vale para UMA mensagem. Mantê-la depois do envio faria a
           // próxima frase sair citando algo que o atendente já respondeu.
           onCancelarResposta?.();
@@ -153,17 +165,6 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
     requestAnimationFrame(() => {
       ta.focus();
       ta.selectionStart = ta.selectionEnd = filled.length;
-      autoresize();
-    });
-  }
-
-  function applyDraft(draft: string) {
-    // O rascunho é uma resposta COMPLETA sugerida — substitui o conteúdo, nunca
-    // concatena (inserir no cursor grudaria dois textos completos, gerando uma
-    // mensagem sem sentido). O vendedor edita/envia a partir daqui.
-    setText(draft);
-    requestAnimationFrame(() => {
-      taRef.current?.focus();
       autoresize();
     });
   }
@@ -215,6 +216,9 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
           mode === "note" && "border-warning/40 bg-warning-bg",
         )}
       >
+        {mode === "reply" && (
+          <ReplyReviewPanel conversationId={conversationId} disabled={isDisabled} />
+        )}
         <TemplateMenu
           open={menuOpen}
           query={slash.query}
@@ -272,7 +276,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
               type="button"
               onClick={onCancelarResposta}
               aria-label={t("Cancelar resposta")}
-              className="rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+              className="rounded-md p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
             >
               <X className="size-4" />
             </button>
@@ -285,9 +289,6 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
               onPick={setPendingFile}
               onPickContact={() => setContactPickerOpen(true)}
             />
-          )}
-          {mode === "reply" && (
-            <DraftReplyButton conversationId={conversationId} disabled={isDisabled} onDraft={applyDraft} />
           )}
           <EmojiButton
             disabled={isDisabled}
@@ -330,19 +331,21 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
             // uma nota interna precisa saber que ela não vai para o cliente, e
             // essa informação não pode depender de abrir um diálogo.
             placeholder={
-              mode === "note" ? t("Escreva uma nota interna… (só o time vê)") : t("Escreva uma mensagem…")
+              mode === "note"
+                ? t("Escreva uma nota interna… (só o time vê)")
+                : t("Escreva uma mensagem…")
             }
             title={
               mode === "note"
-                ? "Enter salva a nota · Shift+Enter quebra linha"
-                : "Enter envia · Shift+Enter quebra linha"
+                ? t("Enter salva a nota · Shift+Enter quebra linha")
+                : t("Enter envia · Shift+Enter quebra linha")
             }
             className={cn(
-              "min-h-9 max-h-40 flex-1 resize-none rounded-md border border-input bg-background px-3 py-2 text-sm",
-              "placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring",
+              "max-h-40 min-h-9 flex-1 resize-none rounded-md border border-input bg-background px-3 py-2 text-sm",
+              "placeholder:text-muted-foreground focus:ring-1 focus:ring-ring focus:outline-hidden",
             )}
             disabled={mode === "note" ? isDisabled : respostaBarrada}
-            aria-label="Mensagem"
+            aria-label={t("Mensagem")}
           />
           {text.trim() || mode === "note" ? (
             <Button
@@ -351,12 +354,12 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
               className="h-9 w-9 shrink-0"
               onClick={handleSubmit}
               disabled={(mode === "note" ? isDisabled : respostaBarrada) || !text.trim()}
-              aria-label="Enviar"
+              aria-label={t("Enviar")}
             >
               <PaperPlaneTilt size={16} weight="fill" aria-hidden />
             </Button>
           ) : (
-            <AudioRecorder conversationId={conversationId} disabled={respostaBarrada} />
+            active && <AudioRecorder conversationId={conversationId} disabled={respostaBarrada} />
           )}
         </div>
       </div>

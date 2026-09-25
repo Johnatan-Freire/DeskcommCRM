@@ -1,7 +1,7 @@
 /**
  * Dublê de banco das rotas de FUNIL e de ETAPA (`app/api/v1/pipelines/**`).
  *
- * Ele APLICA os filtros `eq`, a projeção do `select()`, o `order()` e o
+ * Ele APLICA os filtros `eq`/`neq`, a projeção do `select()`, o `order()` e o
  * `count`/`head` de verdade. Um stub de linha fixa deixaria "etapa de outra
  * organização → 404" passar mesmo com o `eq("organization_id", …)` apagado da
  * rota: mediria o dublê, não o handler.
@@ -166,6 +166,7 @@ export function makeDb(opts: DbOpts = {}): Registro {
   function builder(table: string) {
     const filtros: Array<[string, unknown]> = [];
     const pertinencias: Array<[string, unknown[]]> = [];
+    const negacoes: Array<[string, unknown]> = [];
     let patch: Record<string, unknown> | null = null;
     let nova: Record<string, unknown> | Record<string, unknown>[] | null = null;
     let colunas: string[] | null = null;
@@ -178,7 +179,10 @@ export function makeDb(opts: DbOpts = {}): Registro {
     const casam = () =>
       (tables[table] ?? [])
         .filter((r) => filtros.every(([c, v]) => r[c] === v))
-        .filter((r) => pertinencias.every(([c, vs]) => vs.includes(r[c])));
+        .filter((r) => pertinencias.every(([c, vs]) => vs.includes(r[c])))
+        // `neq` em SQL exclui NULL (`NULL <> v` nao e verdadeiro) — o duble
+        // segue o banco, nao o JavaScript.
+        .filter((r) => negacoes.every(([c, v]) => r[c] !== null && r[c] !== undefined && r[c] !== v));
 
     /**
      * Ordena, corta e projeta como o PostgREST faria.
@@ -298,6 +302,18 @@ export function makeDb(opts: DbOpts = {}): Registro {
         pertinencias.push([c, vs]);
         return b;
       },
+      /**
+       * `.neq(col, v)` — filtro de DESIGUALDADE.
+       *
+       * O dublê nasceu aplicando só `eq`. A #992 trouxe o primeiro uso real de
+       * `neq` (a busca pelo negócio aberto do contato em OUTRO funil): sem este
+       * ramo, a chamada estourava e a ação devolvia `failed` — o teste media o
+       * dublê, não o código.
+       */
+      neq: (c: string, v: unknown) => {
+        negacoes.push([c, v]);
+        return b;
+      },
       limit: (n: number) => {
         teto = n;
         return b;
@@ -362,6 +378,7 @@ export function authOk(role: "manager" | "admin" = "manager"): void {
     full_name: null,
     avatar_url: null,
     is_platform_admin: false,
+    idioma: "pt-BR" as const,
     organizations: [{ organization_id: ORG_ID, organization_name: "Org", role }],
   };
   vi.mocked(requireRole).mockResolvedValue({

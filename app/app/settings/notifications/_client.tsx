@@ -1,18 +1,20 @@
 "use client";
 
-import { useState } from "react";
+import { useT } from "@/hooks/i18n/useT";
+
+import { useSyncExternalStore } from "react";
 
 import { Card } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { useNotificationPermission } from "@/hooks/notifications/useNotificationPermission";
 import {
   NOTIFY_UI_CATEGORIES,
-  canalLigado,
+  assinarPrefs,
+  getPrefsSnapshot,
+  getPrefsSnapshotDoServidor,
   gravarCanal,
-  lerPrefs,
   type NotifyCategory,
   type NotifyChannelPref,
-  type NotifyPrefs,
 } from "@/lib/notifications/prefs";
 
 const LABELS: Record<NotifyCategory, string> = {
@@ -21,11 +23,13 @@ const LABELS: Record<NotifyCategory, string> = {
   lead_won: "Lead ganho",
   lead_lost: "Lead perdido",
   mention: "Você foi mencionado",
+  call_inbound: "Ligação recebida",
 };
 
 export function NotificationPrefsClient() {
+  const t = useT();
   const { permission, request } = useNotificationPermission();
-  const [prefs, setPrefs] = useState<NotifyPrefs>(() => lerPrefs());
+  const prefs = useSyncExternalStore(assinarPrefs, getPrefsSnapshot, getPrefsSnapshotDoServidor);
   const denied = permission === "denied";
   const unsupported = permission === "unsupported";
 
@@ -36,7 +40,7 @@ export function NotificationPrefsClient() {
         if (next !== "granted") return;
       }
     }
-    setPrefs(gravarCanal(category, channel, on));
+    gravarCanal(category, channel, on);
   }
 
   return (
@@ -44,7 +48,7 @@ export function NotificationPrefsClient() {
       <table className="w-full text-sm">
         <thead className="border-b">
           <tr>
-            <th className="px-4 py-3 text-left font-medium">Categoria</th>
+            <th className="px-4 py-3 text-left font-medium">{t("Categoria")}</th>
             <th className="px-4 py-3 text-center font-medium">Email</th>
             <th className="px-4 py-3 text-center font-medium">In-app</th>
             <th className="px-4 py-3 text-center font-medium">Push</th>
@@ -54,22 +58,23 @@ export function NotificationPrefsClient() {
           {NOTIFY_UI_CATEGORIES.map((cat) => (
             <tr key={cat} className="border-b last:border-0">
               <td className="px-4 py-3">
-                {LABELS[cat]}
+                {t(LABELS[cat])}
                 {cat === "message" && denied ? (
                   <p className="mt-1 text-xs text-muted-foreground">
-                    O navegador bloqueou as notificações. Libere-as nas configurações
-                    do site e recarregue.
+                    {t(
+                      "O navegador bloqueou as notificações. Libere-as nas configurações do site e recarregue.",
+                    )}
                   </p>
                 ) : null}
               </td>
               <td className="px-4 py-3 text-center">
-                <Switch checked={false} disabled aria-label={`${LABELS[cat]} via email`} />
+                <Switch checked={false} disabled aria-label={`${t(LABELS[cat])} via email`} />
               </td>
               <td className="px-4 py-3 text-center">
                 <Switch
                   checked={prefs[cat].in_app}
                   onCheckedChange={(on) => void onToggle(cat, "in_app", on)}
-                  aria-label={`${LABELS[cat]} via in_app`}
+                  aria-label={`${t(LABELS[cat])} via in_app`}
                 />
               </td>
               <td className="px-4 py-3 text-center">
@@ -77,8 +82,8 @@ export function NotificationPrefsClient() {
                   checked={prefs[cat].push}
                   disabled={denied || unsupported}
                   onCheckedChange={(on) => void onToggle(cat, "push", on)}
-                  aria-label={`${LABELS[cat]} via push`}
-                  data-testid={cat === "message" ? (canalLigado("message", "push") ? "alerts-toggle" : "alerts-enable") : undefined}
+                  aria-label={`${t(LABELS[cat])} via push`}
+                  data-testid={cat === "message" ? (prefs.message.push ? "alerts-toggle" : "alerts-enable") : undefined}
                 />
               </td>
             </tr>

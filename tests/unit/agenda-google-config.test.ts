@@ -21,15 +21,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const ORIGINAL = { ...process.env };
 
-// `faltaParaConectarOGoogle()` passa por `configuracaoDoGoogle()`, que lê
-// `platform_google_oauth` ANTES do `.env` (migration 0201, banco primeiro —
-// ver o docstring do arquivo). Sem este dublê, os dois casos abaixo fazem uma
-// chamada de rede DE VERDADE contra `NEXT_PUBLIC_SUPABASE_URL` (o placeholder
-// `.invalid` do setup global) — em vez de nunca resolver, a chamada FALHA
-// devagar (DNS), e o teste mede a paciência da rede, não o código. Medido:
-// >15s sob carga, estourando o timeout padrão do vitest. A precedência banco
-// vs. `.env` já tem cerca própria em `agenda-google-credencial-do-banco.test.ts`
-// — aqui só precisa devolver "sem linha", que é o caminho que este arquivo testa.
+// Estes casos medem o leitor do ambiente. A credencial de uma instalação local
+// já configurada pela tela não pode transformar "sem chave" em teste falso.
 vi.mock("@/lib/supabase/admin", () => ({
   createAdminClient: () => ({
     from: () => ({
@@ -42,15 +35,14 @@ vi.mock("@/lib/supabase/admin", () => ({
   }),
 }));
 
+vi.mock("@/lib/webhooks/secrets", () => ({
+  decryptWebhookSecret: async () => null,
+}));
+
 async function importarComEnv(vars: Record<string, string>) {
   vi.resetModules();
   for (const [k, v] of Object.entries(vars)) process.env[k] = v;
-  const mod = await import("@/lib/agenda/google/config");
-  // O memo mora no `globalThis` — `resetModules` não o limpa (ver o arquivo
-  // irmão). Sem isto o segundo caso de `faltaParaConectarOGoogle` leria o
-  // resultado memoizado do primeiro.
-  mod.invalidarCredencialDoGoogle();
-  return mod;
+  return import("@/lib/agenda/google/config");
 }
 
 beforeEach(() => {
@@ -124,6 +116,27 @@ describe("enderecoDeRetorno", () => {
     expect(enderecoDeRetorno("https://crm.exemplo/")).toBe("https://crm.exemplo/api/v1/agenda/google/callback");
     expect(enderecoDeRetorno("https://crm.exemplo///")).toBe("https://crm.exemplo/api/v1/agenda/google/callback");
     expect(enderecoDeRetorno("https://crm.exemplo")).toBe("https://crm.exemplo/api/v1/agenda/google/callback");
+  });
+
+  it("aceita a origem localhost do navegador no desenvolvimento local", async () => {
+    const { enderecoDeRetorno, origemLocalDoNavegador } = await importarComEnv({
+      ...COMPLETO,
+      NEXT_PUBLIC_APP_URL: "http://192.168.0.21:3001",
+    });
+    const origem = origemLocalDoNavegador("http://localhost:3001");
+    expect(origem).toBe("http://localhost:3001");
+    expect(enderecoDeRetorno(origem ?? undefined)).toBe("http://localhost:3001/api/v1/agenda/google/callback");
+  });
+
+  it("não deixa host externo substituir a URL canônica", async () => {
+    const { origemLocalDoNavegador } = await importarComEnv(COMPLETO);
+    expect(origemLocalDoNavegador("https://nao-confiavel.exemplo")).toBeNull();
+  });
+
+  it("lê localhost do Host real da requisição", async () => {
+    const { origemLocalDosCabecalhos } = await importarComEnv(COMPLETO);
+    expect(origemLocalDosCabecalhos(new Headers({ host: "localhost:3001" }))).toBe("http://localhost:3001");
+    expect(origemLocalDosCabecalhos(new Headers({ host: "192.168.0.21:3001" }))).toBeNull();
   });
 });
 

@@ -19,7 +19,7 @@ import { emitLeadActivity } from "@/lib/leads/activity-emitter";
 import { classificarLeadInicial, type ResultadoClassificacaoInicial } from "@/lib/leads/classificacao-inicial";
 import type { CreateLeadInput } from "@/lib/schemas";
 import { mapInboundPayload, verifyInboundSignature, type FieldMap } from "@/lib/webhooks/inbound";
-import { phoneLookupVariants } from "@/lib/channels/phone-variants";
+import { encontrarContatoPorTelefoneComNome } from "@/lib/channels/contato-por-telefone";
 import {
   buildContactConsentGrant,
   buildContactConsentDenial,
@@ -28,10 +28,16 @@ import {
   respondiLeadTitle,
   type RespondiMapped,
 } from "@/lib/webhooks/respondi";
+import {
+  isRdStationPayload,
+  mapRdStationPayload,
+  type RdStationMapped,
+} from "@/lib/webhooks/rdstation";
 import { origemDaPagina, registrarCaptacao } from "@/lib/webhooks/captacao";
 import { ipDoClienteParaInet } from "@/lib/http/ip-do-cliente";
 import { decryptWebhookSecret } from "@/lib/webhooks/secrets";
 import { ApiError } from "@/lib/api/types";
+import { autorizarContatoParaIA } from "@/lib/ai/elegibilidade/autorizacao";
 import { kickLocalPipeline } from "@/lib/dev/kick-local-pipeline";
 
 export const dynamic = "force-dynamic";
@@ -178,6 +184,15 @@ export async function POST(req: NextRequest, ctx: RouteCtx): Promise<NextRespons
     ? mapRespondiPayload(payload)
     : null;
 
+  // RD Station manda `{ leads: [ {...} ] }` — mesmo problema do Respondi (o
+  // mapeador genérico só lê chave de topo). Detecta a forma UMA vez; alimenta
+  // o idempotency key e o mapeamento de campos abaixo. Respondi tem
+  // precedência: um payload nunca é dos dois.
+  const rdStationMapped: RdStationMapped | null =
+    respondiMapped === null && isRdStationPayload(payload)
+      ? mapRdStationPayload(payload)
+      : null;
+
   // Idempotência (spec §5): `external_id` é campo reservado do envio — quem
   // integra via sistema (Zapier/n8n/loja) manda o ID único do disparo e o
   // reenvio automático (retry por timeout) NUNCA duplica o lead. O índice
@@ -200,7 +215,9 @@ export async function POST(req: NextRequest, ctx: RouteCtx): Promise<NextRespons
       // uuid de 36 chars, ~60× abaixo do limiar. É higiene de simetria: dois
       // ramos do mesmo `?:` produzindo a mesma coluna com regras diferentes é o
       // tipo de coisa que só aparece quando alguém manda um corpo fabricado.
-      : (respondiMapped?.externalId?.slice(0, 255) ?? null);
+      : (respondiMapped?.externalId?.slice(0, 255) ??
+        rdStationMapped?.externalId?.slice(0, 255) ??
+        null);
 
   const respondWithLead = (leadId: string): NextResponse => {
     if (isForm && source.redirect_to) {
@@ -239,8 +256,12 @@ export async function POST(req: NextRequest, ctx: RouteCtx): Promise<NextRespons
   //
   // O `respondiMapped ??` é do PR #326: sem ele o payload aninhado do Respondi
   // volta a cair no mapeador genérico, que é o defeito que aquele PR conserta.
+  // O `rdStationMapped ??` é a mesma figura para o envelope `leads[]` do RD
+  // Station (achado 2026-09-08). Ordem: Respondi, RD Station, genérico.
   const mapped =
-    respondiMapped ?? mapInboundPayload(externalId ? payloadForMapping : payload, fieldMap);
+    respondiMapped ??
+    rdStationMapped ??
+    mapInboundPayload(externalId ? payloadForMapping : payload, fieldMap);
   if (!mapped.phone) {
     const rawPhone = findRawPhoneIfUnnormalized(payload, fieldMap);
     if (rawPhone) mapped.source_metadata.raw_phone = rawPhone;
@@ -323,23 +344,30 @@ export async function POST(req: NextRequest, ctx: RouteCtx): Promise<NextRespons
   // a reconciliação abaixo existe só para quem JÁ era contato.
   let contatoNasceuAqui = false;
   if (mapped.phone) {
-    const variantes = phoneLookupVariants(mapped.phone);
-    const selectActiveByPhone = () =>
-      admin
-        .from("contacts")
-        .select("id, name")
-        .eq("organization_id", source.organization_id)
-        .in("phone_number", variantes)
-        .is("is_merged_into", null)
-        .limit(1)
-        .maybeSingle();
+    /** O que os dois caminhos (telefone e e-mail) devolvem — um tipo só. */
+    type ContatoAchado = { data: { id: string; name: string | null } | null };
+
+    // ⚠️ QUAL GRAFIA VENCE é decidido por `escolherContatoCanonico`, e não pelo
+    // banco. Isto era `.in(variantes).limit(1)` SEM `order by`: com as duas
+    // grafias do mesmo celular ainda vivas — estado que a migration `0198`
+    // admite ao chamar o próprio passo 3 de "piso de segurança para o unique" —
+    // o Postgres devolvia qualquer uma das duas. A resposta do cliente entrava
+    // no cadastro errado, o follow-up não a reconhecia, e a mesma pergunta saía
+    // de novo.
+    const selectActiveByPhone = async (): Promise<ContatoAchado> => ({
+      data: await encontrarContatoPorTelefoneComNome(
+        admin,
+        source.organization_id,
+        mapped.phone!,
+      ),
+    });
 
     // uniq_contacts_org_email (baseline.sql) é um SEGUNDO índice único parcial,
     // independente de uniq_contacts_org_phone — um INSERT pode colidir nele
     // mesmo com telefone inédito (mesma pessoa manda e-mail repetido, telefone
     // novo). email_normalized é coluna GERADA (`lower(trim(email))`), então a
     // comparação replica exatamente essa normalização — não `email` bruto.
-    const selectActiveByEmail = (): ReturnType<typeof selectActiveByPhone> | null => {
+    const selectActiveByEmail = (): PromiseLike<ContatoAchado> | null => {
       if (!mapped.email) return null;
       return admin
         .from("contacts")
@@ -487,7 +515,6 @@ export async function POST(req: NextRequest, ctx: RouteCtx): Promise<NextRespons
       ? respondiLeadTitle(respondiMapped)
       : (mapped.name ?? mapped.phone ?? mapped.email ?? "Lead sem nome"),
     contact_id: contactId,
-    currency: "BRL",
     tags: [],
     source: "webhook",
     custom_fields: mapped.custom_fields,
@@ -624,8 +651,27 @@ export async function POST(req: NextRequest, ctx: RouteCtx): Promise<NextRespons
     outcome: "criado",
   });
 
+  // ELEGIBILIDADE DA IA (caso 1): uma submissão do Respondi é uma origem
+  // elegível — autoriza o contato a ser atendido automaticamente. Só tem efeito
+  // nos canais com o gate `allowlist` ligado; canal 'open' ignora a coluna.
+  // Consent explicitamente NEGADO não autoriza (LGPD); `not_found` (o formulário
+  // não pergunta) autoriza — mesma régua do `consentDoEnvio` acima.
+  const consentNegado =
+    respondiMapped != null &&
+    respondiMapped.consent.detectedVia !== "not_found" &&
+    !respondiMapped.consent.granted;
+  if (respondiMapped && contactId && !consentNegado) {
+    const formId = respondiMapped.custom_fields.respondi_form_id ?? "form";
+    const submissionId = respondiMapped.custom_fields.respondi_respondent_id ?? "s";
+    await autorizarContatoParaIA(admin, {
+      organizationId: source.organization_id,
+      contactId,
+      reason: `respondi:${formId}:${submissionId}`,
+    });
+  }
+
   // Captação: drena lead.created e inscreve no fluxo neste mesmo request.
-  // Sem isto, em prod (Vercel Hobby sem cron de 1 min) o gatilho fica pending.
+  // Sem isto, numa instalação sem cron de 1 min (relógio HTTP), o gatilho fica pending.
   await kickLocalPipeline(
     admin,
     contactId

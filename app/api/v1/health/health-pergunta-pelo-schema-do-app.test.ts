@@ -4,17 +4,16 @@ import { NextRequest } from "next/server";
 /**
  * GET /api/v1/health — o ping do banco pergunta pelo schema QUE O APP USA.
  *
- * ## A classe de defeito (achada ao triar o CHANGELOG do upstream)
+ * ## A classe de defeito
  *
  * O check do Supabase é um `fetch` cru contra `/rest/v1/organizations`. Sem
  * cabeçalho de schema, o PostgREST resolve no schema DEFAULT do projeto — o
  * primeiro da lista "Exposed schemas" —, e que ele seja `public` é costume de
  * projeto recém-criado, não garantia da plataforma.
  *
- * Medido pelo upstream (melgarafael/DeskcommCRM, commit 8da85846) numa VPS
- * real: o projeto Supabase já servia outra aplicação, com um schema próprio à
- * frente de `public` na lista. O ping procurava `<outro>.organizations`,
- * recebia
+ * Medido numa VPS real em 17/09/2026: o projeto Supabase já servia outras
+ * aplicações e tinha um schema próprio à frente de `public` na lista. O ping
+ * procurava `<outro>.organizations`, recebia
  *
  *   404 {"code":"PGRST205","message":"Could not find the table ... in the schema cache"}
  *
@@ -26,7 +25,7 @@ import { NextRequest } from "next/server";
  *
  * `hostgator-setup-kit/update.sh` termina em `wait_app_healthy`, e o código de
  * saída diferente de zero é justamente o sinal que o `agent.sh` usa para
- * REVERTER para a imagem anterior. Uma atualização bem-sucedida seria desfeita
+ * REVERTER para a imagem anterior. Uma atualização bem-sucedida era desfeita
  * por causa de uma configuração de painel que o CRM não controla — e o dono
  * veria a versão voltar sozinha, sem erro nenhum no app.
  *

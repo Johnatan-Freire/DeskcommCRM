@@ -67,6 +67,20 @@ export interface FatosDoComando {
   bot_silenced_until?: string | null;
   /** A trava do CONTATO — irrevogável pelo agente. */
   force_human?: boolean | null;
+  /**
+   * O contato pediu para não receber mensagens (`contacts.is_blocked`).
+   *
+   * Entra aqui porque o motor o trata como parada dura — `before-send.ts` recusa
+   * com `select (is_blocked or force_human) as stopped` — e uma tela que dissesse
+   * "Automático atendendo" sobre um contato descadastrado afirmaria o oposto do
+   * que vai acontecer.
+   *
+   * **Mas ele NÃO liga `travaVigente`**, e a diferença é deliberada: `travaVigente`
+   * é o que acende "Devolver ao automático", e devolver não desfaz um opt-out — o
+   * `stopGate` recusaria na mesma. Um botão que aparece e não pode funcionar é
+   * controle decorativo, que é pior que ausência de botão.
+   */
+  is_blocked?: boolean | null;
 }
 
 export type Comando =
@@ -95,7 +109,12 @@ export type MotivoDoSilencio =
   /** Alguém pausou de propósito, ou o automático passou o caso para uma pessoa. */
   | "pausado"
   /** Janela deslizante do envio manual. Ação: NENHUMA — volta sozinho. */
-  | "resposta_humana_recente";
+  | "resposta_humana_recente"
+  /**
+   * `contacts.is_blocked` — o cliente pediu para sair. Ação: NENHUMA no
+   * automático; quem decide reabrir é o cliente, não a equipe.
+   */
+  | "contato_descadastrado";
 
 export interface ComandoDaConversa {
   comando: Comando;
@@ -126,8 +145,30 @@ export interface ComandoDaConversa {
 
 /** O literal que o PostgREST devolve para `timestamptz 'infinity'`. */
 const INFINITO = "infinity";
+/**
+ * O gêmeo do INFINITO, e ele NÃO é silêncio.
+ *
+ * `new Date("-infinity")` também é `Invalid Date`, então sem este ramo ele cairia
+ * no fallback de "data ilegível = calado" — e o Postgres, que é quem grava,
+ * discorda: `'-infinity' > now()` é **false**. Enquanto a regra vivia só no
+ * TypeScript a divergência não tinha como aparecer; a partir do momento em que o
+ * banco calcula o mesmo comando, ela vira uma linha vermelha no espelho.
+ * Quem está certo é o banco: `-infinity` é um instante no passado infinito, ou
+ * seja, um silêncio que já venceu.
+ */
+const MENOS_INFINITO = "-infinity";
 
-const STATUS_ENCERRADOS = new Set(["closed", "archived"]);
+/**
+ * `resolved` entra, e a razão de ele não estar aqui antes é uma pergunta
+ * diferente: `CONVERSATION_TERMINAL_STATUSES` responde "o que o `exclude_finished`
+ * esconde", enquanto este conjunto responde "quem manda". São vizinhos e não são
+ * o mesmo — mas para a pergunta do comando, conversa resolvida é conversa que
+ * acabou, e deixá-la de fora punha uma conversa resolvida e sem dono na Fila.
+ * Medido em 2026-08-30: nenhum código de produção escreve
+ * `conversations.status='resolved'` (só há leitores), então isto não muda nada
+ * hoje — e passa a importar no instante em que o banco calcular o mesmo comando.
+ */
+const STATUS_ENCERRADOS = new Set(["closed", "archived", "resolved"]);
 
 /**
  * O silêncio, lido do jeito que o Postgres o entrega.
@@ -149,11 +190,12 @@ const STATUS_ENCERRADOS = new Set(["closed", "archived"]);
  * tranquilizadora que a doutrina proíbe — falha fechada na ação, aberta na
  * informação. `INFINITO` fica nomeado porque é quem o leitor vem procurar.
  */
-function silencioVigente(
+export function silencioVigente(
   valor: string | null | undefined,
   agora: Date,
 ): { vigente: boolean; duravel: boolean; ate: Date | null } {
   if (valor === null || valor === undefined) return { vigente: false, duravel: false, ate: null };
+  if (valor === MENOS_INFINITO) return { vigente: false, duravel: false, ate: null };
   const ate = new Date(valor);
   if (valor === INFINITO || Number.isNaN(ate.getTime())) {
     return { vigente: true, duravel: true, ate: null };
@@ -164,6 +206,7 @@ function silencioVigente(
 export function comandoDaConversa(fatos: FatosDoComando, agora: Date = new Date()): ComandoDaConversa {
   const silencio = silencioVigente(fatos.bot_silenced_until, agora);
   const travado = fatos.force_human === true;
+  const bloqueado = fatos.is_blocked === true;
   const encerrada = STATUS_ENCERRADOS.has(fatos.status);
 
   const comando: Comando = fatos.assigned_to_user_id
@@ -176,7 +219,7 @@ export function comandoDaConversa(fatos: FatosDoComando, agora: Date = new Date(
       ? { quem: "encerrada" }
       : // Sem dono: quem manda depende do automático estar de pé. Calado e sem
         // dono é a conversa que o automático escalou e ninguém pegou — a fila.
-        silencio.vigente || travado
+        silencio.vigente || travado || bloqueado
         ? { quem: "aguardando" }
         : fatos.automaticoDaOrg === false
           ? { quem: "ninguem" }
@@ -193,28 +236,35 @@ export function comandoDaConversa(fatos: FatosDoComando, agora: Date = new Date(
    */
   const comandoFinal: Comando = comando;
 
-  const automaticoAtivo = !encerrada && !travado && !silencio.vigente;
+  const automaticoAtivo = !encerrada && !travado && !bloqueado && !silencio.vigente;
 
   const motivo: MotivoDoSilencio | null = automaticoAtivo
     ? null
     : encerrada
       ? null // Encerrada não é silêncio: é ausência de assunto. O estado já diz.
-      : travado
-        ? "contato_travado"
-        : // Ordem importa: a trava do CONTATO é mais forte e mais ampla que a da
-          // conversa, então ela nomeia o motivo mesmo havendo silêncio local —
-          // senão a tela ofereceria "devolver ao automático" explicando o motivo
-          // menor, e a pessoa clicaria esperando o efeito errado.
-          silencio.duravel
-          ? fatos.assigned_to_user_id
-            ? "atendente_no_comando"
-            : "pausado"
-          : "resposta_humana_recente";
+      : bloqueado
+        ? // ANTES de `travado`, de propósito: quando as duas valem, é o opt-out que
+          // decide a AÇÃO — não há nenhuma. Nomear a trava menor faria a tela
+          // sugerir um "devolver" que o `stopGate` recusaria na sequência.
+          "contato_descadastrado"
+        : travado
+          ? "contato_travado"
+          : // Ordem importa: a trava do CONTATO é mais forte e mais ampla que a da
+            // conversa, então ela nomeia o motivo mesmo havendo silêncio local —
+            // senão a tela ofereceria "devolver ao automático" explicando o motivo
+            // menor, e a pessoa clicaria esperando o efeito errado.
+            silencio.duravel
+            ? fatos.assigned_to_user_id
+              ? "atendente_no_comando"
+              : "pausado"
+            : "resposta_humana_recente";
 
   return {
     comando: comandoFinal,
     automaticoAtivo,
-    travaVigente: travado || silencio.vigente,
+    // `bloqueado` ANULA a trava devolvível: veja o comentário de `is_blocked` em
+    // `FatosDoComando`. Devolver não desfaz opt-out, e o botão seria decorativo.
+    travaVigente: (travado || silencio.vigente) && !bloqueado,
     motivo,
     silencioAte: motivo === "resposta_humana_recente" ? silencio.ate : null,
   };
@@ -243,4 +293,121 @@ export const ROTULO_DO_MOTIVO: Record<MotivoDoSilencio, string> = {
   contato_travado: "Automático pausado para este cliente",
   pausado: "Automático pausado",
   resposta_humana_recente: "Automático volta em instantes",
+  contato_descadastrado: "Cliente pediu para não receber mensagens",
 };
+
+/**
+ * O VOCABULÁRIO QUE O BANCO FALA — quatro, não cinco.
+ *
+ * `fn_comando_da_conversa` (migration 0202) devolve estes quatro. `ninguem` fica
+ * de fora de propósito: ele não é um estado diferente, é o mesmo balde do
+ * `automatico` renomeado quando a ORG não tem nenhum agente no ar — e "a org tem
+ * automático?" é um fato org-wide que o SQL só saberia reproduzindo
+ * `agenteAtende` inteiro dentro do banco. Seria a regra duplicada de novo, agora
+ * numa terceira encarnação.
+ *
+ * Quem sabe o fato da org é o servidor, e ele o aplica escolhendo o CONJUNTO de
+ * comandos que a aba pede — ver `comandosDaFila`.
+ */
+export const COMANDOS_DO_BANCO = ["humano", "automatico", "aguardando", "encerrada"] as const;
+export type ComandoDoBanco = (typeof COMANDOS_DO_BANCO)[number];
+
+/**
+ * O QUE A ABA "FILA" PEDE, e é aqui que o fato org-wide entra.
+ *
+ * Numa org COM automático de pé, "precisa de uma pessoa agora" é `aguardando`: o
+ * resto o robô atende. Numa org SEM automático nenhum, `automatico` não descreve
+ * ninguém — não há robô — e essas conversas também estão esperando gente; deixá-las
+ * fora faria a Fila de uma instalação recém-instalada nascer VAZIA com dezenas de
+ * clientes sem resposta, que é o pior estado possível na primeira impressão.
+ *
+ * `undefined` ("não sei", leitura em andamento ou que falhou) segue a mesma
+ * convenção do resto do arquivo: assume que HÁ automático. Errar para o lado de
+ * mostrar menos na fila é recuperável em ~200ms; errar para o outro pinta 83
+ * linhas de trabalho humano que não existe.
+ */
+export function comandosDaFila(automaticoDaOrg?: boolean): ComandoDoBanco[] {
+  return automaticoDaOrg === false ? ["aguardando", "automatico"] : ["aguardando"];
+}
+
+/**
+ * A ORDEM DA FILA, num lugar só — mais tempo esperando primeiro.
+ *
+ * ─── A régua é a mensagem mais ANTIGA sem resposta, não a última (issue #990) ─
+ *
+ * A ordem era por `last_inbound_at`, a ÚLTIMA mensagem do cliente — e essa coluna
+ * é reescrita a cada mensagem nova (`fn_mark_conversation_message`, migration
+ * 0267). O efeito era o oposto do pretendido: o cliente que insiste (pergunta,
+ * cobra, escreve de novo) REINICIAVA a própria espera e descia para o fim da
+ * fila, atrás de quem escreveu uma vez e ficou quieto. Não é uma lista
+ * desordenada na tela — é a pessoa que mais está tentando ser atendida sendo a
+ * última a ser atendida.
+ *
+ * A régua passa a ser `awaiting_since`: o instante da mensagem do cliente mais
+ * antiga que ninguém respondeu ainda (min(sent_at) dos inbound posteriores a
+ * `last_outbound_at`, no atendimento em curso). Ela é COLUNA, e não expressão,
+ * porque a ordem da Fila é um `order by` pedido ao PostgREST pela rota da lista e
+ * o PostgREST ordena por coluna — a expressão mora em `messages` e depende de
+ * `last_outbound_at`.
+ *
+ * `last_message_at` continua fora: ele anda quando o atendente responde (a
+ * conversa que o cliente abandonou há dois dias volta ao topo assim que ele
+ * recebe uma resposta hoje), e `created_at` pode ser de uma conversa antiga
+ * reaberta. `nullsFirst: false` põe quem nunca recebeu mensagem no fim; o `id` é
+ * o desempate, e sem ele duas conversas com o mesmo instante trocam de lugar
+ * entre duas leituras — a linha "pula" sozinha na tela.
+ *
+ * Quem consome: a rota da lista (`app/api/v1/conversations/_handler.ts`, a aba
+ * Fila), o mapa de posições e o resumo da fila (`lib/routing/queue.ts` — o "3º"
+ * que o atendente lê na linha e o número que o cliente ouve no WhatsApp) e a
+ * pílula "Aguardando há…" com a hora do canto da linha
+ * (`components/inbox/ConversationListItem.tsx`, via `esperaDaConversa`). Enquanto
+ * cada um escrevia a sua, a mesma conversa podia aparecer em 2º numa e 5ª na
+ * outra — ordenada por uma pergunta e numerada por outra, com a espera da linha
+ * dizendo um tempo que a ordem não respeitava —, sem nada ficar vermelho.
+ */
+/**
+ * "Este pedido é o da Fila?" — a mesma pergunta na rota e na lista.
+ *
+ * A ordem já mora em `ORDEM_DA_ESPERA`, mas o PREDICADO que decide se ela vale
+ * continuava escrito duas vezes: em `app/api/v1/conversations/_handler.ts` (que
+ * ordena) e em `components/inbox/ConversationList.tsx` (que numera "1º, 2º…" e
+ * mostra o tempo de espera). Ganhar uma condição num só dos dois — uma aba nova,
+ * um filtro — produz a tela ordenada por uma pergunta e numerada por outra, sem
+ * nada ficar vermelho. É a mesma classe que o #994 veio fechar para a ordem.
+ */
+export function ehAFila(f: {
+  comando?: readonly string[] | null;
+  assigned_to?: string | null;
+}): boolean {
+  return f.comando?.includes("aguardando") ?? f.assigned_to === "unassigned";
+}
+
+export const ORDEM_DA_ESPERA = {
+  coluna: "awaiting_since",
+  opcoes: { ascending: true, nullsFirst: false },
+} as const;
+
+/**
+ * O INSTANTE que a Fila trata como espera, para quem já tem a linha na mão — a
+ * contraparte de `ORDEM_DA_ESPERA`, que é a COLUNA pedida ao banco.
+ *
+ * Existe porque o mesmo instante é mostrado em dois lugares da linha (a pílula
+ * "Aguardando há…" e a hora do canto) e o valor não pode sair de duas cadeias de
+ * fallback escritas à mão: `?? created_at` num lugar e `?? last_message_at` no
+ * outro é exatamente a divergência de 40px que a #464 fechou.
+ *
+ * `awaiting_since` é a régua (migration 0267). `last_inbound_at` fica no meio da
+ * cadeia por um motivo com prazo: entre o deploy deste código e a migration
+ * aplicada, a coluna ainda não vem na linha que o realtime entrega, e sem esse
+ * degrau a Fila inteira mostraria a data de criação — uma tela plausível e
+ * errada. `created_at` é o último degrau, para a conversa que nunca recebeu
+ * mensagem do cliente.
+ */
+export function esperaDaConversa(c: {
+  awaiting_since?: string | null;
+  last_inbound_at?: string | null;
+  created_at?: string | null;
+}): string | null {
+  return c.awaiting_since ?? c.last_inbound_at ?? c.created_at ?? null;
+}

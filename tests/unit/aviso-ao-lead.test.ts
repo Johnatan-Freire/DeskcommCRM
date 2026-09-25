@@ -39,10 +39,6 @@ import { SPINNING_DEFAULTS } from "@/lib/agent-engine/spinning/defaults";
 /** Lead fixo — o sorteio de variante é por hash, então o texto é reprodutível. */
 const LEAD = "11111111-1111-4111-8111-111111111111";
 
-function disponibilidade(disponiveis: number, total: number): QuemPodeAssumir {
-  return { disponiveis, total, motivoEHorario: false, agendas: [] };
-}
-
 const MOTIVOS: MotivoDoAviso[] = [
   "pediu_humano",
   "suspeita_de_opt_out",
@@ -51,9 +47,9 @@ const MOTIVOS: MotivoDoAviso[] = [
 ];
 const ESTADOS: Array<{ rotulo: string; quem: QuemPodeAssumir | null }> = [
   { rotulo: "leitura falhou", quem: null },
-  { rotulo: "instalação fresca", quem: disponibilidade(0, 0) },
-  { rotulo: "fora de expediente", quem: disponibilidade(0, 3) },
-  { rotulo: "com gente livre", quem: disponibilidade(2, 3) },
+  { rotulo: "instalação fresca", quem: { disponiveis: 0, total: 0 } },
+  { rotulo: "fora de expediente", quem: { disponiveis: 0, total: 3 } },
+  { rotulo: "com gente livre", quem: { disponiveis: 2, total: 3 } },
 ];
 
 describe("motivoDoAviso traduz o que o banco grava", () => {
@@ -76,25 +72,25 @@ describe("motivoDoAviso traduz o que o banco grava", () => {
 
 describe("o texto respeita o estado REAL da equipe", () => {
   it("instalação sem ninguém configurado: registra, não promete prazo", () => {
-    const t = textoDoAviso("pediu_humano", disponibilidade(0, 0), LEAD);
+    const t = textoDoAviso("pediu_humano", { disponiveis: 0, total: 0 }, LEAD);
     expect(t).toMatch(/registr|anotad|primeira oportunidade/i);
     expect(t).not.toMatch(/aguard/i);
   });
 
   it("leitura falhou é tratado como 'não sei' — mesma cautela", () => {
     const semLeitura = textoDoAviso("pediu_humano", null, LEAD);
-    const semEquipe = textoDoAviso("pediu_humano", disponibilidade(0, 0), LEAD);
+    const semEquipe = textoDoAviso("pediu_humano", { disponiveis: 0, total: 0 }, LEAD);
     expect(semLeitura).toBe(semEquipe);
   });
 
   it("equipe existe mas ninguém livre: não convida a aguardar", () => {
-    const t = textoDoAviso("pediu_humano", disponibilidade(0, 3), LEAD);
+    const t = textoDoAviso("pediu_humano", { disponiveis: 0, total: 3 }, LEAD);
     expect(t).toMatch(/ninguém|não há atendente/i);
     expect(t).not.toMatch(/aguarde só um momento|é só aguardar/i);
   });
 
   it("com gente livre: convida a aguardar na conversa", () => {
-    const t = textoDoAviso("pediu_humano", disponibilidade(2, 3), LEAD);
+    const t = textoDoAviso("pediu_humano", { disponiveis: 2, total: 3 }, LEAD);
     expect(t).toMatch(/aguard|fica por aqui/i);
   });
 
@@ -130,8 +126,8 @@ describe("quem pediu para PARAR não recebe oferta de atendimento", () => {
 
 describe("o aviso é determinístico por lead e variado entre leads", () => {
   it("mesmo lead, mesma frase — sempre", () => {
-    const a = textoDoAviso("pediu_humano", disponibilidade(1, 1), LEAD);
-    const b = textoDoAviso("pediu_humano", disponibilidade(1, 1), LEAD);
+    const a = textoDoAviso("pediu_humano", { disponiveis: 1, total: 1 }, LEAD);
+    const b = textoDoAviso("pediu_humano", { disponiveis: 1, total: 1 }, LEAD);
     expect(a).toBe(b);
   });
 

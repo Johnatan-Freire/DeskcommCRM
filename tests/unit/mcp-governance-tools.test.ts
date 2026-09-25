@@ -237,6 +237,20 @@ describe("crm_manage_tags", () => {
     expect(cap.updates).toContainEqual({ table: "contacts", values: { tags: ["novo"] } });
   });
 
+  // O que já estava gravado pode estar em caixa mista no banco (dado anterior à
+  // #1224): sem normalizar o que está lá, `remove: ["vip"]` não alcança o "VIP" e
+  // o marcador fica impossível de tirar pela MCP.
+  it("contact: remove alcança o marcador gravado em caixa mista", async () => {
+    const cap = makeCap();
+    const res = (await crmManageTags.handler(
+      { target_kind: "contact", target_id: CONV, add: undefined, remove: ["vip"] },
+      makeCtx(withTags("contacts", ["VIP"]), cap),
+    )) as { tags: string[] };
+
+    expect(res.tags).toEqual([]);
+    expect(cap.updates).toContainEqual({ table: "contacts", values: { tags: [] } });
+  });
+
   it("tag > 40 chars rejeitada", async () => {
     const cap = makeCap();
     await expect(
@@ -287,15 +301,21 @@ describe("crm_get_queue_status", () => {
   const now = new Date("2026-07-18T12:00:00.000Z");
   // Fila: 3 conversas esperando 10/20/30s ⇒ avg 20s. 2 atendentes elegíveis.
   const resolve: Resolver = (q) => {
-    if (q.table === "conversations" && q.select === "last_inbound_at") {
+    if (q.table === "conversations" && q.select === "awaiting_since") {
       return {
         data: [
-          { last_inbound_at: new Date(now.getTime() - 10_000).toISOString() },
-          { last_inbound_at: new Date(now.getTime() - 20_000).toISOString() },
-          { last_inbound_at: new Date(now.getTime() - 30_000).toISOString() },
+          { awaiting_since: new Date(now.getTime() - 10_000).toISOString() },
+          { awaiting_since: new Date(now.getTime() - 20_000).toISOString() },
+          { awaiting_since: new Date(now.getTime() - 30_000).toISOString() },
         ],
         error: null,
       };
+    }
+    if (q.table === "user_organizations") {
+      return { data: [{ user_id: USER_A }, { user_id: USER_B }], error: null };
+    }
+    if (["channel_sessions", "channel_routing_policies", "channel_routing_responsibles"].includes(q.table)) {
+      throw new Error("organization_summary must not resolve an individual channel policy");
     }
     if (q.table === "attendant_availability") {
       return {
@@ -318,6 +338,25 @@ describe("crm_get_queue_status", () => {
       now,
     );
     expect(res).toEqual({ queue_size: 3, avg_wait_seconds: 20, online_eligible_count: 2 });
+  });
+
+  it("disponibilidade sem membership ativa não conta como elegível", async () => {
+    const onlyA: Resolver = (q) => q.table === "user_organizations"
+      ? { data: [{ user_id: USER_A }], error: null } : resolve(q);
+    const res = await getQueueStatus(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      makeSupabase(onlyA, makeCap()) as any, ORG, now,
+    );
+    expect(res).toEqual({ queue_size: 3, avg_wait_seconds: 20, online_eligible_count: 1 });
+  });
+
+  it("erro ao ler membership não é publicado como zero elegíveis", async () => {
+    const failed: Resolver = (q) => q.table === "user_organizations"
+      ? { data: null, error: { message: "membership unavailable" } } : resolve(q);
+    await expect(getQueueStatus(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      makeSupabase(failed, makeCap()) as any, ORG, now,
+    )).rejects.toThrow("membership unavailable");
   });
 
   it("tool handler retorna o shape documentado", async () => {

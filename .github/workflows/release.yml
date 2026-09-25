@@ -9,13 +9,16 @@ name: release
 # o GITHUB_TOKEN não cria novo workflow run.
 #
 # O segundo ato do upstream (cortar a tag `vX.Y.Z` automaticamente ao merge
-# deste PR) foi removido NESTE FORK: exigia um GitHub App próprio
-# (RELEASE_APP_ID/RELEASE_APP_PRIVATE_KEY) que este fork não tem, e falhava em
-# TODO push na main — inclusive quem nunca mexeu em release. Esta instalação
-# não usa versão numerada: o deploy é a cada merge na main, direto pela imagem
-# `latest` (ver `.github/workflows/deploy.yml`). Se um dia este fork quiser
-# publicar releases numeradas de verdade, é só criar o GitHub App, cadastrar os
-# dois secrets e trazer de volta o job `cortar-tag` do upstream.
+# deste PR, publicar a release, conferir as três/quatro imagens no GHCR, o
+# canal `stable` e a vitrine da LP) foi removido NESTE FORK: exigia um GitHub
+# App próprio (RELEASE_APP_ID/RELEASE_APP_PRIVATE_KEY) que este fork não tem, e
+# o job `push:branches:[main]` falhava em TODO push na main — inclusive quem
+# nunca mexeu em release. Esta instalação não usa versão numerada: o deploy é
+# a cada merge na main, direto pela imagem `latest` (ver
+# `.github/workflows/deploy.yml`). Se um dia este fork quiser publicar
+# releases numeradas de verdade, é só criar o GitHub App, cadastrar os dois
+# secrets e trazer de volta o job `cortar-tag` do upstream — nenhuma melhoria
+# dele foi perdida, só não roda sem o App.
 
 on:
   workflow_dispatch: {}
@@ -32,7 +35,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/create-github-app-token@v2
+      - uses: actions/create-github-app-token@v3
         id: token
         with:
           app-id: ${{ secrets.RELEASE_APP_ID }}
@@ -45,12 +48,10 @@ jobs:
           fetch-depth: 0
           token: ${{ steps.token.outputs.token }}
 
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
+      - uses: ./.github/actions/preparar-node
+        # O teto do preâmbulo mora aqui porque passo de composite action não
+        # aceita `timeout-minutes`. Razão e medições: o cabeçalho da action.
+        timeout-minutes: 5
 
       - name: Calcular o número e montar a seção
         id: corte
@@ -84,4 +85,3 @@ jobs:
           } > /tmp/corpo.md
           gh pr create --base main --head "release/${VERSAO}" \
             --title "Release ${VERSAO}" --body-file /tmp/corpo.md
-

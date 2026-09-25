@@ -1,8 +1,11 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
+import { randomId } from "@/lib/random-id";
 import { toast } from "sonner";
+import { useT } from "@/hooks/i18n/useT";
 
+import { PairingOptions } from "@/components/connections/PairingOptions";
 import { Button } from "@/components/ui/button";
 import { skipWhatsapp, markWhatsappConfigured } from "@/app/actions/onboarding/skipWhatsapp";
 import { CanalOficialClient } from "@/components/connections/CanalOficialClient";
@@ -68,35 +71,35 @@ function isRedirectError(err: unknown): boolean {
  * O estado do pareamento em palavras — nunca o enum do transporte.
  * Cada linha responde "e agora?", que é a pergunta de quem está olhando.
  */
-function rotuloDoEstado(s: Status): string {
+function rotuloDoEstado(s: Status, t: (texto: string) => string): string {
   switch (s) {
     case "SCAN_QR_CODE":
-      return "Pronto para conectar";
+      return t("Pronto para conectar");
     case "STARTING":
     case "INIT":
-      return "Preparando o código…";
+      return t("Preparando o código…");
     case "WORKING":
-      return "Conectado!";
+      return t("Conectado!");
     case "FAILED":
-      return "O código expirou";
+      return t("O código expirou");
     default:
-      return "Não consegui falar com o WhatsApp";
+      return t("Não consegui falar com o WhatsApp");
   }
 }
 
-function explicacaoDoEstado(s: Status): string {
+function explicacaoDoEstado(s: Status, t: (texto: string) => string): string {
   switch (s) {
     case "SCAN_QR_CODE":
-      return "Escaneie o código abaixo com o celular que vai atender.";
+      return t("Escolha QR Code ou código de pareamento e confirme no WhatsApp do celular.");
     case "STARTING":
     case "INIT":
-      return "Isso leva alguns segundos. O código aparece aqui sozinho.";
+      return t("Isso leva alguns segundos. O código aparece aqui sozinho.");
     case "WORKING":
-      return "O número está no ar. Seguindo para o próximo passo.";
+      return t("O número está no ar. Seguindo para o próximo passo.");
     case "FAILED":
-      return "É normal — ele vale poucos minutos. Dá para gerar outro.";
+      return t("É normal — ele vale poucos minutos. Dá para gerar outro.");
     default:
-      return "O serviço roda no seu servidor e não respondeu agora.";
+      return t("O serviço roda no seu servidor e não respondeu agora.");
   }
 }
 
@@ -147,6 +150,7 @@ function Escolha({
 
 /** Voltar à pergunta. Escolher errado não pode ser uma porta que tranca. */
 function VoltarParaEscolha({ onVoltar }: { onVoltar: () => void }) {
+  const t = useT();
   return (
     <button
       type="button"
@@ -154,7 +158,7 @@ function VoltarParaEscolha({ onVoltar }: { onVoltar: () => void }) {
       onClick={onVoltar}
       className="text-xs text-muted-foreground underline underline-offset-4 hover:text-foreground"
     >
-      ← Escolher outra forma
+      ← {t("Escolher outra forma")}
     </button>
   );
 }
@@ -168,6 +172,7 @@ function VoltarParaEscolha({ onVoltar }: { onVoltar: () => void }) {
  * Aqui, nenhuma escolha — nem a pergunta em si — deixa a pessoa sem saída.
  */
 function Saidas({ status, sessionName }: { status: Status; sessionName: string }) {
+  const t = useT();
   const [pending, startTransition] = useTransition();
   return (
     <div className="flex flex-wrap gap-2 pt-2">
@@ -181,12 +186,12 @@ function Saidas({ status, sessionName }: { status: Status; sessionName: string }
               await skipWhatsapp();
             } catch (err) {
               if (isRedirectError(err)) throw err;
-              toast.error("Falha ao pular: " + String(err));
+              toast.error(`${t("Falha ao pular:")} ${String(err)}`);
             }
           })
         }
       >
-        Pular por enquanto
+        {t("Pular por enquanto")}
       </Button>
       <Button
         type="button"
@@ -200,12 +205,12 @@ function Saidas({ status, sessionName }: { status: Status; sessionName: string }
               );
             } catch (err) {
               if (isRedirectError(err)) throw err;
-              toast.error("Falha ao marcar passo: " + String(err));
+              toast.error(`${t("Falha ao marcar passo:")} ${String(err)}`);
             }
           })
         }
       >
-        Conectei em outro lugar
+        {t("Conectei em outro lugar")}
       </Button>
     </div>
   );
@@ -216,8 +221,11 @@ export function ConnectWhatsappClient({
   sessionName,
   oficialPodeReceber,
 }: Props) {
+  const t = useT();
   const [pending, startTransition] = useTransition();
   const [forma, setForma] = useState<Forma | null>(null);
+  const createKey = useRef<string | null>(null);
+  const restartKey = useRef<string | null>(null);
   const [info, setInfo] = useState<SessionInfo>({ status: "INIT", session: sessionName });
   const [qrTick, setQrTick] = useState(0);
   const [qrFailed, setQrFailed] = useState(false);
@@ -239,7 +247,7 @@ export function ConnectWhatsappClient({
     (async () => {
       setBusy(true);
       try {
-        const res = await fetch("/api/v1/onboarding/whatsapp/session", { method: "POST" });
+        const res = await fetch("/api/v1/onboarding/whatsapp/session", { method: "POST", headers: { "Idempotency-Key": createKey.current ??= randomId() } });
         const json = (await res.json()) as { data?: SessionInfo; error?: { message?: string } };
         if (cancelled) return;
         if (json.data) {
@@ -254,7 +262,7 @@ export function ConnectWhatsappClient({
         setInfo({
           status: "ERROR",
           session: sessionName,
-          error: json.error?.message ?? `o servidor respondeu ${res.status}`,
+          error: json.error?.message ? t(json.error.message) : `${t("o servidor respondeu")} ${res.status}`,
         });
       } catch (err) {
         if (!cancelled) setInfo({ status: "ERROR", session: sessionName, error: String(err) });
@@ -265,7 +273,7 @@ export function ConnectWhatsappClient({
     return () => {
       cancelled = true;
     };
-  }, [forma, wahaConfigured, sessionName]);
+  }, [forma, wahaConfigured, sessionName, t]);
 
   // 2) Poll status every 3 seconds until WORKING/FAILED.
   //
@@ -303,32 +311,33 @@ export function ConnectWhatsappClient({
       }
     }, 3000);
     return () => clearInterval(id);
-  }, [forma, wahaConfigured, status, sessionName]);
+  }, [forma, wahaConfigured, status, sessionName, t]);
 
   // 3) When status → WORKING, auto-advance.
   useEffect(() => {
-    if (status !== "WORKING") return;
+    if (status !== "WORKING" || !info.session) return;
+    const confirmedSession = info.session;
     startTransition(async () => {
       try {
-        await markWhatsappConfigured(sessionName, "WORKING");
+        await markWhatsappConfigured(confirmedSession, "WORKING");
       } catch (err) {
         if (isRedirectError(err)) throw err;
-        toast.error("Falha ao avançar: " + String(err));
+        toast.error(`${t("Falha ao avançar:")} ${String(err)}`);
       }
     });
-  }, [status, sessionName]);
+  }, [status, info.session, t]);
 
   // Derruba a sessão morta e sobe outra. O polling volta sozinho porque `status`
   // sai de FAILED e o efeito que o observa roda de novo.
   async function restartSession() {
     setBusy(true);
     try {
-      const res = await fetch("/api/v1/onboarding/whatsapp/session?restart=1", { method: "POST" });
+      const res = await fetch("/api/v1/onboarding/whatsapp/session?restart=1", { method: "POST", headers: { "Idempotency-Key": restartKey.current ??= randomId() } });
       const json = (await res.json()) as { data?: SessionInfo };
-      if (json.data) setInfo(json.data);
-      else toast.error("Não consegui gerar outro código. Tente de novo em alguns segundos.");
+      if (json.data) { setInfo(json.data); restartKey.current = null; }
+      else toast.error(t("Não consegui gerar outro código. Tente de novo em alguns segundos."));
     } catch {
-      toast.error("Não consegui falar com o servidor. Confira sua conexão e tente de novo.");
+      toast.error(t("Não consegui falar com o servidor. Confira sua conexão e tente de novo."));
     } finally {
       setBusy(false);
     }
@@ -342,36 +351,39 @@ export function ConnectWhatsappClient({
     return (
       <div className="space-y-4 rounded-lg border bg-background p-6">
         <fieldset className="space-y-3">
-          <legend className="text-sm font-medium">Como você já usa esse número?</legend>
+          <legend className="text-sm font-medium">{t("Como você já usa esse número?")}</legend>
           <p className="text-xs text-muted-foreground">
-            Existe mais de um jeito de ter WhatsApp para empresa, e cada um conecta
-            de um jeito. Se você nunca ouviu falar dos outros dois, é o primeiro.
+            {t(
+              "Existe mais de um jeito de ter WhatsApp para empresa, e cada um conecta de um jeito. Se você nunca ouviu falar dos outros dois, é o primeiro.",
+            )}
           </p>
           <div className="grid gap-2">
             <Escolha
               valor="qr"
               atual={forma}
-              titulo="Leio um código com o celular"
-              corpo="É assim para quase todo mundo. Você abre o WhatsApp no celular que vai atender e aponta para um código que aparece aqui."
+              titulo={t("Uso o WhatsApp no celular")}
+              corpo={t(
+                "Conecte com QR Code ou digite um código de pareamento no WhatsApp do celular.",
+              )}
               onEscolher={setForma}
             />
             <Escolha
               valor="oficial"
               atual={forma}
-              titulo="Tenho conta oficial na Meta"
-              corpo="Você cadastrou o número na Meta e tem as credenciais em mãos. Não usa o celular para conectar."
+              titulo={t("Tenho conta oficial na Meta")}
+              corpo={t("Você cadastrou o número na Meta e tem as credenciais em mãos. Não usa o celular para conectar.")}
               onEscolher={setForma}
             />
             <Escolha
               valor="parceiro"
               atual={forma}
-              titulo="Contrato de um provedor parceiro"
-              corpo="Uma empresa parceira cuida do seu WhatsApp e te deu uma chave de acesso."
+              titulo={t("Contrato de um provedor parceiro")}
+              corpo={t("Uma empresa parceira cuida do seu WhatsApp e te deu uma chave de acesso.")}
               onEscolher={setForma}
             />
           </div>
         </fieldset>
-        <Saidas status={status} sessionName={sessionName} />
+        <Saidas status={status} sessionName={info.session ?? ""} />
       </div>
     );
   }
@@ -384,13 +396,12 @@ export function ConnectWhatsappClient({
         {forma === "oficial" && !oficialPodeReceber && (
           <div className="rounded-md border border-amber-300/60 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-500/40 dark:bg-amber-950/40 dark:text-amber-100">
             <p className="font-medium">
-              Este servidor ainda não está pronto para RECEBER por este caminho.
+              {t("Este servidor ainda não está pronto para RECEBER por este caminho.")}
             </p>
             <p className="mt-1">
-              Dá para conectar e já enviar, mas as respostas do cliente não vão chegar
-              até quem instalou o sistema completar uma configuração no servidor. Se
-              você quer atender hoje, o caminho do código com o celular funciona agora
-              — e dá para trocar depois, sem perder nada.
+              {t(
+                "Dá para conectar e já enviar, mas as respostas do cliente não vão chegar até quem administra a instalação cadastrar o App da Meta, em Admin › API Oficial (Meta). Se você quer atender hoje, o caminho do código com o celular funciona agora — e dá para trocar depois, sem perder nada.",
+              )}
             </p>
           </div>
         )}
@@ -400,7 +411,7 @@ export function ConnectWhatsappClient({
             contra o outro lado ANTES de gravar — e duas cópias divergem. */}
         {forma === "oficial" ? <CanalOficialClient /> : <CanalParceiroClient />}
 
-        <Saidas status={status} sessionName={sessionName} />
+        <Saidas status={status} sessionName={info.session ?? ""} />
       </div>
     );
   }
@@ -410,11 +421,11 @@ export function ConnectWhatsappClient({
       <VoltarParaEscolha onVoltar={() => setForma(null)} />
       {!wahaConfigured && (
         <div className="rounded-md border border-amber-300/60 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-500/40 dark:bg-amber-950/40 dark:text-amber-100">
-          <p className="font-medium">O WhatsApp desta instalação ainda não subiu.</p>
+          <p className="font-medium">{t("O WhatsApp desta instalação ainda não subiu.")}</p>
           <p className="mt-1">
-            Ele roda no seu próprio servidor. Dá para seguir sem ele agora e conectar o
-            número depois, em <strong>Canais › Conexões</strong> — seu funcionário fica
-            pronto de qualquer jeito, só não terá por onde atender ainda.
+            {t("Ele roda no seu próprio servidor. Dá para seguir sem ele agora e conectar o número depois, em")}{" "}
+            <strong>{t("Canais › Conexões")}</strong> —{" "}
+            {t("seu funcionário fica pronto de qualquer jeito, só não terá por onde atender ainda.")}
           </p>
         </div>
       )}
@@ -430,8 +441,8 @@ export function ConnectWhatsappClient({
             em "INIT", sem código, sem erro e sem próximo passo. A pessoa olha
             uma palavra que não significa nada e não sabe se espera ou desiste.
           */}
-          <p className="text-sm font-medium">{rotuloDoEstado(busy ? "STARTING" : status)}</p>
-          <p className="mt-1 text-xs text-muted-foreground">{explicacaoDoEstado(busy ? "STARTING" : status)}</p>
+          <p className="text-sm font-medium">{rotuloDoEstado(busy ? "STARTING" : status, t)}</p>
+          <p className="mt-1 text-xs text-muted-foreground">{explicacaoDoEstado(busy ? "STARTING" : status, t)}</p>
 
           {/*
             O CÓDIGO EM SI. `showQr` já existia calculado (e o `qrTick` já era
@@ -447,44 +458,47 @@ export function ConnectWhatsappClient({
             o cache do navegador a cada novo código — sem ele, a mesma URL não
             recarregaria a imagem quando o WAHA girasse o QR por trás.
           */}
-          {showQr && (
+          {showQr && info.channel_session_id && (
+            <PairingOptions key={info.channel_session_id} sessionId={info.channel_session_id} qr={
             <div className="mt-3 flex flex-col items-center gap-2">
               {qrFailed ? (
                 <p className="text-xs text-muted-foreground">
-                  Não consegui carregar o código agora. Ele deve reaparecer sozinho em
-                  instantes — se não aparecer, gere outro abaixo.
+                  {t(
+                    "Não consegui carregar o código agora. Ele deve reaparecer sozinho em instantes — se não aparecer, gere outro abaixo.",
+                  )}
                 </p>
               ) : (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
                   key={qrTick}
                   src={`/api/v1/onboarding/whatsapp/qr?t=${qrTick}`}
-                  alt="Código QR para conectar o WhatsApp"
+                  alt={t("Código QR para conectar o WhatsApp")}
                   className="h-48 w-48 rounded-md border bg-white object-contain sm:h-56 sm:w-56"
                   onError={() => setQrFailed(true)}
                   onLoad={() => setQrFailed(false)}
                 />
               )}
             </div>
+            } />
           )}
 
           {status === "WORKING" && (
             <p className="mt-3 text-sm font-medium text-emerald-700 dark:text-emerald-400">
-              ✓ Conectado! Avançando…
+              ✓ {t("Conectado! Avançando…")}
             </p>
           )}
 
           {status === "FAILED" && (
             <div className="mt-3 space-y-2">
               <p className="text-sm text-destructive">
-                O código expirou antes de alguém escanear. É normal — ele vale só alguns minutos.
+                {t("O código expirou antes de alguém escanear. É normal — ele vale só alguns minutos.")}
               </p>
               <p className="text-xs text-muted-foreground">
-                Deixe o WhatsApp já aberto em <strong>Aparelhos conectados</strong> antes de gerar o
-                próximo, que aí dá tempo de sobra.
+                {t("Deixe o WhatsApp já aberto em")} <strong>{t("Aparelhos conectados")}</strong>{" "}
+                {t("antes de gerar o próximo, que aí dá tempo de sobra.")}
               </p>
               <Button type="button" size="sm" disabled={busy} onClick={restartSession}>
-                {busy ? "Gerando…" : "Gerar novo QR Code"}
+                {busy ? t("Gerando…") : t("Gerar novo QR Code")}
               </Button>
             </div>
           )}
@@ -492,23 +506,24 @@ export function ConnectWhatsappClient({
           {(status === "ERROR" || status === "NOT_STARTED" || status === "STOPPED") && (
             <div className="mt-3 space-y-2">
               <p className="text-sm">
-                O serviço de WhatsApp desta instalação não respondeu. Ele roda no seu
-                servidor, junto com o resto do sistema — quem instalou consegue religá-lo.
+                {t(
+                  "O serviço de WhatsApp desta instalação não respondeu. Ele roda no seu servidor, junto com o resto do sistema — quem instalou consegue religá-lo.",
+                )}
               </p>
               {info.error && (
                 <p className="text-xs text-muted-foreground">
-                  Detalhe técnico: <code className="break-all">{info.error}</code>
+                  {t("Detalhe técnico:")} <code className="break-all">{info.error}</code>
                 </p>
               )}
               <Button type="button" size="sm" variant="outline" disabled={busy} onClick={restartSession}>
-                {busy ? "Tentando…" : "Tentar de novo"}
+                {busy ? t("Tentando…") : t("Tentar de novo")}
               </Button>
             </div>
           )}
         </div>
       )}
 
-      <Saidas status={status} sessionName={sessionName} />
+      <Saidas status={status} sessionName={info.session ?? ""} />
     </div>
   );
 }

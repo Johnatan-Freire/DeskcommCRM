@@ -1,5 +1,5 @@
 /**
- * A CASCATA INTERROMPIDA SE COMPLETA SOZINHA — o segundo tempo.
+ * A CASCATA INTERROMPIDA SE COMPLETA SOZINHA — issue #310, o segundo tempo.
  *
  * ─── O que a rota, sozinha, não resolvia ────────────────────────────────────
  *
@@ -31,6 +31,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  MAX_CONTATOS_EXAMINADOS,
   MAX_CONTATOS_POR_VARREDURA,
   SUFIXO_ANONIMIZADO,
   type ClienteDaCascata,
@@ -100,13 +101,23 @@ function banco(linhas: Linha[]) {
 
   const cliente = {
     from(tabela: string) {
-      const casar = (filtros: Array<[string, unknown]>, dentro: string[] | null): Linha[] =>
+      const casar = (
+        filtros: Array<[string, unknown]>,
+        dentro: [string, string[]] | null,
+      ): Linha[] =>
         linhas.filter((l) => {
-          if (l.id.split(":")[0] !== tabela) return false;
+          if ((l.id.split(":")[0] ?? "") !== tabela) return false;
           for (const [col, val] of filtros) {
             if ((l as unknown as Record<string, unknown>)[col] !== val) return false;
           }
-          if (dentro && !dentro.includes(l.id)) return false;
+          // O `.in()` da cascata vem em DUAS colunas — `id` no UPDATE das
+          // atividades, `contact_id` na detecção em bloco. Um dublê que
+          // ignorasse a coluna casaria as duas na errada e daria verde falso.
+          if (dentro) {
+            const [col, vals] = dentro;
+            const valor = (l as unknown as Record<string, string | undefined>)[col];
+            if (valor === undefined || !vals.includes(valor)) return false;
+          }
           return true;
         });
 
@@ -115,15 +126,15 @@ function banco(linhas: Linha[]) {
         patch: Record<string, unknown>,
       ) => {
         const filtros: Array<[string, unknown]> = [];
-        let dentro: string[] | null = null;
+        let dentro: [string, string[]] | null = null;
         let teto: number | null = null;
         const q: Record<string, unknown> = {
           eq: (col: string, val: unknown) => {
             filtros.push([col, val]);
             return q;
           },
-          in: (_col: string, vals: string[]) => {
-            dentro = vals;
+          in: (col: string, vals: string[]) => {
+            dentro = [col, vals];
             return q;
           },
           limit: (n: number) => {
@@ -181,10 +192,10 @@ describe("varredura: a retomada acontece sem ninguém clicar", () => {
 
     expect(r.examinados).toBe(1);
     expect(r.completados).toHaveLength(1);
-    expect(r.completados[0].contactId).toBe("contacts:a");
-    expect(r.completados[0].organizationId).toBe(ORG);
-    expect(r.completados[0].resultado.leadsRedigidas).toEqual(["crm_leads:1"]);
-    expect(r.completados[0].resultado.atividadesRedigidas).toBe(1);
+    expect(r.completados[0]!.contactId).toBe("contacts:a");
+    expect(r.completados[0]!.organizationId).toBe(ORG);
+    expect(r.completados[0]!.resultado.leadsRedigidas).toEqual(["crm_leads:1"]);
+    expect(r.completados[0]!.resultado.atividadesRedigidas).toBe(1);
     // O estado FINAL, não só a intenção.
     expect(alvo.linhas.find((l) => l.id === "crm_leads:1")!.title).toBe(
       `Orçamento de telhado${SUFIXO_ANONIMIZADO}`,
@@ -249,16 +260,48 @@ describe("varredura: a retomada acontece sem ninguém clicar", () => {
     expect(alvo.linhas.find((l) => l.id === "crm_leads:minha")!.title).toContain(SUFIXO_ANONIMIZADO);
   });
 
-  it("o teto por rodada é respeitado e o resto é ANUNCIADO", async () => {
-    const muitos = Array.from({ length: 5 }, (_, i) => contatoAnonimizado(String(i)));
-    alvo = banco(muitos);
+  it("⭐ o teto limita o CONSERTO, não a leitura — e o resto é alcançado na rodada seguinte", async () => {
+    // A versão anterior tinha um teto só, aplicado como `limit` na consulta de
+    // contatos: toda rodada examinava os MESMOS primeiros N. Uma vez limpos,
+    // o cron rodava para sempre sem NUNCA alcançar o contato N+1 — starvation
+    // silenciosa, num prazo legal, com a trilha dizendo que tudo correu bem.
+    const linhas: Linha[] = [];
+    for (let i = 0; i < 5; i += 1) {
+      linhas.push(contatoAnonimizado(String(i)));
+      linhas.push({
+        id: `crm_leads:${i}`,
+        organization_id: ORG,
+        contact_id: `contacts:${i}`,
+        title: `Negócio ${i} com PII`,
+      });
+    }
+    alvo = banco(linhas);
 
-    const r = await varrerRedacoesIncompletas(alvo.cliente, 3);
+    const primeira = await varrerRedacoesIncompletas(alvo.cliente, 2);
 
-    expect(r.examinados).toBe(3);
+    // Examinou TODOS, consertou o teto, e disse que sobrou.
+    expect(primeira.examinados).toBe(5);
+    expect(primeira.comResiduo).toBe(5);
+    expect(primeira.completados).toHaveLength(2);
     // Silêncio aqui seria indistinguível de "acabou" — o mesmo erro que o laço
     // de lotes da poda evita com `temResto`.
-    expect(r.temResto).toBe(true);
+    expect(primeira.temResto).toBe(true);
+
+    // ⭐ A propriedade que a starvation quebrava: as rodadas seguintes AVANÇAM.
+    const vistos = new Set(primeira.completados.map((c) => c.contactId));
+    for (let rodada = 0; rodada < 3; rodada += 1) {
+      const r = await varrerRedacoesIncompletas(alvo.cliente, 2);
+      for (const c of r.completados) vistos.add(c.contactId);
+    }
+    expect(
+      vistos.size,
+      "o cron nunca alcançou os contatos além do teto — resíduo pendente para sempre",
+    ).toBe(5);
+    expect(alvo.linhas.filter((l) => l.title?.endsWith(SUFIXO_ANONIMIZADO))).toHaveLength(5);
+
+    const ultima = await varrerRedacoesIncompletas(alvo.cliente, 2);
+    expect(ultima.comResiduo, "sobrou resíduo depois de tudo consertado").toBe(0);
+    expect(ultima.temResto).toBe(false);
     expect(MAX_CONTATOS_POR_VARREDURA).toBeGreaterThan(0);
   });
 
@@ -270,6 +313,7 @@ describe("varredura: a retomada acontece sem ninguém clicar", () => {
         }),
       }),
     } as unknown as ClienteDaCascata;
+    expect(MAX_CONTATOS_EXAMINADOS).toBeGreaterThan(MAX_CONTATOS_POR_VARREDURA);
 
     const r = await varrerRedacoesIncompletas(cliente);
 
@@ -311,10 +355,12 @@ describe("o laço de retorno: a varredura deixa rastro por contato", () => {
   });
 
   it("⭐ o cron completa a cascata e audita NA ORG do contato, não numa linha global", async () => {
-    // Esta é a resposta ao DoD 13: a peça aparece na trilha de auditoria, que é
-    // tela consultável (`lgpd.anonymize_catchup` já está em AUDIT_ACTIONS, então
-    // entra no filtro do painel sozinho). Uma linha `retention.sweep_run` global
-    // não responderia ao titular — e é a auditoria que responde a ele.
+    // Esta é a resposta ao DoD 13: a peça aparece em `/app/audit`, que lista as
+    // linhas de `api_audit_log` e filtra por `action` digitada — conferido em
+    // `app/app/audit/_client.tsx`, que é campo livre e não uma lista fechada, ou
+    // seja, a linha aparece sem ninguém cadastrar nada. Uma linha
+    // `retention.sweep_run` global não responderia ao titular, e é a auditoria
+    // que responde a ele: por isso a org e o contato vão na linha.
     const b = banco([
       contatoAnonimizado(),
       { id: "crm_leads:1", organization_id: ORG, contact_id: "contacts:a", title: "Orçamento com PII" },
@@ -341,14 +387,46 @@ describe("o laço de retorno: a varredura deixa rastro por contato", () => {
   it("⭐ rodada sem resíduo NÃO audita — cron que resmunga é o defeito que a poda existe para não ser", async () => {
     // A outra direção do mesmo invariante que `cron-audita-so-quando-ha-efeito`
     // vigia: 365 linhas/ano numa instalação que não tem nada a corrigir.
+    // A atividade já redigida entra de propósito: sem ela este caso não
+    // discrimina o passo 3. Medido — com o filtro de resíduo das atividades
+    // removido, ele passava, e a sabotagem reprovava 4 casos em vez de 5.
     bancoDoCron = banco([
       contatoAnonimizado(),
       { id: "crm_leads:1", organization_id: ORG, contact_id: "contacts:a", title: `Feita${SUFIXO_ANONIMIZADO}` },
+      { id: "crm_lead_activities:1", organization_id: ORG, contact_id: "contacts:a", payload: { redacted: true } },
     ]);
 
     const { GET } = await import("@/app/api/v1/cron/data-retention/route");
     await GET(requisicaoAutorizada());
 
     expect(auditou, "auditou uma varredura que não fez nada").not.toHaveBeenCalled();
+  });
+});
+
+describe("a varredura não derruba a poda junto com ela", () => {
+  function requisicaoAutorizada() {
+    return { headers: new Headers({ authorization: "Bearer segredo" }) } as never;
+  }
+
+  it("⭐ varredura que EXPLODE não faz o cron auditar a poda como falha", async () => {
+    // Sem um try próprio, uma exceção aqui cairia no catch do handler: o cron
+    // responderia 500 e gravaria `retention.sweep_run { falhou: true }` num dia
+    // em que o expurgo do audit funcionou — a trilha passaria a mentir sobre a
+    // peça que ela existe para vigiar.
+    auditou.mockClear();
+    bancoDoCron = {
+      cliente: {
+        from: () => {
+          throw new Error("função ausente neste clone");
+        },
+      } as unknown as ClienteDaCascata,
+    };
+
+    const { GET } = await import("@/app/api/v1/cron/data-retention/route");
+    const resposta = await GET(requisicaoAutorizada());
+
+    expect(resposta.status, "a poda foi reportada como falha por causa da varredura").toBe(200);
+    const acoes = auditou.mock.calls.map((c) => (c[0] as { action: string }).action);
+    expect(acoes).not.toContain("retention.sweep_run");
   });
 });

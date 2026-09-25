@@ -358,7 +358,7 @@ describe("runAutomationForEvent — motor de regras (Task 8)", () => {
     expect(runsCount()).toBe(before);
   });
 
-  describe("corte de conexão (migration 0281)", () => {
+  describe("corte de conexão (migration 0398)", () => {
     const SESSION_HIST = "dddddddd-2222-4000-8000-000000000001";
     const CONTACT_HIST = "dddddddd-3333-4000-8000-000000000001";
     const CONV_HIST = "dddddddd-4444-4000-8000-000000000001";

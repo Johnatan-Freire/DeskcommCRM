@@ -16,13 +16,19 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { apiClient } from "@/lib/api/client";
 import type { VisibilityMode } from "@/lib/auth/types";
+import { PRAZO_MAX_MINUTOS, PRAZO_MIN_MINUTOS } from "@/lib/escalacao/devolucao-automatica";
 import { ROUTING_MODES, VISIBILITY_MODES, type RoutingMode } from "@/lib/schemas/routing";
+import { useT } from "@/hooks/i18n/useT";
 
 export interface AtendimentoConfig {
   mode: RoutingMode;
   max_retries: number;
   backoff_seconds: number;
   visibility_mode: VisibilityMode;
+  /** `null` = nunca devolve sozinho (o padrão do produto). */
+  handoff_return_after_minutes: number | null;
+  /** "A conversa fica com quem atendeu" — desligado é o padrão do produto. */
+  conversation_stays_with_attendant: boolean;
 }
 
 const MODO_COPY: Record<RoutingMode, { titulo: string; corpo: string }> = {
@@ -105,6 +111,7 @@ function Escolha({
 }
 
 export function AtendimentoForm({ initial }: { initial: AtendimentoConfig }) {
+  const t = useT();
   const [form, setForm] = useState<AtendimentoConfig>(initial);
   const [salvo, setSalvo] = useState<AtendimentoConfig>(initial);
   const [isPending, startTransition] = useTransition();
@@ -118,15 +125,17 @@ export function AtendimentoForm({ initial }: { initial: AtendimentoConfig }) {
    */
   const combinacaoMorta = form.visibility_mode === "own" && form.mode === "manual";
 
+  const devolveSozinho = form.handoff_return_after_minutes !== null;
+
   function salvar(e: React.FormEvent) {
     e.preventDefault();
     startTransition(async () => {
       try {
         await apiClient.patch("/api/v1/settings/routing", form);
         setSalvo(form);
-        toast.success("Distribuição de atendimento salva.");
+        toast.success(t("Distribuição de atendimento salva."));
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Não consegui salvar.");
+        toast.error(err instanceof Error ? t(err.message) : t("Não consegui salvar."));
       }
     });
   }
@@ -135,9 +144,9 @@ export function AtendimentoForm({ initial }: { initial: AtendimentoConfig }) {
     <form onSubmit={salvar} className="flex max-w-3xl flex-col gap-6" data-testid="form-atendimento">
       <Card className="space-y-4 p-4">
         <div>
-          <h2 className="text-sm font-semibold">Quem recebe o cliente novo</h2>
+          <h2 className="text-sm font-semibold">{t("Quem recebe o cliente novo")}</h2>
           <p className="text-xs text-muted-foreground">
-            Vale para conversa que chega sem dono.
+            {t("Vale para conversa que chega sem dono.")}
           </p>
         </div>
         <div className="space-y-2">
@@ -147,8 +156,8 @@ export function AtendimentoForm({ initial }: { initial: AtendimentoConfig }) {
               nome="modo"
               valor={m}
               atual={form.mode}
-              titulo={MODO_COPY[m].titulo}
-              corpo={MODO_COPY[m].corpo}
+              titulo={t(MODO_COPY[m].titulo)}
+              corpo={t(MODO_COPY[m].corpo)}
               disabled={isPending}
               onPick={(v) => setForm((f) => ({ ...f, mode: v as RoutingMode }))}
             />
@@ -158,7 +167,7 @@ export function AtendimentoForm({ initial }: { initial: AtendimentoConfig }) {
         {form.mode === "round_robin" ? (
           <div className="grid gap-4 border-t pt-4 sm:grid-cols-2">
             <div className="space-y-1">
-              <Label htmlFor="max_retries">Tentativas antes de desistir</Label>
+              <Label htmlFor="max_retries">{t("Tentativas antes de desistir")}</Label>
               <Input
                 id="max_retries"
                 type="number"
@@ -171,12 +180,15 @@ export function AtendimentoForm({ initial }: { initial: AtendimentoConfig }) {
                 }
               />
               <p className="text-xs text-muted-foreground">
-                Quando não há ninguém disponível, o sistema tenta de novo mais tarde. Ao
-                estourar, a conversa fica na fila esperando alguém.
+                {t(
+                  "Quando não há ninguém disponível, o sistema tenta de novo mais tarde. Ao estourar, a conversa fica na fila esperando alguém.",
+                )}
               </p>
             </div>
             <div className="space-y-1">
-              <Label htmlFor="backoff_seconds">Espera entre tentativas (segundos)</Label>
+              <Label htmlFor="backoff_seconds">
+                {t("Espera entre tentativas (segundos)")}
+              </Label>
               <Input
                 id="backoff_seconds"
                 type="number"
@@ -195,10 +207,10 @@ export function AtendimentoForm({ initial }: { initial: AtendimentoConfig }) {
 
       <Card className="space-y-4 p-4">
         <div>
-          <h2 className="text-sm font-semibold">O que cada atendente enxerga</h2>
+          <h2 className="text-sm font-semibold">{t("O que cada atendente enxerga")}</h2>
           <p className="text-xs text-muted-foreground">
-            Restringe apenas quem tem o papel <strong>Atendente</strong>. Gerente e
-            administrador continuam vendo a operação inteira.
+            {t("Restringe apenas quem tem o papel")} <strong>{t("Atendente")}</strong>.{" "}
+            {t("Gerente e administrador continuam vendo a operação inteira.")}
           </p>
         </div>
         <div className="space-y-2">
@@ -208,8 +220,8 @@ export function AtendimentoForm({ initial }: { initial: AtendimentoConfig }) {
               nome="visibilidade"
               valor={v}
               atual={form.visibility_mode}
-              titulo={VISIBILIDADE_COPY[v].titulo}
-              corpo={VISIBILIDADE_COPY[v].corpo}
+              titulo={t(VISIBILIDADE_COPY[v].titulo)}
+              corpo={t(VISIBILIDADE_COPY[v].corpo)}
               disabled={isPending}
               onPick={(x) => setForm((f) => ({ ...f, visibility_mode: x as VisibilityMode }))}
             />
@@ -221,19 +233,107 @@ export function AtendimentoForm({ initial }: { initial: AtendimentoConfig }) {
             data-testid="aviso-combinacao-morta"
             className="rounded-md border border-amber-500/40 bg-amber-50/60 p-3 text-xs dark:bg-amber-900/10"
           >
-            Com <strong>&ldquo;só os seus&rdquo;</strong> e distribuição manual, ninguém
-            enxerga a fila para pegar — e nenhum cliente é atendido. Ligue o rodízio para que
-            alguém receba.
+            {t("Com")} <strong>&ldquo;{t("só os seus")}&rdquo;</strong>{" "}
+            {t(
+              "e distribuição manual, ninguém enxerga a fila para pegar — e nenhum cliente é atendido. Ligue o rodízio para que alguém receba.",
+            )}
           </p>
         ) : null}
       </Card>
 
+      <Card className="space-y-4 p-4" data-testid="devolucao-ao-agente">
+        <div>
+          <h2 className="text-sm font-semibold">{t("Quando a pessoa some, a IA volta?")}</h2>
+          <p className="text-xs text-muted-foreground">
+            {t(
+              "Quando alguém assume uma conversa, o agente de IA para de responder nela até ser devolvido. Se ninguém devolve, o cliente que escreve de novo fica sem resposta.",
+            )}
+          </p>
+        </div>
+        <label className="flex cursor-pointer items-start gap-3">
+          <input
+            type="checkbox"
+            data-testid="devolver-sozinho"
+            checked={devolveSozinho}
+            disabled={isPending}
+            onChange={(e) =>
+              setForm((f) => ({ ...f, handoff_return_after_minutes: e.target.checked ? 60 : null }))
+            }
+            className="mt-1 h-4 w-4 shrink-0 accent-primary"
+          />
+          <span className="space-y-1">
+            <span className="block text-sm font-medium">
+              {t("Devolver ao agente sozinho depois de um tempo sem resposta da equipe")}
+            </span>
+            <span className="block text-xs text-muted-foreground">
+              {t(
+                "O tempo conta a partir do último sinal de uma pessoa na conversa: assumir, responder pela tela ou pelo celular. Só devolve onde há agente publicado. Desligado, vale a regra de sempre: a IA só volta quando alguém clica em Devolver.",
+              )}
+            </span>
+          </span>
+        </label>
+        {devolveSozinho ? (
+          <div className="max-w-xs space-y-1 border-t pt-4">
+            <Label htmlFor="handoff_return_after_minutes">{t("Minutos sem resposta da equipe")}</Label>
+            <Input
+              id="handoff_return_after_minutes"
+              type="number"
+              min={PRAZO_MIN_MINUTOS}
+              max={PRAZO_MAX_MINUTOS}
+              value={form.handoff_return_after_minutes ?? 60}
+              disabled={isPending}
+              onChange={(e) =>
+                setForm((f) => ({ ...f, handoff_return_after_minutes: Number(e.target.value) }))
+              }
+            />
+            <p className="text-xs text-muted-foreground">
+              {t("Entre 5 minutos e 24 horas. Sessenta minutos é a ordem de grandeza de um atendimento humano.")}
+            </p>
+          </div>
+        ) : null}
+      </Card>
+
+      <Card className="space-y-4 p-4" data-testid="conversa-fica-com-quem-atendeu">
+        <div>
+          <h2 className="text-sm font-semibold">
+            {t("Quando alguém responde, a conversa fica com essa pessoa?")}
+          </h2>
+          <p className="text-xs text-muted-foreground">
+            {t(
+              "Desligado, vale a regra de sempre: responder pela tela cala a IA por alguns minutos, e a conversa encerrada que recebe mensagem nova volta para a fila.",
+            )}
+          </p>
+        </div>
+        <label className="flex cursor-pointer items-start gap-3">
+          <input
+            type="checkbox"
+            data-testid="fica-com-quem-atendeu"
+            checked={form.conversation_stays_with_attendant}
+            disabled={isPending}
+            onChange={(e) =>
+              setForm((f) => ({ ...f, conversation_stays_with_attendant: e.target.checked }))
+            }
+            className="mt-1 h-4 w-4 shrink-0 accent-primary"
+          />
+          <span className="space-y-1">
+            <span className="block text-sm font-medium">{t("A conversa fica com quem atendeu")}</span>
+            <span className="block text-xs text-muted-foreground">
+              {t(
+                "Responder pelo Inbox numa conversa sem dono passa a assumi-la, e a IA fica calada até alguém devolver. Quando o cliente escreve numa conversa encerrada, ela volta direto para o último atendente, sem passar pela distribuição, se ele ainda faz parte da equipe.",
+              )}
+            </span>
+          </span>
+        </label>
+      </Card>
+
       <div className="flex items-center gap-3">
         <Button type="submit" disabled={isPending || !sujo}>
-          {isPending ? "Salvando…" : "Salvar"}
+          {isPending ? t("Salvando…") : t("Salvar")}
         </Button>
         {sujo ? (
-          <span className="text-xs text-muted-foreground">Há mudanças não salvas.</span>
+          <span className="text-xs text-muted-foreground">
+            {t("Há mudanças não salvas.")}
+          </span>
         ) : null}
       </div>
     </form>

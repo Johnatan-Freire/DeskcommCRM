@@ -383,10 +383,6 @@ async function loadCandidates(
     )
     .eq("organization_id", orgId)
     .is("archived_at", null)
-    // Pausa manual (is_active=false) precisa tirar o agente do ar aqui também —
-    // sem este filtro, um agente pausado continuava sendo candidato válido neste
-    // runtime mesmo que lib/agent-engine/agent/agent-config.ts já o recusasse.
-    .eq("is_active", true)
     .not("published_version_id", "is", null)
     .order("priority", { ascending: false })
     .order("created_at", { ascending: true });

@@ -11,6 +11,7 @@ import { getWahaClient } from "@/lib/waha/client";
 import { wahaSendPlanFor } from "@/lib/waha/media-send";
 import {
   resolveCanonicalCusChatId,
+  resolvePhoneJidDigitsForCall,
   resolveWhatsappIdForContactCard,
 } from "@/lib/waha/resolve-contact-whatsapp-id";
 import { parseWahaMessageId, wahaEchoExternalIds } from "@/lib/waha/message-id";
@@ -47,9 +48,9 @@ export const wahaAdapter: ChannelAdapter = {
 
   /**
    * As formas que o eco do nosso envio pode ter gravado. A regra mora em
-   * `wahaEchoExternalIds` (`lib/waha/message-id.ts`) porque o reenvio do
-   * watchdog precisa da MESMA resposta e não passa por este adaptador — o
-   * comentário de lá explica as duas pontas de cada engine.
+   * `wahaEchoExternalIds` (`lib/waha/message-id.ts`) porque o reenvio do watchdog
+   * precisa da MESMA resposta e não passa por este adaptador — o comentário de lá
+   * explica as duas pontas de cada engine.
    */
   echoExternalIds(input: { externalId: string; recipient: string }): string[] {
     return wahaEchoExternalIds(input.externalId, input.recipient);
@@ -96,6 +97,29 @@ export const wahaAdapter: ChannelAdapter = {
     const client = getWahaClient();
     if (!client) return null;
     return client.resolvePhoneForLid(input.sessionRef, input.identity.slice("lid:".length));
+  },
+
+  /**
+   * `check-exists` nas duas grafias do nono dígito; só JID de telefone serve
+   * (ver `phoneJidDigitsFromCheckResult`). Transporte não configurado é `null`.
+   */
+  async resolveRegisteredPhone(input: { sessionRef: string; phone: string }): Promise<string | null> {
+    const client = getWahaClient();
+    if (!client) return null;
+    return resolvePhoneJidDigitsForCall(client, input.sessionRef, input.phone);
+  },
+
+  /**
+   * "digitando…" no aparelho do cliente, antes da 1ª bolha do turno da IA.
+   *
+   * Transporte não configurado é NOOP, não erro — mesmo critério do `send`
+   * logo abaixo: numa instalação sem o container de pé o produto não pode
+   * parar por causa de um indicador decorativo.
+   */
+  async signalTyping(input: { sessionRef: string; recipient: string }): Promise<void> {
+    const client = getWahaClient();
+    if (!client) return;
+    await client.setPresence(input.sessionRef, input.recipient, "typing");
   },
 
   /**
@@ -190,14 +214,17 @@ export const wahaAdapter: ChannelAdapter = {
         envelope.contact.phoneNumber,
         resolvedId ?? envelope.contact.whatsappId,
       );
+      await envelope.beforeSend?.();
       res = await client.sendContactVcard(envelope.sessionRef, to, [contact]);
     } else if (envelope.media) {
+      await envelope.beforeSend?.();
       res = await client.sendMedia(
         envelope.sessionRef,
         to,
         wahaSendPlanFor(envelope.kind, envelope.media),
       );
     } else {
+      await envelope.beforeSend?.();
       res = await client.sendMessage(
         envelope.sessionRef,
         to,

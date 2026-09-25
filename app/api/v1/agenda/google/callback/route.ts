@@ -1,3 +1,4 @@
+import { supportCallbackWriteAllowed } from "@/lib/impersonate/support";
 /**
  * GET /api/v1/agenda/google/callback — a volta do consentimento do Google.
  *
@@ -46,25 +47,83 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 import { audit } from "@/lib/audit";
+import { PROVEDOR_GOOGLE } from "@/lib/agenda/tipos";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { encryptWebhookSecret } from "@/lib/webhooks/secrets";
-import { CAMINHO_DO_CALLBACK, configuracaoDoGoogle } from "@/lib/agenda/google/config";
+import { CAMINHO_DO_CALLBACK, configuracaoDoGoogle, origemLocalDosCabecalhos } from "@/lib/agenda/google/config";
 import { verificarEstado } from "@/lib/agenda/google/estado";
 import { NOME_DO_VINCULO, vinculoConfere } from "@/lib/agenda/google/vinculo";
 import { cookieSecure } from "@/lib/supabase/cookie-secure";
 import { escoposFaltando } from "@/lib/agenda/google/oauth";
 import { trocarCodigoPorToken } from "@/lib/agenda/google/token";
 import { contaDaAgendaPrimaria } from "@/lib/agenda/google/calendarios";
+import { classificarErroDoGoogle } from "@/lib/agenda/google/erros";
 import { env } from "@/lib/env";
 
 export const dynamic = "force-dynamic";
 
+/**
+ * A volta para a Agenda — por PÁGINA-PONTE, e não por redirect.
+ *
+ * ⚠️ ISTO ERA UM `NextResponse.redirect`, E É O QUE DESLOGAVA A PESSOA.
+ *
+ * O relato do dono do produto na v1.9.0: "clico em Conectar Google, seleciono
+ * minha conta, e ELE DESLOGA DA MINHA CONTA". A sessão nunca foi tocada — não há
+ * `signOut` em caminho nenhum desta rota, e o cookie de sessão tem 400 dias.
+ *
+ * O que acontecia é o SEGUNDO SALTO: um 307 daqui para `/app/agenda` ainda
+ * pertence à cadeia de navegação iniciada em `accounts.google.com`. O cookie de
+ * sessão é `SameSite=Strict` e não viaja com initiator cross-site, então o
+ * `proxy.ts` não enxergava usuário e mandava para `/login`.
+ *
+ * MEDIDO EM NAVEGADOR (`tests/e2e/agenda-google-volta-nao-desloga.spec.ts`), com
+ * o usuário comprovadamente logado um passo antes: ele parava em
+ * `/login?next=%2Fapp%2Fagenda%3Ferro%3D...`. Era dedução no briefing; agora é
+ * observação, em Chromium.
+ *
+ * A ponte resolve porque muda QUEM INICIA a navegação: o HTML volta com 200 no
+ * nosso próprio origin, e o `location.replace` seguinte é disparado por um
+ * documento nosso. Initiator same-site ⇒ o cookie Strict viaja.
+ *
+ * Por que não as alternativas:
+ *   - baixar o cookie para `lax`: `Strict` é o que impede que qualquer site de
+ *     terceiros dispare navegação top-level GET AUTENTICADA contra o CRM.
+ *     Trocar a superfície do produto inteiro para consertar uma tela;
+ *   - rota pública intermediária: quebra no mesmo ponto e cobra entrada nova em
+ *     `PUBLIC_PATHS` — superfície pública nova para o que a rota já pública
+ *     resolve;
+ *   - tratar no proxy: não bastaria. `app/app/agenda/page.tsx` chama
+ *     `requireAuth()`, que redireciona por conta própria — seria furar dois.
+ *
+ * As 14 saídas herdam de graça, porque todas passam por aqui.
+ */
 function voltar(parametro: string): NextResponse {
   const base = env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
-  const resposta = NextResponse.redirect(new URL(`/app/agenda?${parametro}`, base));
-  // A LIMPEZA MORA AQUI, e não em cada saída, porque esta rota tem doze delas e
-  // uma que esquecesse deixaria um vínculo vivo até o TTL. Toda volta passa por
-  // esta função — sucesso e erro —, então o cookie morre com o fluxo.
+  const destino = new URL(`/app/agenda?${parametro}`, base).toString();
+  // Escapado mesmo o valor vindo de literais nossos: a ponte é genérica, e o
+  // dia em que alguém passar algo de fora por aqui não deve ser o dia em que
+  // isto vira injeção.
+  const seguro = destino
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+  const resposta = new NextResponse(
+    `<!doctype html><html lang="pt-br"><head><meta charset="utf-8">` +
+      `<meta name="robots" content="noindex">` +
+      `<noscript><meta http-equiv="refresh" content="0;url=${seguro}"></noscript>` +
+      `<title>Voltando…</title></head><body>` +
+      `<p>Voltando para a sua agenda…</p>` +
+      `<script>location.replace(${JSON.stringify(destino)})</script>` +
+      `<noscript><p><a href="${seguro}">Continuar</a></p></noscript>` +
+      `</body></html>`,
+    { status: 200, headers: { "content-type": "text/html; charset=utf-8" } },
+  );
+  // A LIMPEZA MORA AQUI, e não em cada saída, porque esta rota tem catorze delas
+  // e uma que esquecesse deixaria um vínculo vivo até o TTL. Toda volta passa
+  // por esta função — sucesso e erro —, então o cookie morre com o fluxo.
+  //
+  // `Set-Cookie` funciona igual num 200: a limpeza não dependia do redirect.
   resposta.cookies.set(NOME_DO_VINCULO, "", {
     httpOnly: true,
     sameSite: "lax",
@@ -149,7 +208,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     return voltar("erro=retorno_incompleto");
   }
 
-  const app = await configuracaoDoGoogle();
+  const app = await configuracaoDoGoogle(origemLocalDosCabecalhos(req.headers) ?? undefined);
   if (!app) return voltar("erro=google_nao_configurado");
 
   // ⚠️ QUEIMA DO NONCE — e ela vem ANTES de trocar o código, não depois.
@@ -163,6 +222,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   // `code` do Google — que é de uso único — antes de descobrir que o `state`
   // era repetido, e quem apresentasse o legítimo receberia "código já usado",
   // um erro que aponta para o Google e não para o replay.
+  if (!(await supportCallbackWriteAllowed(organizationId, userId, estado.authSessionId))) return voltar("erro=retorno_nao_verificavel");
   const admin = createAdminClient();
   const { error: erroDoNonce } = await admin.from("calendar_oauth_nonces").insert({
     nonce: estado.nonce,
@@ -211,11 +271,39 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   // 5. De quem é a agenda, e em que fuso ela vive.
   const conta = await contaDaAgendaPrimaria(token.access_token);
   if (!conta.ok) {
+    // ─── O MOTIVO do Google era jogado fora, e a tela mandava tentar de novo ──
+    //
+    // Medido em produção em 2026-09-01: três tentativas seguidas, todas
+    // `{"reason":"conta_indisponivel","detalhe":"HTTP 403"}`. O corpo do Google
+    // — que diz `accessNotConfigured`, `PERMISSION_DENIED` ou o que for — já
+    // vinha em `conta.erro` e morria aqui: nem auditoria, nem log.
+    //
+    // O custo não é só diagnóstico. 403 por API desligada NÃO passa com o
+    // tempo, e a tela dizia "Tente de novo" — mandando a pessoa repetir para
+    // sempre um caminho que não tem como funcionar. Um conselho errado é pior
+    // que nenhum, porque ocupa o lugar do certo.
+    //
+    // `classificarErroDoGoogle` já sabia ler esse corpo e já era usada no resto
+    // do módulo. Este era o único ponto que não a chamava.
+    const classificacao = classificarErroDoGoogle(conta.erro, "listar");
     await audit({
       action: "agenda.google.conexao_falhou",
       organizationId,
-      metadata: { reason: "conta_indisponivel", detalhe: conta.detalhe, user_id: userId },
+      metadata: {
+        reason: "conta_indisponivel",
+        detalhe: conta.detalhe,
+        // O que faltava para diagnosticar sem adivinhar.
+        motivo_do_google: classificacao.motivo,
+        mensagem_do_google: classificacao.mensagem,
+        user_id: userId,
+      },
     });
+    // `sem_permissao` é o 403 que NÃO é cota — o classificador já separa os
+    // dois. Ele merece tela própria porque a ação é do dono da instalação, no
+    // Google Cloud, e não da pessoa que clicou.
+    if (classificacao.desfecho === "sem_permissao") {
+      return voltar("erro=google_recusou_o_acesso");
+    }
     return voltar("erro=conta_indisponivel");
   }
 
@@ -238,7 +326,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       .select("oauth_refresh_token_encrypted")
       .eq("organization_id", organizationId)
       .eq("user_id", userId)
-      .eq("provider", "google_calendar")
+      .eq("provider", PROVEDOR_GOOGLE)
       .eq("account_email", conta.conta.email)
       .maybeSingle();
     refreshJaGuardado = Boolean(existente?.oauth_refresh_token_encrypted);
@@ -270,7 +358,11 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     {
       organization_id: organizationId,
       user_id: userId,
-      provider: "google_calendar",
+      // A CONSTANTE também aqui, embora o literal estivesse CERTO: enquanto o
+      // único lugar que escreve o valor certo o escreve à mão, o símbolo
+      // canônico segue órfão — e foi a orfandade que deixou três leituras
+      // divergirem sem nada acusar.
+      provider: PROVEDOR_GOOGLE,
       account_email: conta.conta.email,
       oauth_access_token_encrypted: accessCifrado,
       // Quando o Google não reenviou a chave e já havia uma guardada, a coluna
@@ -340,6 +432,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   }
 
   await audit({
+    actorUserId: userId,
+    actorAuthSessionId: estado.authSessionId,
     action: "agenda.google.conexao_concluida",
     organizationId,
     metadata: { user_id: userId, account_email: conta.conta.email, fuso: conta.conta.fuso },

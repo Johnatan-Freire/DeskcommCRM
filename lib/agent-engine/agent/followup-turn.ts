@@ -1,3 +1,7 @@
+import {claimOfJob,type JobClaim} from "../queue/claim";
+import {resultadoDoEnvioDoFollowup} from "../edge/crm/send-ledger";
+import { parseServiceBoundary } from "@/lib/atendimento/fronteira";
+import { requireCurrentServiceBoundary } from "@/lib/atendimento/fronteira-server";
 /**
  * Handler do job `followup_turn` (F3-03; blueprint 1.3) — a peça BUILD da
  * continuidade. A F3-01 (cron persistente) dispara e a F3-02 (tool schedule_followup)
@@ -35,6 +39,11 @@ import {
   type LeadCheckpointRow,
 } from './inbound-turn';
 import { isLeadInHandoff } from './human-handoff';
+import { fusoDaOrganizacao } from './fuso-da-org';
+import {
+  followupPublicadoDoEnrollment,
+  proximaAberturaDoFollowup,
+} from './janela-de-followup';
 import type { LeadStateRow } from './lead-state';
 import { loadReentryTemplate, pickReentryVariant } from './reentry-template';
 import {
@@ -98,7 +107,10 @@ export const followupTurnPayloadSchema = z
  *  (agent-engine não importa followup/* — regra dura de dependência numa direção só). */
 export type FollowupFlowTurnResult =
   | { kind: 'sent' }
+  | { kind: 'skipped'; reason: string }
   | { kind: 'classified'; class: string }
+  /** O envio ficou estacionado até `until` (janela fechada) — nem saiu, nem foi recusado. */
+  | { kind: 'deferred'; until: Date; reason: string }
   | { kind: 'planned'; propostas: PropostaDeEsperaBruta[]; modelo: string };
 
 /**
@@ -110,7 +122,7 @@ export type FollowupFlowTurnResult =
 export interface FollowupTurnDeps extends InboundTurnDeps {
   completeFollowupTurn?: (
     pool: pg.Pool,
-    input: { organizationId: string; enrollmentId: string; nodeId: string; result: FollowupFlowTurnResult },
+    input: { organizationId: string; enrollmentId: string; nodeId: string; jobId?: string; jobClaim?:JobClaim; result: FollowupFlowTurnResult },
   ) => Promise<void>;
 }
 
@@ -241,9 +253,79 @@ export function createFollowupTurnHandler(deps: FollowupTurnDeps) {
     }
     const payload = followupTurnPayloadSchema.parse(job.payload);
 
-    const target = await resolveSendTarget(pool, tenantId, leadId);
+    const boundary = parseServiceBoundary(job.payload.service_boundary);
+    await requireCurrentServiceBoundary(pool, boundary);
+    const { rows: targetRows } = await pool.query<{ channel_session_id: string; archived_at: string | null }>(
+      `select c.channel_session_id, to_jsonb(cs)->>'archived_at' as archived_at from conversations c
+       join channel_sessions cs on cs.id=c.channel_session_id and cs.organization_id=c.organization_id
+       where c.organization_id=$1 and c.id=$2 and c.contact_id=$3`,
+      [tenantId, boundary!.conversation_id, leadId]);
+    if (!targetRows[0]) throw new Error('conversa de origem indisponível');
+    if (targetRows[0].archived_at) throw new Error('canal arquivado');
+    const target: ReentrySendTarget = { tenantId, leadId, conversationId: boundary!.conversation_id, channelSessionId: targetRows[0]!.channel_session_id };
 
     const clock = deps.clock ?? ((): Date => new Date());
+
+    // #490 — a janela PRÓPRIA vale só para envio proativo dirigido por fluxo.
+    // `classify` e `plan_timing` não falam com o cliente e podem rodar a qualquer
+    // hora. Retornos prometidos via `schedule_followup` continuam fora deste
+    // recorte: eles não têm enrollment/agent pinado, e a issue deixou essa regra
+    // explicitamente em aberto para uma decisão separada.
+    if (payload.followup_enrollment_id !== undefined && payload.purpose === 'send_message') {
+      const followup = await followupPublicadoDoEnrollment(
+        pool,
+        tenantId,
+        payload.followup_enrollment_id,
+      );
+      const sendWindow =
+        typeof followup === 'object' && followup !== null
+          ? (followup as { send_window?: unknown }).send_window
+          : null;
+      if (sendWindow !== null && sendWindow !== undefined) {
+        const runLog = withFields(deps.log, {
+          job_id: job.id,
+          tenant_id: tenantId,
+          lead_id: leadId,
+          enrollment_id: payload.followup_enrollment_id,
+        });
+        const agora = clock();
+        const fuso = await fusoDaOrganizacao(pool, tenantId, runLog);
+        const proximaAbertura = proximaAberturaDoFollowup(followup, fuso, agora);
+        if (proximaAbertura !== null) {
+          const complete = deps.completeFollowupTurn;
+          if (!complete || payload.node_id === undefined) {
+            throw new Error(
+              'follow-up adiado pela janela própria sem completeFollowupTurn/node_id — o enrollment não saberia do adiamento',
+            );
+          }
+          await rescheduleReentry(pool, {
+            tenantId,
+            leadId,
+            jobId: job.id,
+            at: proximaAbertura,
+            payload: job.payload,
+          });
+          runLog.info('follow-up adiado pela janela própria do agente', {
+            next_run_at: proximaAbertura.toISOString(),
+            timezone: fuso,
+          });
+          // O adiamento VOLTA para o enrollment, como o da janela anti-ban em
+          // `runFlowDrivenTurn`. Sem isto o motor lê a espera como worker morto:
+          // o dead-man da ação esgota ~11h e marca `dead` um enrollment cujo
+          // envio ia sair na abertura — e o padrão desta faixa (sexta 18h →
+          // segunda 9h) já espera 63h.
+          await complete(pool, {
+            jobId: job.id,
+            jobClaim: claimOfJob(job),
+            organizationId: tenantId,
+            enrollmentId: payload.followup_enrollment_id,
+            nodeId: payload.node_id,
+            result: { kind: 'deferred', until: proximaAbertura, reason: 'followup_send_window' },
+          });
+          return;
+        }
+      }
+    }
 
     // Onda 5 (Task 5.1): turno DIRIGIDO POR FLUXO — guard exclusivo, nunca cai nos
     // caminhos legados abaixo (F3-03/F3-04 seguem intocados quando o campo falta).
@@ -294,94 +376,21 @@ export function createFollowupTurnHandler(deps: FollowupTurnDeps) {
   };
 }
 
+/**
+ * O que aconteceu com um envio sem LLM. `deferred` carrega o INSTANTE porque
+ * quem recebe precisa dele: sem a data, "adiado" e "some" são a mesma coisa
+ * para o enrollment.
+ */
+type EnvioFixoDesfecho =
+  | { kind: "sent" }
+  | { kind: "deferred"; until: Date; reason: string }
+  | { kind: "skipped" };
+
 interface ReentrySendTarget {
   tenantId: string;
   leadId: string;
   channelSessionId: string;
   conversationId: string;
-}
-
-/**
- * Conversa 1:1 + sessão de envio. Captação por webhook não passa pelo WAHA, então
- * o contato chega sem thread — o follow-up de recepção é o primeiro outbound e
- * precisa ABRIR a conversa no número WORKING da org (mesmo papel de
- * `ensureConversation` na ação send_whatsapp).
- *
- * `to_jsonb(cs) ->> 'archived_at'` em vez de `cs.archived_at`: clone sem a
- * migration 0106 não pode tomar 42703 em todo follow-up.
- */
-async function resolveSendTarget(
-  pool: pg.Pool,
-  tenantId: string,
-  contactId: string,
-): Promise<ReentrySendTarget> {
-  const { rows } = await pool.query<{
-    id: string;
-    channel_session_id: string | null;
-    channel_archived_at: string | null;
-  }>(
-    `select c.id,
-            c.channel_session_id,
-            to_jsonb(cs) ->> 'archived_at' as channel_archived_at
-       from conversations c
-       left join channel_sessions cs
-         on cs.id = c.channel_session_id and cs.organization_id = c.organization_id
-      where c.organization_id = $1 and c.contact_id = $2 and c.is_group = false
-      order by c.last_message_at desc nulls last limit 1`,
-    [tenantId, contactId],
-  );
-  const conv = rows[0];
-  if (conv !== undefined && conv.channel_session_id !== null) {
-    if (conv.channel_archived_at !== null) {
-      throw new Error('followup_turn para canal arquivado — o número foi excluído da Central de Conexões');
-    }
-    return {
-      tenantId,
-      leadId: contactId,
-      channelSessionId: conv.channel_session_id,
-      conversationId: conv.id,
-    };
-  }
-
-  const session = await pool.query<{ id: string }>(
-    `select cs.id
-       from channel_sessions cs
-      where cs.organization_id = $1
-        and (to_jsonb(cs) ->> 'archived_at') is null
-      order by case when cs.status = 'WORKING' then 0 else 1 end, cs.created_at asc
-      limit 1`,
-    [tenantId],
-  );
-  const channelSessionId = session.rows[0]?.id;
-  if (channelSessionId === undefined) {
-    throw new Error('followup_turn sem conversa/número do contato — impossível retomar o contato');
-  }
-
-  try {
-    const inserted = await pool.query<{ id: string }>(
-      `insert into conversations (organization_id, contact_id, channel_session_id, channel, status, is_group, metadata)
-       values ($1, $2, $3, 'whatsapp', 'open', false, jsonb_build_object('created_by', 'followup_turn'))
-       returning id`,
-      [tenantId, contactId, channelSessionId],
-    );
-    const conversationId = inserted.rows[0]?.id;
-    if (conversationId === undefined) {
-      throw new Error('followup_turn sem conversa/número do contato — impossível retomar o contato');
-    }
-    return { tenantId, leadId: contactId, channelSessionId, conversationId };
-  } catch (err) {
-    const code = (err as { code?: string } | null)?.code;
-    if (code !== '23505') throw err;
-    const winner = await pool.query<{ id: string }>(
-      `select id from conversations
-        where organization_id = $1 and contact_id = $2 and channel_session_id = $3 and is_group = false
-        order by created_at desc limit 1`,
-      [tenantId, contactId, channelSessionId],
-    );
-    const conversationId = winner.rows[0]?.id;
-    if (conversationId === undefined) throw err;
-    return { tenantId, leadId: contactId, channelSessionId, conversationId };
-  }
 }
 
 /**
@@ -428,9 +437,20 @@ async function runFlowDrivenTurn(
     const body = await resolveFlowSendBody(pool, target.tenantId, input);
     if (body !== null) {
       // Texto do operador: sem camada semântica (ver o cabeçalho de sendFixedOutbound).
-      const sent = await sendFixedOutbound(deps, job, pool, ctx, clock, target, body, false);
-      if (sent) {
-        await complete(pool, { organizationId: target.tenantId, enrollmentId, nodeId, result: { kind: 'sent' } });
+      const desfecho = await sendFixedOutbound(deps, job, pool, ctx, clock, target, body, false);
+      // TODO OS TRÊS DESFECHOS VOLTAM PARA O ENROLLMENT. O adiado era o que não
+      // voltava, e o silêncio dele custava o enrollment inteiro: o motor ficava
+      // rechecando um turno que ninguém ia fechar e, esgotado o orçamento do
+      // dead-man (~11h), marcava `dead` com `action_turn_never_completed` — um
+      // motivo falso, porque o worker estava vivo e o envio só esperava a
+      // janela abrir. Uma noite de sábado com domingo fechado (33h) já passava
+      // do orçamento na `main`; a faixa de envio por agente chega a 159h.
+      if (desfecho.kind === 'sent') {
+        await complete(pool, { jobId:job.id,jobClaim:claimOfJob(job), organizationId: target.tenantId, enrollmentId, nodeId, result: { kind: 'sent' } });
+      } else if (desfecho.kind === 'skipped') {
+        await complete(pool,{jobId:job.id,jobClaim:claimOfJob(job),organizationId:target.tenantId,enrollmentId,nodeId,result:{kind:'skipped',reason:'O envio foi recusado pelas regras do atendimento.'}});
+      } else {
+        await complete(pool,{jobId:job.id,jobClaim:claimOfJob(job),organizationId:target.tenantId,enrollmentId,nodeId,result:{kind:'deferred',until:desfecho.until,reason:desfecho.reason}});
       }
       return;
     }
@@ -444,13 +464,15 @@ async function runFlowDrivenTurn(
         return `${opening}\n\n## Orientação do passo do fluxo\n${input.promptHint}`;
       },
     });
-    await complete(pool, { organizationId: target.tenantId, enrollmentId, nodeId, result: { kind: 'sent' } });
+    const result = await resultadoDoEnvioDoFollowup(pool,job.organization_id,job.id);
+    await complete(pool, { jobId:job.id,jobClaim:claimOfJob(job), organizationId: target.tenantId, enrollmentId, nodeId, result });
     return;
   }
 
   if (input.purpose === 'classify') {
     const classes = input.classes ?? [];
-    const context = await getLeadContext(pool, deps.crmCfg, { tenantId: target.tenantId, leadId: target.leadId }, {
+    const fuso = await fusoDaOrganizacao(pool, target.tenantId, runLog);
+    const context = await getLeadContext(pool, deps.crmCfg, { tenantId: target.tenantId, leadId: target.leadId, fuso }, {
       historyLimit: deps.knobs.historyLimit,
       maxTokens: deps.knobs.maxContextTokens,
     });
@@ -469,7 +491,7 @@ async function runFlowDrivenTurn(
       },
       { ...(deps.registry !== undefined ? { registry: deps.registry } : {}), log: runLog },
     );
-    await complete(pool, { organizationId: target.tenantId, enrollmentId, nodeId, result: { kind: 'classified', class: cls } });
+    await complete(pool, { jobId:job.id,jobClaim:claimOfJob(job), organizationId: target.tenantId, enrollmentId, nodeId, result: { kind: 'classified', class: cls } });
     return;
   }
 
@@ -480,10 +502,12 @@ async function runFlowDrivenTurn(
   if (esperas.length === 0) {
     throw new Error('turno de planejamento de tempo sem esperas no payload — o engine só o enfileira quando há espera adaptativa');
   }
-  const context = await getLeadContext(pool, deps.crmCfg, { tenantId: target.tenantId, leadId: target.leadId }, {
-    historyLimit: deps.knobs.historyLimit,
-    maxTokens: deps.knobs.maxContextTokens,
-  });
+  const context = await getLeadContext(
+    pool,
+    deps.crmCfg,
+    { tenantId: target.tenantId, leadId: target.leadId, fuso: await fusoDaOrganizacao(pool, target.tenantId, runLog) },
+    { historyLimit: deps.knobs.historyLimit, maxTokens: deps.knobs.maxContextTokens },
+  );
   if (!context.ok) {
     throw new Error(`turno de planejamento de tempo do fluxo falhou em get_lead_context (${context.error.code})`);
   }
@@ -499,6 +523,7 @@ async function runFlowDrivenTurn(
     { ...(deps.registry !== undefined ? { registry: deps.registry } : {}), log: runLog, clock },
   );
   await complete(pool, {
+    jobId:job.id,jobClaim:claimOfJob(job),
     organizationId: target.tenantId,
     enrollmentId,
     nodeId,
@@ -569,7 +594,7 @@ async function resolveFlowSendBody(
 }
 
 /**
- * Envia `body` pela cadeia de guardrails, sem LLM. `true` = o sink aceitou.
+ * Envia `body` pela cadeia de guardrails, sem LLM. Distingue aceito, adiado e veto terminal.
  *
  * ─── Por que a camada semântica é PARÂMETRO, e não uma decisão só ───────────
  *
@@ -605,19 +630,21 @@ async function sendFixedOutbound(
   body: string,
   /** `true` só na re-entrada por template — ver o cabeçalho. */
   comCamadaSemantica: boolean,
-): Promise<boolean> {
+): Promise<EnvioFixoDesfecho> {
   const { tenantId, leadId, channelSessionId, conversationId } = target;
   const runLog = withFields(deps.log, { job_id: job.id, tenant_id: tenantId, lead_id: leadId });
 
   if (await isLeadInHandoff(pool, tenantId, leadId)) {
     runLog.info('envio fixo pulado — lead silenciado (handoff/opt-out)', { kind: job.kind });
-    return false;
+    return { kind: "skipped" };
   }
 
-  const context = await getLeadContext(pool, deps.crmCfg, { tenantId, leadId }, {
-    historyLimit: deps.knobs.historyLimit,
-    maxTokens: deps.knobs.maxContextTokens,
-  });
+  const context = await getLeadContext(
+    pool,
+    deps.crmCfg,
+    { tenantId, leadId, fuso: await fusoDaOrganizacao(pool, tenantId, runLog) },
+    { historyLimit: deps.knobs.historyLimit, maxTokens: deps.knobs.maxContextTokens },
+  );
   if (!context.ok) {
     throw new Error(`envio fixo do follow-up falhou em get_lead_context (${context.error.code})`);
   }
@@ -660,7 +687,7 @@ async function sendFixedOutbound(
             ),
         }
       : {}),
-    send: (finalBody) => channel.send({ tenantId, leadId, jobId: job.id, seq: 1, conversationId, body: finalBody }),
+    send: (finalBody) => channel.send({ tenantId, leadId, jobId: job.id, jobClaim:claimOfJob(job), seq: 1, conversationId, body: finalBody }),
   });
 
   if (chain.status === 'vetoed') {
@@ -676,21 +703,22 @@ async function sendFixedOutbound(
         code: chain.code,
         next_run_at: chain.nextAllowedAt.toISOString(),
       });
-      return false;
+      return { kind: "deferred", until: chain.nextAllowedAt, reason: chain.code };
     }
     runLog.info('envio fixo vetado pela cadeia — não re-agendado', { code: chain.code });
-    return false;
+    return { kind: "skipped" };
   }
 
   const outcome = chain.outcome;
   switch (outcome.kind) {
     case 'sent':
     case 'already_sent':
-    case 'queued':
       runLog.info('envio fixo concluído', { kind: outcome.kind });
-      return true;
+      return { kind: "sent" };
+    case 'queued':
+      throw new Error('envio fixo: mensagem aguardando o canal — não conclui o passo');
     case 'blocked':
-      await applySendOutcome(pool, outcome, { jobId: job.id, workerId: ctx.workerId, tenantId, leadId }, {
+      await applySendOutcome(pool, outcome, { jobId: job.id, workerId: ctx.workerId, tenantId, leadId, jobClaim:claimOfJob(job) }, {
         queuedRetryDelayMs: deps.knobs.queuedRetryDelayMs,
       });
       throw new JobSettledError('envio fixo vetado pelo sink (is_blocked) — job cancelado em definitivo');

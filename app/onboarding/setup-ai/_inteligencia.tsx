@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import { useT } from "@/hooks/i18n/useT";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -46,6 +47,7 @@ type Prova =
   | { estado: "nao_deu" };
 
 export function InteligenciaDele({ inicial }: { inicial: EstadoDaChave }) {
+  const t = useT();
   const [chave, setChave] = useState(inicial);
   const [prova, setProva] = useState<Prova | null>(null);
   const [salvando, setSalvando] = useState(false);
@@ -101,17 +103,17 @@ export function InteligenciaDele({ inicial }: { inicial: EstadoDaChave }) {
     return (
       <section className="space-y-3 rounded-lg border border-amber-500/40 bg-amber-500/5 p-5">
         <div>
-          <h3 className="text-sm font-medium">Ele ainda não tem cérebro</h3>
+          <h3 className="text-sm font-medium">{t("Ele ainda não tem cérebro")}</h3>
           <p className="mt-1 text-sm text-muted-foreground">
-            Seu funcionário pensa com a inteligência artificial que você contratar.
-            A instalação não trouxe nenhuma chave — cole a sua aqui e ele já nasce
-            funcionando.
+            {t(
+              "Seu funcionário pensa com a inteligência artificial que você contratar. A instalação não trouxe nenhuma chave — cole a sua aqui e ele já nasce funcionando.",
+            )}
           </p>
         </div>
 
         <div className="grid gap-3 sm:grid-cols-[minmax(0,180px)_1fr]">
           <div className="space-y-1.5">
-            <Label htmlFor="provedor_da_ia">Qual você contratou</Label>
+            <Label htmlFor="provedor_da_ia">{t("Qual você contratou")}</Label>
             <select
               id="provedor_da_ia"
               value={provedor}
@@ -126,17 +128,28 @@ export function InteligenciaDele({ inicial }: { inicial: EstadoDaChave }) {
             </select>
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="api_key_da_ia">A chave</Label>
+            <Label htmlFor="api_key_da_ia">{t("A chave")}</Label>
             <Input
               id="api_key_da_ia"
               type="password"
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
-              placeholder="Cole aqui a chave que a empresa de IA te deu"
+              placeholder={t("Cole aqui a chave que a empresa de IA te deu")}
               autoComplete="off"
             />
           </div>
         </div>
+
+        {/*
+          A escolha vale para a EMPRESA, não só para este atendente — e quem lê
+          a tela precisa saber disso antes de escolher, não depois. É a mesma
+          decisão que o passo grava em `organizations.settings.llm`.
+        */}
+        <p className="text-xs text-muted-foreground">
+          {t(
+            "Esta escolha passa a valer para a empresa inteira: é esta inteligência que atende seus clientes.",
+          )}
+        </p>
 
         <div className="flex items-center gap-3">
           <Button
@@ -150,7 +163,7 @@ export function InteligenciaDele({ inicial }: { inicial: EstadoDaChave }) {
               fd.set("api_key", apiKey);
               const r = await salvarChaveDaIa(fd);
               setSalvando(false);
-              if (!r.ok) return toast.error(r.erro);
+              if (!r.ok) return toast.error(t(r.erro));
               // A chave sai da memória da tela no mesmo instante em que é aceita.
               setApiKey("");
               setChave({
@@ -159,13 +172,32 @@ export function InteligenciaDele({ inicial }: { inicial: EstadoDaChave }) {
                 rotulo: PROVEDORES.find((p) => p.id === provedor)?.rotulo ?? provedor,
                 final: r.final,
               });
-              toast.success("Chave guardada. Agora ele pode pensar.");
+              // A escolha acima passa a valer para a empresa inteira; quando ela
+              // NÃO passou a valer, a tela diz por quê. Dar "Chave guardada" e
+              // ficar calado sobre o padrão faria a pessoa acreditar que a IA da
+              // empresa mudou quando não mudou — e o sintoma só apareceria na
+              // hora de publicar.
+              if (r.aviso === "sem_modelo_no_catalogo") {
+                toast.warning(
+                  t(
+                    "A chave foi guardada. A lista de modelos desta empresa de IA ainda não chegou nesta instalação — por enquanto a IA da empresa continua a anterior. Não precisa colar a chave de novo.",
+                  ),
+                );
+              } else if (r.aviso) {
+                toast.warning(
+                  t(
+                    "A chave foi guardada, mas não consegui mudar a IA da empresa agora. Dá para trocar em IA › Provedores.",
+                  ),
+                );
+              } else {
+                toast.success(t("Chave guardada. Agora ele pode pensar."));
+              }
             }}
           >
-            {salvando ? "Guardando..." : "Guardar a chave"}
+            {salvando ? t("Guardando...") : t("Guardar a chave")}
           </Button>
           <span className="text-xs text-muted-foreground">
-            Ela é guardada cifrada — nem nós conseguimos lê-la depois.
+            {t("Ela é guardada cifrada — nem nós conseguimos lê-la depois.")}
           </span>
         </div>
       </section>
@@ -175,25 +207,30 @@ export function InteligenciaDele({ inicial }: { inicial: EstadoDaChave }) {
   return (
     <section className="space-y-1 rounded-lg border bg-background p-5">
       <h3 className="text-sm font-medium">
-        O cérebro dele: {chave.rotulo}
+        {t("O cérebro dele:")} {chave.rotulo}
         {chave.final ? (
-          <span className="ml-1 font-normal text-muted-foreground">(final {chave.final})</span>
+          <span className="ml-1 font-normal text-muted-foreground">
+            ({t("final")} {chave.final})
+          </span>
         ) : null}
       </h3>
       <p className="text-sm text-muted-foreground">
-        {prova?.estado === "conferindo" && "Conferindo se a chave tem crédito…"}
-        {prova?.estado === "ok" && "Testei agora: a chave respondeu e tem crédito."}
+        {prova?.estado === "conferindo" && t("Conferindo se a chave tem crédito…")}
+        {prova?.estado === "ok" && t("Testei agora: a chave respondeu e tem crédito.")}
         {prova?.estado === "problema" && (
           <>
-            A chave foi aceita, mas o teste não passou:{" "}
-            <span className="text-amber-700 dark:text-amber-500">{prova.mensagem}</span>. Se for
-            falta de crédito, adicione saldo na conta da empresa de IA — sem isso ele não responde
-            a nenhum cliente.
+            {t("A chave foi aceita, mas o teste não passou:")}{" "}
+            <span className="text-amber-700 dark:text-amber-500">{prova.mensagem}</span>.{" "}
+            {t(
+              "Se for falta de crédito, adicione saldo na conta da empresa de IA — sem isso ele não responde a nenhum cliente.",
+            )}
           </>
         )}
         {prova?.estado === "nao_deu" &&
-          "Não consegui testar o crédito agora. Dá para seguir — mas confira o saldo na conta da empresa de IA antes de confiar nele."}
-        {prova === null && "Pronta para uso."}
+          t(
+            "Não consegui testar o crédito agora. Dá para seguir — mas confira o saldo na conta da empresa de IA antes de confiar nele.",
+          )}
+        {prova === null && t("Pronta para uso.")}
       </p>
     </section>
   );

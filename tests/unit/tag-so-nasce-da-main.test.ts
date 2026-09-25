@@ -73,11 +73,12 @@ describe("a tag nasce no CI, e nunca do GITHUB_TOKEN", () => {
     expect(escritas, "escrita pelo GITHUB_TOKEN: quem escreve aqui tem que ser o App").toEqual([]);
   });
 
-  // O job `cortar-tag` (corte automático de tag ao merge do PR de release) foi
-  // removido deste fork: exigia RELEASE_APP_ID/RELEASE_APP_PRIVATE_KEY, que
-  // este fork não tem, e falhava em TODO push na main. Aqui o deploy é a cada
-  // merge, direto pela imagem `latest` (`.github/workflows/deploy.yml`) — ver
-  // o cabeçalho de `release.yml`. Os três casos que vigiavam o conteúdo desse
-  // job saíram junto; os dois acima (token do App, sem escrita pelo
+  // O job `cortar-tag` (corte automático de tag ao merge do PR de release,
+  // publicação da release, conferência de imagens/canal stable/vitrine da LP)
+  // foi removido deste fork: exigia RELEASE_APP_ID/RELEASE_APP_PRIVATE_KEY,
+  // que este fork não tem, e falhava em TODO push na main. Aqui o deploy é a
+  // cada merge, direto pela imagem `latest` (`.github/workflows/deploy.yml`)
+  // — ver o cabeçalho de `release.yml`. Os testes que vigiavam o conteúdo
+  // desse job saíram junto; os dois acima (token do App, sem escrita pelo
   // GITHUB_TOKEN) continuam valendo para o job que restou.
 });

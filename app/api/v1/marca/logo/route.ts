@@ -1,3 +1,4 @@
+import { requireSupportWrite } from "@/lib/impersonate/support";
 /**
  * O logo da marca — subir do computador, sem colar URL.
  *
@@ -57,7 +58,7 @@ import { z } from "zod";
 import { fail, ok } from "@/lib/api/wrappers";
 import { audit } from "@/lib/audit";
 import { loadAuthUser, mfaEmDivida, resolveActiveOrg } from "@/lib/auth/server";
-import { ROLE_RANK } from "@/lib/auth/types";
+import { roleAtLeast } from "@/lib/auth/types";
 import { checkRateLimit } from "@/lib/ai/dispatcher/rate-limit";
 import { invalidarMarcaDaInstalacao } from "@/lib/branding/instalacao";
 import {
@@ -160,7 +161,7 @@ async function abrirContexto(escopo: Escopo): Promise<{ ctx: Contexto } | { recu
       recusa: { codigo: "forbidden_tenant", mensagem: "Sem organização ativa.", status: 403 },
     };
   }
-  if (!user.is_platform_admin && ROLE_RANK[org.role] < ROLE_RANK.admin) {
+  if (!user.is_platform_admin && !roleAtLeast(org.role, "admin")) {
     return {
       recusa: {
         codigo: "forbidden_role",
@@ -355,6 +356,9 @@ async function registrarAuditoria(
 }
 
 export async function POST(req: NextRequest): Promise<Response> {
+  const supportDenied = await requireSupportWrite();
+  if (supportDenied) return supportDenied;
+
   const requestId = randomUUID();
 
   const form = await req.formData().catch(() => null);
@@ -453,6 +457,9 @@ export async function POST(req: NextRequest): Promise<Response> {
  * a tela apontaria para um objeto que não existe mais.
  */
 export async function DELETE(req: NextRequest): Promise<Response> {
+  const supportDenied = await requireSupportWrite();
+  if (supportDenied) return supportDenied;
+
   const requestId = randomUUID();
 
   const escopoLido = escopoSchema.safeParse(new URL(req.url).searchParams.get("escopo"));

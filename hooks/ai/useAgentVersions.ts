@@ -30,6 +30,8 @@ export interface AgentVersionRow {
   pipeline_ids: string[];
   knowledge_source_ids: string[];
   sistema_escolar_tool_ids: string[];
+  can_mark_won: boolean;
+  can_mark_lost: boolean;
   split_messages: boolean;
   split_max_chars: number;
   followup: { enabled: boolean; flow_pointer_ids: string[] };

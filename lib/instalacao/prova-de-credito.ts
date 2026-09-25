@@ -21,6 +21,7 @@
 import { normalizarErro } from "@/lib/agent-engine/edge/llm/run-model-call";
 import {
   cabecalhosDeAtribuicaoOpenRouter,
+  DEEPSEEK_ENDPOINT,
   OPENROUTER_ENDPOINT,
 } from "@/lib/agent-engine/edge/llm/providers";
 
@@ -42,11 +43,8 @@ interface Requisicao {
 
 /**
  * A menor geração possível em cada provedor — na maioria, um único token,
- * porque o objetivo é atravessar a cobrança, não obter texto. O nome do
- * parâmetro de teto varia por provedor (`max_tokens` na Anthropic e no
- * OpenRouter, `max_completion_tokens` na OpenAI, `maxOutputTokens` no
- * Google) — e a OpenAI também é a exceção ao "um único token": ver o
- * comentário no caso `openai`.
+ * porque o objetivo é atravessar a cobrança, não obter texto. A OpenAI é
+ * exceção a esse "um único token": ver o comentário no caso `openai`.
  */
 export function montarRequisicaoDeProva(
   provider: string,
@@ -67,25 +65,25 @@ export function montarRequisicaoDeProva(
         body: { model: modelo, max_tokens: 1, messages: msg },
       };
     case "openai":
-      // ⚠️ `max_completion_tokens`, NUNCA `max_tokens`. A família de modelos mais
-      // nova da OpenAI (gpt-5.x, o1, o3...) RECUSA `max_tokens` com 400
-      // "Unsupported parameter" — e o catálogo de modelos (migration 0104) já
-      // marca um modelo dessa família como default do provider `openai`, então
-      // toda instalação nova batia nesse erro ao testar a própria chave.
-      // `max_completion_tokens` é o substituto que a OpenAI documenta para
-      // TODOS os modelos da Chat Completions API, não só os novos — não há
-      // motivo para manter os dois nomes por modelo.
+      // `max_tokens` foi descontinuado pela OpenAI: os modelos de raciocínio
+      // (o1/o3, a família gpt-5) RECUSAM esse campo — "Unsupported parameter:
+      // 'max_tokens' is not supported with this model. Use
+      // 'max_completion_tokens' instead." — e é exatamente o modelo padrão
+      // curado para este provedor (`ai_models.is_default_for_provider`) que
+      // cai nessa família. `max_completion_tokens` é aceito em toda a família
+      // de chat completions, raciocínio ou não, então não há motivo para
+      // ramificar por modelo aqui.
       //
       // ⚠️ E não pode ser `1`. Nos modelos de raciocínio o teto é dividido com
       // os `reasoning_tokens` internos (nem sempre visíveis, e variam de
-      // chamada para chamada) — medido contra a chave real de uma instalação:
-      // 1 e 4 tokens devolvem 400/200-com-conteúdo-vazio antes de sobrar
-      // espaço pra qualquer palavra, e os dois desfechos são diferentes de
-      // "chave ruim" mas caem no balde genérico de erro em `normalizarErro`,
-      // o mesmo "selo verde mentiroso" que o cabeçalho deste arquivo existe
-      // para evitar. 32 sobrou espaço de sobra nos testes (resposta completa
-      // com 9 tokens, folga pro raciocínio variar) sem deixar de ser uma
-      // geração mínima.
+      // chamada para chamada) — medido contra uma chave real: 1 e 4 tokens
+      // devolvem 400 ("Could not finish the message within the
+      // max_completion_tokens")/200-com-conteúdo-vazio antes de sobrar espaço
+      // pra qualquer palavra, e nenhum dos dois é "chave ruim" — mas o 400
+      // cai no balde genérico de erro em `normalizarErro`, o mesmo "selo
+      // verde mentiroso" que o cabeçalho deste arquivo existe para evitar. 32
+      // sobrou espaço de sobra na medição (resposta completa com 9 tokens)
+      // sem deixar de ser uma geração mínima.
       return {
         url: "https://api.openai.com/v1/chat/completions",
         headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
@@ -104,6 +102,14 @@ export function montarRequisicaoDeProva(
           "content-type": "application/json",
           ...cabecalhosDeAtribuicaoOpenRouter(),
         },
+        body: { model: modelo, max_tokens: 1, messages: msg },
+      };
+    case "deepseek":
+      // OpenAI-compatível. `max_tokens: 1` atravessa a cobrança; o corpo é uma
+      // GERAÇÃO, não a listagem `GET /models` (que o validador de chave já usa).
+      return {
+        url: `${baseUrl ?? DEEPSEEK_ENDPOINT}/chat/completions`,
+        headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
         body: { model: modelo, max_tokens: 1, messages: msg },
       };
     case "google":

@@ -1,3 +1,5 @@
+import { parseServiceBoundary, StaleServiceBoundaryError } from "@/lib/atendimento/fronteira";
+import { assertServiceBoundarySupabase } from "@/lib/atendimento/origem";
 /**
  * Gatilho de CASO ABERTO (`trigger_config.kind='case_opened'`) — o follow-up
  * passa a nascer sozinho quando o agente abre um caso de escalação, e a morrer
@@ -54,7 +56,12 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { EventRow } from "@/lib/event-log/dispatcher";
 import { flowGraphSchema } from "./graph-schema";
 import { triggerConfigSchema } from "./api-schemas";
-import { resolveAgentForAutomaticTrigger, type FollowupGateDb } from "./agent-followup-gate";
+import {
+  decidirAgenteDoEnrollmentAutomatico,
+  noDeGatilhoDoGrafo,
+  type FollowupGateDb,
+  type NoDeGatilho,
+} from "./agent-followup-gate";
 
 /** Os dois eventos deste produtor. Constantes porque o handler, o registro e os
  *  testes precisam do MESMO literal — cópias divergem no primeiro ajuste. */
@@ -87,8 +94,9 @@ export interface GatilhoCasoDb {
   carregaPointersDeCaso(orgId: string): Promise<PointerDeCaso[]>;
   /** Fallback: o payload do trigger já traz `contact_id`; isto só roda se faltar. */
   carregaContatoDaConversa(orgId: string, conversationId: string): Promise<string | null>;
-  carregaNoDeGatilho(orgId: string, versionId: string): Promise<string | null>;
+  carregaNoDeGatilho(orgId: string, versionId: string): Promise<NoDeGatilho | null>;
   insereEnrollment(input: {
+    source_case_id?: string | null;
     organization_id: string;
     pointer_id: string;
     version_id: string;
@@ -99,7 +107,7 @@ export interface GatilhoCasoDb {
     // `next_eval_at` OMITIDO de propósito: o `default now()` da 0147 decide. O
     // "agora" do processo é FUTURO para o `now()` do Postgres (17–34 ms medidos)
     // e o claim pularia o tick.
-  }): Promise<{ inserted: boolean; id: string | null }>;
+  }): Promise<{ inserted: boolean; id: string | null; reason?: "stale_origin" }>;
   insereEventoDoEnrollment(evento: {
     organization_id: string;
     enrollment_id: string;
@@ -126,6 +134,7 @@ export interface GatilhoCasoSummary {
   pointers_barrados_pelo_gate: number;
   enrolled: number;
   skipped_existing: number;
+  skipped_stale_origin?: number;
   /** Conversa sem contato — não há a quem escrever. Contado, nunca calado. */
   sem_contato: number;
   cancelados: number;
@@ -244,26 +253,32 @@ export async function aplicaGatilhoDeCaso(
   }
 
   for (const pointer of armados) {
-    const agentId = await resolveAgentForAutomaticTrigger(deps.gateDb, row.organization_id, pointer.id);
-    if (agentId === null) {
+    const noDeGatilho = await deps.db.carregaNoDeGatilho(row.organization_id, pointer.active_version_id);
+    if (!noDeGatilho) continue;
+    const { agentId, barrado } = await decidirAgenteDoEnrollmentAutomatico(
+      deps.gateDb,
+      row.organization_id,
+      pointer.id,
+      noDeGatilho.pedeAgente,
+    );
+    if (barrado) {
       summary.pointers_barrados_pelo_gate++;
       continue;
     }
 
-    const noDeGatilho = await deps.db.carregaNoDeGatilho(row.organization_id, pointer.active_version_id);
-    if (!noDeGatilho) continue;
-
-    const { inserted, id } = await deps.db.insereEnrollment({
+    const { inserted, id, reason } = await deps.db.insereEnrollment({
+      source_case_id: textoOuNulo(row.payload.case_id),
       organization_id: row.organization_id,
       pointer_id: pointer.id,
       version_id: pointer.active_version_id,
       contact_id: contatoId,
       conversation_id: conversationId,
-      current_node_id: noDeGatilho,
+      current_node_id: noDeGatilho.id,
       agent_id: agentId,
     });
     if (!inserted) {
-      summary.skipped_existing++;
+      if (reason === "stale_origin") summary.skipped_stale_origin = (summary.skipped_stale_origin ?? 0) + 1;
+      else summary.skipped_existing++;
       continue;
     }
     summary.enrolled++;
@@ -272,7 +287,7 @@ export async function aplicaGatilhoDeCaso(
       await deps.db.insereEventoDoEnrollment({
         organization_id: row.organization_id,
         enrollment_id: id,
-        node_id: noDeGatilho,
+        node_id: noDeGatilho.id,
         event_type: "enrolled_by_case_opened",
         payload: {
           case_id: textoOuNulo(row.payload.case_id),
@@ -299,7 +314,7 @@ export function createSupabaseGatilhoCasoDb(admin: SupabaseClient): GatilhoCasoD
     async carregaPointersDeCaso(orgId) {
       const { data, error } = await admin
         .from("followup_flow_pointers")
-        .select("id, organization_id, active_version_id, trigger_config")
+        .select("id, organization_id, active_version_id, trigger_config, surface")
         .eq("organization_id", orgId)
         .eq("status", "active")
         .not("active_version_id", "is", null);
@@ -311,8 +326,11 @@ export function createSupabaseGatilhoCasoDb(admin: SupabaseClient): GatilhoCasoD
         organization_id: string;
         active_version_id: string | null;
         trigger_config: unknown;
+        surface?: string | null;
       }>) {
-        if (!row.active_version_id) continue;
+        // Roteiro de atendimento (0394) é do turno, nunca do relógio: o banco
+        // já o prende em gatilho manual, e este corte é a segunda porta.
+        if (!row.active_version_id || row.surface === "atendimento") continue;
         // Mesmo schema do publish: `trigger_config` que não passa nele não arma
         // nada, em vez de armar torto.
         const parsed = triggerConfigSchema.safeParse(row.trigger_config);
@@ -347,13 +365,22 @@ export function createSupabaseGatilhoCasoDb(admin: SupabaseClient): GatilhoCasoD
       if (error) throw new Error(error.message);
       if (!data) return null;
       const graph = flowGraphSchema.parse(data.graph);
-      return graph.nodes.find((n) => n.type === "trigger")?.id ?? null;
+      return noDeGatilhoDoGrafo(graph);
     },
 
     async insereEnrollment(input) {
+      const { source_case_id, ...values } = input;
+      const { data: source, error: sourceError } = await admin.from("agent_cases").select("context_snapshot")
+        .eq("organization_id", input.organization_id).eq("id", source_case_id ?? "").maybeSingle();
+      if (sourceError) throw sourceError;
+      const boundary = parseServiceBoundary(source?.context_snapshot?.service_boundary);
+      if (!boundary) return { inserted: false, id: null, reason: "stale_origin" };
+      try { await assertServiceBoundarySupabase(admin, boundary); } catch (error) {
+        if (error instanceof StaleServiceBoundaryError) return { inserted: false, id: null, reason: "stale_origin" }; throw error;
+      }
       const { data, error } = await admin
         .from("followup_enrollments")
-        .insert(input)
+        .insert({ ...values, service_boundary: boundary })
         .select("id")
         .maybeSingle();
       if (error) {

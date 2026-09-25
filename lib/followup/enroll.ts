@@ -1,3 +1,6 @@
+import type { ServiceBoundary } from "@/lib/atendimento/fronteira";
+import { assertServiceBoundarySupabase } from "@/lib/atendimento/origem";
+import { beginServiceAtOrigin } from "@/lib/atendimento/origem";
 /**
  * Inscrição de um contato num fluxo publicado.
  *
@@ -18,6 +21,7 @@ export const ENROLLMENT_LIST_COLUMNS =
 
 export type EnrollFollowupInput = {
   organizationId: string;
+  resolveServiceBoundary?: () => Promise<ServiceBoundary>;
   pointerId: string;
   contactId: string;
   agentId?: string;
@@ -42,12 +46,23 @@ export async function enrollFollowupFlow(
 
   const { data: pointer, error: pointerErr } = await supabase
     .from("followup_flow_pointers")
-    .select("id, status, active_version_id")
+    .select("id, status, active_version_id, surface")
     .eq("organization_id", organizationId)
     .eq("id", pointerId)
     .maybeSingle();
   if (pointerErr) return { ok: false, code: "internal_error", message: pointerErr.message, status: 500 };
   if (!pointer) return { ok: false, code: "not_found", message: "Fluxo não encontrado.", status: 404 };
+  // Roteiro de atendimento não se inscreve pelo relógio: ele começa no turno do
+  // agente (palavra-gatilho ou roteador). O banco recusaria a linha
+  // (`trg_enrollment_superficie_coerente`); aqui a recusa vira mensagem legível.
+  if (pointer.surface === "atendimento") {
+    return {
+      ok: false,
+      code: "flow_not_enrollable",
+      message: "Roteiro de atendimento começa na conversa, não por inscrição.",
+      status: 422,
+    };
+  }
 
   if (pointer.status !== "active" || !pointer.active_version_id) {
     return {
@@ -107,6 +122,8 @@ export async function enrollFollowupFlow(
     );
   }
 
+  const boundary = input.resolveServiceBoundary ? await input.resolveServiceBoundary() : await beginServiceAtOrigin(supabase, organizationId, contactId);
+  if (input.resolveServiceBoundary) await assertServiceBoundarySupabase(supabase, boundary);
   const { data: created, error: insErr } = await supabase
     .from("followup_enrollments")
     .insert({
@@ -119,6 +136,8 @@ export async function enrollFollowupFlow(
       // next_eval_at omite: default now() do banco (migration 0147). new Date()
       // do processo fica 17–34 ms à frente e o claim `<= now()` pula o tick.
       agent_id: agentId,
+      service_boundary: boundary,
+      conversation_id: boundary.conversation_id,
     })
     .select(ENROLLMENT_LIST_COLUMNS)
     .single();

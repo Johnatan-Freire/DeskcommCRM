@@ -32,6 +32,7 @@ import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { join, posix } from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
+import ts from "typescript";
 
 import {
   comHandoffSeOrcamentoAcabar,
@@ -42,6 +43,7 @@ import {
 import type { DesfechoDoAviso } from "@/lib/agent-engine/agent/aviso-de-escalacao";
 import { corpoDoBloqueio } from "@/lib/agent-engine/edge/llm/orcamento";
 import { LlmBudgetExceededError } from "@/lib/agent-engine/edge/llm/run-model-call";
+import { montarBriefingDaPassagem } from "@/lib/escalacao/briefing-da-passagem";
 
 const RAIZ = process.cwd();
 const INBOUND = join(RAIZ, "lib/agent-engine/agent/inbound-turn.ts");
@@ -51,7 +53,12 @@ const CABECALHO = join(RAIZ, "components/inbox/ConversationHeader.tsx");
 const ORG = "11111111-1111-4111-8111-111111111111";
 const LEAD = "22222222-2222-4222-8222-222222222222";
 const CONVERSA = "33333333-3333-4333-8333-333333333333";
-const RESUMO_DO_CHECKPOINT = "Compromissos: enviar orçamento. Próxima ação: ligar amanhã.";
+/**
+ * O que o briefing do checkpoint produz — a montagem é PURA e determinística,
+ * então o valor esperado é derivado dela, não redigitado. Redigitar faria este
+ * arquivo reprovar por mudança de formatação em vez de por perda de contexto.
+ */
+const RESUMO_DO_CHECKPOINT = "Compromissos: enviar orçamento";
 
 function poolFalso(opts: { falhaEm?: string } = {}) {
   const chamadas: Array<{ sql: string; params: unknown[] }> = [];
@@ -91,7 +98,18 @@ function contexto(pool: unknown, log: unknown, avisarLead = avisoEspiao()) {
     // FUNÇÃO, não valor: a escolta envolve o turno inteiro e abre antes de o
     // checkpoint ter sido lido. Resolver o resumo no caminho feliz seria uma
     // query a mais por turno para um texto que quase nunca é usado.
-    resumoDoCheckpoint: async () => RESUMO_DO_CHECKPOINT,
+    //
+    // Devolve o BRIEFING inteiro, e não só o texto, desde a onda que fez a
+    // passagem virar linha de banco: as quatro colunas da linha saem daqui.
+    briefingDoCheckpoint: async () =>
+      montarBriefingDaPassagem({
+        checkpoint: {
+          commitments: ["enviar orçamento"],
+          objections: [],
+          next_action: "ligar amanhã",
+          rolling_summary: "",
+        },
+      }),
     avisarLead,
     log: log as never,
   };
@@ -100,10 +118,6 @@ function contexto(pool: unknown, log: unknown, avisarLead = avisoEspiao()) {
 /** Só as escritas do handoff — as leituras auxiliares da timeline não contam. */
 function sqlsDoHandoff(chamadas: Array<{ sql: string }>): string[] {
   return chamadas.map((c) => c.sql.replace(/\s+/gu, " ").trim());
-}
-
-function ocorrencias(texto: string, agulha: string): number {
-  return texto.split(agulha).length - 1;
 }
 
 describe("a escolta do orçamento", () => {
@@ -163,9 +177,15 @@ describe("a escolta do orçamento", () => {
     expect(crons?.params).toEqual([ORG, LEAD]);
 
     // (d) a Central recebe o item de escalação, com o título desta causa
-    const inbox = chamadas.find((c) => c.sql.includes("insert into agent_inbox_items"));
+    const inbox = chamadas.find((c) => c.sql.includes("agent_inbox_items"));
     expect(inbox, "handoff sem item na Central é passagem que ninguém vê").toBeDefined();
     expect(inbox?.params).toContain(TITULO_DO_HANDOFF_POR_ORCAMENTO);
+
+    // (e) a LINHA DE FATO — o que quem assume vai ler, e que não existia
+    const passagem = chamadas.find((c) => c.sql.includes("insert into passagens_de_atendimento"));
+    expect(passagem, "a passagem por teto de gasto não virou registro").toBeDefined();
+    expect(passagem?.params).toContain("teto_de_gasto");
+    expect(passagem?.params).toContain("orcamento_de_ia");
   });
 
   it("o resumo do handoff é texto fixo + checkpoint — nunca um resumo gerado", async () => {
@@ -181,8 +201,14 @@ describe("a escolta do orçamento", () => {
     // de ser recusado.
     expect(chamada).toHaveBeenCalledTimes(1);
 
-    const inbox = chamadas.find((c) => c.sql.includes("insert into agent_inbox_items"));
-    const corpo = String(inbox?.params?.[2] ?? "");
+    // ⚠️ O CONTEXTO MUDOU DE CASA. Ele ia para o corpo do aviso da Central, e a
+    // rota da Central lê os avisos com o client de serviço e entrega `body` a
+    // qualquer `agent` — inclusive a quem a visibilidade de conversa não
+    // deixaria abrir aquele atendimento. Agora ele mora na LINHA da passagem,
+    // que é lida sob `fn_can_view_conversation`. A propriedade medida é a mesma
+    // ("o humano assume com o contexto acumulado"); o que mudou foi onde olhar.
+    const passagem = chamadas.find((c) => c.sql.includes("insert into passagens_de_atendimento"));
+    const corpo = String(passagem?.params?.find((p) => typeof p === "string" && p.includes(RESUMO_DO_HANDOFF_POR_ORCAMENTO)) ?? "");
     expect(corpo).toContain(RESUMO_DO_HANDOFF_POR_ORCAMENTO);
     expect(corpo, "o humano assume sem o contexto acumulado da conversa").toContain(
       RESUMO_DO_CHECKPOINT,
@@ -231,7 +257,13 @@ describe("a escolta do orçamento", () => {
     // jeito, mas quem for assumir precisa saber que o cliente está esperando sem
     // ter sido avisado — é o que muda a primeira frase que o atendente digita.
     const { pool, chamadas } = poolFalso();
-    const avisar = vi.fn(async (): Promise<DesfechoDoAviso> => ({ avisado: false, porque: "outside_window" }));
+    const avisar = vi.fn(
+      async (): Promise<DesfechoDoAviso> => ({
+        avisado: false,
+        porque: "messaging_window_closed",
+        motivoCodigo: "fora_da_janela",
+      }),
+    );
 
     await expect(
       comHandoffSeOrcamentoAcabar(contexto(pool, logFalso(), avisar), async () => {
@@ -239,10 +271,18 @@ describe("a escolta do orçamento", () => {
       }),
     ).rejects.toThrow();
 
-    const inbox = chamadas.find((c) => c.sql.includes("insert into agent_inbox_items"));
+    const inbox = chamadas.find((c) => c.sql.includes("agent_inbox_items"));
     const corpo = String(inbox?.params?.[2] ?? "");
     expect(corpo).toMatch(/NÃO foi avisado/u);
-    expect(corpo).toContain("outside_window");
+    // ⚠️ O código TÉCNICO do gate saiu do corpo e o que entrou é a frase em
+    // português do vocabulário fechado. `outside_window` é texto para quem lê
+    // log; quem lê a Central é quem vai atender o cliente.
+    expect(corpo).toContain("Estamos fora do horário em que este canal envia mensagens");
+    expect(corpo, "código de gate na tela de quem opera").not.toContain("messaging_window_closed");
+    // E o desfecho vira DADO na linha da passagem, não só frase.
+    const passagem = chamadas.find((c) => c.sql.includes("insert into passagens_de_atendimento"));
+    expect(passagem?.params).toContain("fora_da_janela");
+    expect(passagem?.params).toContain(false);
   });
 
   it("aviso que falha NÃO impede a passagem", async () => {
@@ -296,83 +336,77 @@ describe("a escolta do orçamento", () => {
  * o corpo do turno rodar desescoltado, e nenhum auxiliar futuro precisa ser
  * lembrado numa lista.
  */
-describe("o call site — medido no texto, porque a unidade não o alcança", () => {
+/** Distinguishes the authorized in-memory preview from every operational entrance. */
+function chamadasDoNucleo(texto: string) {
+  const ast = ts.createSourceFile("inbound.ts", texto, ts.ScriptTarget.Latest, true);
+  const chamadas: Array<{ tipo: "operacional" | "preview" | "sem_escolta"; texto: string }> = [];
+  const visit = (node: ts.Node) => {
+    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === "executarTurnoDoAgente") {
+      const ancestors: ts.Node[] = [];
+      for (let p = node.parent; p; p = p.parent) ancestors.push(p);
+      const owner = ancestors.find(ts.isFunctionDeclaration)?.name?.text;
+      const escoltado = ancestors.some(p => ts.isCallExpression(p) && ts.isIdentifier(p.expression) && p.expression.text === "comHandoffSeOrcamentoAcabar");
+      const preview = owner === "runAgentPreview" && node.arguments.length === 6 &&
+        node.arguments[1]?.kind === ts.SyntaxKind.NullKeyword && node.arguments[5]?.getText(ast) === "preview";
+      chamadas.push({ tipo: owner === "runAgentTurn" && escoltado ? "operacional" : preview ? "preview" : "sem_escolta", texto: node.getText(ast) });
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(ast);
+  return chamadas;
+}
+
+describe("o call site — AST separa prévia sem job do turno operacional escoltado", () => {
   const fonteInbound = readFileSync(INBOUND, "utf8");
   const ESCOLTADO = "() => executarTurnoDoAgente(deps, job, pool, ctx, input),";
 
-  it("o turno inteiro roda dentro da escolta — não só as chamadas diretas de modelo", () => {
-    expect(fonteInbound.length, "guarda de vacuidade: inbound-turn.ts vazio?").toBeGreaterThan(1000);
-    // Duas ocorrências: a declaração e a ÚNICA chamada. Uma terceira seria um
-    // caminho de execução do turno que a escolta não cobre.
-    expect(
-      // Com parêntese: só INVOCAÇÃO e declaração contam. A menção em prosa
-      // (crase, sem parêntese) do cabeçalho de `runAgentTurn` não é caminho de
-      // execução, e contá-la faria o número mudar quando alguém edita comentário.
-      ocorrencias(fonteInbound, "executarTurnoDoAgente("),
-      "o núcleo do turno ganhou um segundo call site — a escolta cobre um só",
-    ).toBe(2);
-    expect(
-      fonteInbound,
-      "o núcleo do turno saiu de dentro da escolta: um estouro de teto em QUALQUER " +
-        "chamada de modelo do turno (inclusive as indiretas, que rodam primeiro) vira " +
-        "job cancelado e lead sem resposta",
-    ).toContain(ESCOLTADO);
-    expect(
-      fonteInbound.includes("export async function executarTurnoDoAgente"),
-      "exportar o núcleo cria um caminho para o turno rodar desescoltado",
-    ).toBe(false);
+  it("há uma única entrada operacional escoltada e uma prévia explicitamente sem job", () => {
+    const calls = chamadasDoNucleo(fonteInbound);
+    expect(calls.map(c => c.tipo).sort()).toEqual(["operacional", "preview"]);
+    const ast = ts.createSourceFile("inbound.ts", fonteInbound, ts.ScriptTarget.Latest, true);
+    const declarations = ast.statements.filter(ts.isFunctionDeclaration).filter(n => n.name?.text === "executarTurnoDoAgente");
+    expect(declarations).toHaveLength(1);
+    expect(declarations[0]!.modifiers?.some(m => m.kind === ts.SyntaxKind.ExportKeyword) ?? false).toBe(false);
   });
 
-  it("os auxiliares que chamam o modelo estão DENTRO do núcleo escoltado", () => {
-    // A guarda de alcance: se `classifyStage`/`maybeCompact` saíssem de
-    // `executarTurnoDoAgente` para `runAgentTurn` (antes da escolta), a escolta
-    // voltaria a não cobri-los. `indexOf` do núcleo marca a fronteira.
-    const inicioDoNucleo = fonteInbound.indexOf("async function executarTurnoDoAgente");
-    expect(inicioDoNucleo).toBeGreaterThan(0);
-    for (const auxiliar of ["classifyStage(", "maybeCompact("]) {
-      const pos = fonteInbound.indexOf(`await ${auxiliar}`);
-      expect(pos, `${auxiliar} não foi encontrado — o detector mede outra coisa`).toBeGreaterThan(0);
-      expect(
-        pos,
-        `${auxiliar} chama o modelo FORA do núcleo escoltado — estourar o teto ali ` +
-          `cancela o job sem handoff`,
-      ).toBeGreaterThan(inicioDoNucleo);
-    }
+  function auxiliaresForaDoNucleo(texto: string) {
+    const ast = ts.createSourceFile("inbound.ts", texto, ts.ScriptTarget.Latest, true);
+    const encontrados: Array<{ nome: string; owner: string | undefined }> = [];
+    const visit = (node: ts.Node) => {
+      if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && ["classifyStage", "maybeCompact"].includes(node.expression.text)) {
+        let parent: ts.Node | undefined = node.parent;
+        while (parent && !ts.isFunctionDeclaration(parent)) parent = parent.parent;
+        encontrados.push({ nome: node.expression.text, owner: parent && ts.isFunctionDeclaration(parent) ? parent.name?.text : undefined });
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(ast);
+    return encontrados;
+  }
+  it("todos os auxiliares de classificação e compaction ficam dentro do núcleo", () => {
+    const calls = auxiliaresForaDoNucleo(fonteInbound);
+    expect(new Set(calls.map(c => c.nome))).toEqual(new Set(["classifyStage", "maybeCompact"]));
+    expect(calls.filter(c => c.owner !== "executarTurnoDoAgente")).toEqual([]);
   });
 
-  it("controle negativo: o detector acusa o núcleo tirado da escolta", () => {
-    const sabotado = fonteInbound.replace(
-      ESCOLTADO,
-      "() => Promise.resolve(),\n  );\n  await executarTurnoDoAgente(deps, job, pool, ctx, input);\n  void (",
-    );
-    expect(sabotado, "a sabotagem não mudou nada — o detector mede outra coisa").not.toBe(
-      fonteInbound,
-    );
-    // ⚠️ A CONTAGEM SOZINHA NÃO PEGARIA: a sabotagem tira uma invocação de dentro
-    // da escolta e põe outra fora, e o total continua 2. É a asserção de
-    // CONTINÊNCIA que carrega o peso aqui — cada uma das duas guarda uma
-    // propriedade diferente, e declarar isso é o que impede alguém de "simplificar"
-    // o caso removendo a que parece redundante.
-    expect(ocorrencias(sabotado, "executarTurnoDoAgente(")).toBe(2);
-    expect(sabotado).not.toContain(ESCOLTADO);
+  it("controle negativo: retirar a escolta é acusado mesmo mantendo o número de chamadas", () => {
+    const sabotado = fonteInbound.replace(ESCOLTADO, "() => Promise.resolve(),\n  );\n  await executarTurnoDoAgente(deps, job, pool, ctx, input);\n  void (");
+    expect(sabotado).not.toBe(fonteInbound);
+    expect(chamadasDoNucleo(sabotado)).toHaveLength(2);
+    expect(chamadasDoNucleo(sabotado).filter(c => c.tipo === "sem_escolta")).toHaveLength(1);
   });
-
-  it("controle negativo: a contagem acusa um SEGUNDO caminho de execução do turno", () => {
-    const sabotado = `${fonteInbound}\nasync function atalho() { await executarTurnoDoAgente(a, b, c, d, e); }\n`;
-    expect(ocorrencias(sabotado, "executarTurnoDoAgente(")).toBe(3);
-    // O atalho preserva a escolta original — só a contagem o denuncia.
-    expect(sabotado).toContain(ESCOLTADO);
+  it("controle negativo: um novo atalho é acusado sem remover a escolta legítima", () => {
+    const sabotado = `${fonteInbound}\nasync function atalho() { await executarTurnoDoAgente(a, b, c, d, e); }`;
+    expect(chamadasDoNucleo(sabotado).map(c => c.tipo).sort()).toEqual(["operacional", "preview", "sem_escolta"]);
   });
-
-  it("controle negativo: o detector acusa um auxiliar promovido para fora do núcleo", () => {
-    const inicioDoNucleo = fonteInbound.indexOf("async function executarTurnoDoAgente");
-    const sabotado =
-      fonteInbound.slice(0, inicioDoNucleo) +
-      "await classifyStage(x);\n" +
-      fonteInbound.slice(inicioDoNucleo);
-    expect(sabotado.indexOf("await classifyStage(")).toBeLessThan(
-      sabotado.indexOf("async function executarTurnoDoAgente"),
-    );
+  it("controle negativo: prévia não pode transportar um job operacional", () => {
+    const sabotado = fonteInbound.replace(/(await executarTurnoDoAgente\(\s*deps,\s*)null,/, "$1job,");
+    expect(sabotado).not.toBe(fonteInbound);
+    expect(chamadasDoNucleo(sabotado).filter(c => c.tipo === "sem_escolta")).toHaveLength(1);
+  });
+  it("controle negativo: um auxiliar fora do núcleo é acusado", () => {
+    const sabotado = `${fonteInbound}\nasync function atalho() { await classifyStage(x); }`;
+    expect(auxiliaresForaDoNucleo(sabotado).filter(c => c.owner !== "executarTurnoDoAgente")).toEqual([{ nome: "classifyStage", owner: "atalho" }]);
   });
 
   it("o erro de orçamento se declara terminal — é o que a fila lê", () => {
@@ -387,8 +421,8 @@ describe("o call site — medido no texto, porque a unidade não o alcança", ()
 describe("a fila trata veto de negócio como veto, não como incidente", () => {
   const fonteWorker = readFileSync(WORKER, "utf8").replace(/\s+/gu, " ");
   const ROTEAMENTO =
-    "if (terminal) { await cancelJob(pool, job.id, workerId, errMsg(err)); } " +
-    "else { await failJob(pool, job.id, workerId, err); }";
+    "if (terminal) { await cancelJob(pool, job.id, workerId, errMsg(err), claimOfJob(job)?.acquired_at); } " +
+    "else { await failJob(pool, job.id, workerId, err, claimOfJob(job)?.acquired_at); }";
 
   it("erro terminal vai para cancelJob; o resto continua em failJob", () => {
     expect(fonteWorker.length, "guarda de vacuidade: arquivo do worker vazio").toBeGreaterThan(1000);
@@ -401,8 +435,8 @@ describe("a fila trata veto de negócio como veto, não como incidente", () => {
 
   it("controle negativo: o detector acusa a volta do failJob", () => {
     const sabotado = fonteWorker.replace(
-      "await cancelJob(pool, job.id, workerId, errMsg(err));",
-      "await failJob(pool, job.id, workerId, err);",
+      "await cancelJob(pool, job.id, workerId, errMsg(err), claimOfJob(job)?.acquired_at);",
+      "await failJob(pool, job.id, workerId, err, claimOfJob(job)?.acquired_at);",
     );
     expect(sabotado).not.toBe(fonteWorker);
     expect(sabotado).not.toContain(ROTEAMENTO);
@@ -498,17 +532,27 @@ describe("o código morto de orçamento não volta", () => {
 describe("os textos do orçamento nomeiam botões que existem", () => {
   const fonteCabecalho = readFileSync(CABECALHO, "utf8");
 
-  /** O rótulo do botão de volta, extraído do próprio componente. */
+  /**
+   * O rótulo do botão de volta, extraído do próprio componente.
+   *
+   * Lê o ÚLTIMO `t("...")` antes de `</Button>`, não o primeiro depois do
+   * `data-testid`: o `title` do botão (tooltip com o alcance da ação, i18n
+   * também) ganhou suas próprias chamadas `t(...)` antes do texto visível, e
+   * pegar a primeira ocorrência passou a capturar o tooltip em vez do rótulo.
+   */
   function rotuloDoBotaoDeVolta(): string {
     const bloco = fonteCabecalho.slice(fonteCabecalho.indexOf('data-testid="devolver-ao-automatico"'));
-    const m = /t\("([^"]+)"\)/.exec(bloco);
-    if (m === null) {
+    const fechamento = bloco.indexOf("</Button>");
+    const corpoDoBotao = fechamento === -1 ? bloco : bloco.slice(0, fechamento);
+    const ocorrencias = [...corpoDoBotao.matchAll(/t\("([^"]+)"\)/g)];
+    const ultima = ocorrencias[ocorrencias.length - 1];
+    if (ultima === undefined) {
       throw new Error(
         "não achei o rótulo do botão de volta em ConversationHeader.tsx — o extrator perdeu o alvo. " +
           "Perder o alvo NÃO é aprovação: conserte o extrator, nunca apague o caso.",
       );
     }
-    return m[1]!;
+    return ultima[1]!;
   }
 
   it("o botão de volta existe e tem um rótulo legível (guarda de vacuidade)", () => {
@@ -535,9 +579,12 @@ describe("os textos do orçamento nomeiam botões que existem", () => {
       't("Voltar para a IA")',
     );
     expect(renomeado).not.toBe(fonteCabecalho);
-    const novo = /t\("([^"]+)"\)/.exec(
-      renomeado.slice(renomeado.indexOf('data-testid="devolver-ao-automatico"')),
-    )?.[1];
+    const blocoRenomeado = renomeado.slice(renomeado.indexOf('data-testid="devolver-ao-automatico"'));
+    const fechamentoRenomeado = blocoRenomeado.indexOf("</Button>");
+    const corpoRenomeado =
+      fechamentoRenomeado === -1 ? blocoRenomeado : blocoRenomeado.slice(0, fechamentoRenomeado);
+    const ocorrenciasRenomeadas = [...corpoRenomeado.matchAll(/t\("([^"]+)"\)/g)];
+    const novo = ocorrenciasRenomeadas[ocorrenciasRenomeadas.length - 1]?.[1];
     expect(novo).toBe("Voltar para a IA");
     expect(corpoDoBloqueio(15_000, 10_000)).not.toContain(novo as string);
   });

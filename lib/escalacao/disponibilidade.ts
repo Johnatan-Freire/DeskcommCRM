@@ -23,8 +23,6 @@
  * É o mesmo par que `emitLeadActivity` (supabase) e `emitAgentActivityForContact`
  * (pg) formam sobre `buildLeadActivityRow`: dois leitores, uma regra.
  */
-import type { SupabaseClient } from "@supabase/supabase-js";
-
 import { ROLE_RANK, type Role } from "@/lib/auth/types";
 import { isAttendantEligible, isWithinSchedule, OPEN_LOAD_STATUSES } from "@/lib/routing/eligibility";
 import { availabilityScheduleSchema, type AvailabilitySchedule } from "@/lib/schemas/routing";
@@ -46,8 +44,13 @@ export interface QuemPodeAssumir {
    * capacidade cheia não é previsível daqui (não sabemos quando uma conversa
    * em andamento termina), e "ninguém logado agora" também não é horário —
    * é presença, e cai no genérico de propósito (ver `agendas` abaixo).
+   *
+   * Opcional: `lib/ai/handoff/aviso-ao-lead.ts` monta este tipo pelo lado
+   * supabase-js (roster de `atendentes.ts`, sem leitura de agenda) para
+   * `textoDoAviso` — esse consumidor não usa "próxima abertura", então não
+   * precisa calcular o campo. Ausente é lido como "não é motivo de horário".
    */
-  motivoEHorario: boolean;
+  motivoEHorario?: boolean;
   /**
    * Agendas de QUEM JÁ CONFIGUROU disponibilidade alguma vez — insumo pra
    * "próxima abertura". Deliberadamente INDEPENDENTE do toggle `is_available`
@@ -57,7 +60,7 @@ export interface QuemPodeAssumir {
    * sempre falso, e a estimativa de horário nunca apareceria se dependesse
    * disso.
    */
-  agendas: Pick<AvailabilitySchedule, "timezone" | "windows">[];
+  agendas?: Pick<AvailabilitySchedule, "timezone" | "windows">[];
 }
 
 interface LinhaDeDisponibilidade {
@@ -66,60 +69,20 @@ interface LinhaDeDisponibilidade {
   is_available: boolean | null;
   capacity: number | null;
   schedule: unknown;
-  /** normalizada pra number nos DOIS leitores antes de chegar aqui (pg devolve string). */
-  carga: number;
-}
-
-/**
- * A REGRA, compartilhada pelos dois leitores (pg e supabase-js — ver docstring
- * do módulo). Puramente TypeScript: SQL que decidisse elegibilidade aqui seria
- * a segunda regra, e as duas divergiriam sem ninguém notar.
- */
-function computeQuemPodeAssumir(rows: LinhaDeDisponibilidade[], now: Date): QuemPodeAssumir {
-  // Viewer não é insumo de roteamento — mesmo corte do roster da API.
-  const atendentes = rows.filter(
-    (r) => ROLE_RANK[r.role as Role] !== undefined && ROLE_RANK[r.role as Role] >= ROLE_RANK.agent,
-  );
-
-  // `capacity === null` = nunca salvou uma linha em attendant_availability.
-  // is_available NÃO decide se a linha entra aqui — quem configurou uma vez e
-  // está offline no momento continua, só com `is_available: false`.
-  const configurados = atendentes.filter((r) => r.capacity !== null);
-
-  const agendas = configurados.map((r) => availabilityScheduleSchema.parse(r.schedule ?? {}));
-
-  // `disponiveis` (quem pode assumir DE VERDADE agora) continua exigindo
-  // is_available AO VIVO — é o mesmo cálculo que o roteamento usa, e prometer
-  // com quem está offline prometeria o que o roteamento nunca entregaria.
-  const disponiveis = configurados.filter((r, i) =>
-    isAttendantEligible(
-      { isAvailable: r.is_available === true, capacity: r.capacity as number, currentLoad: r.carga, schedule: agendas[i] },
-      now,
-    ),
-  ).length;
-
-  // Ignora capacidade E o toggle is_available de propósito (ver doc de
-  // `agendas` no módulo): se a AGENDA de alguém diz que está no horário agora
-  // (esteja ele logado ou não), o motivo de `disponiveis === 0` não é
-  // previsível por horário — pode ser fila cheia ou só ninguém ter aberto o
-  // inbox ainda hoje, e prometer "volta às Xh" seria inventar um horário que
-  // já passou.
-  const motivoEHorario =
-    configurados.length > 0 && configurados.every((r, i) => !isWithinSchedule(agendas[i], now));
-
-  return { disponiveis, total: atendentes.length, motivoEHorario, agendas };
+  carga: string;
 }
 
 /**
  * Uma query só: roster agent+ ⟕ disponibilidade ⟕ carga (conversas abertas
- * atribuídas). Cliente `pg` — o motor de turno roda fora do request.
+ * atribuídas). A decisão de elegibilidade fica em TypeScript, na função pura
+ * compartilhada — SQL que decidisse aqui seria a segunda regra.
  */
 export async function quemPodeAssumirAgora(
   db: Queryable,
   tenantId: string,
   now: Date,
 ): Promise<QuemPodeAssumir> {
-  const { rows } = await db.query<Omit<LinhaDeDisponibilidade, "carga"> & { carga: string }>(
+  const { rows } = await db.query<LinhaDeDisponibilidade>(
     `select uo.user_id,
             uo.role,
             aa.is_available,
@@ -138,74 +101,40 @@ export async function quemPodeAssumirAgora(
         and uo.revoked_at is null`,
     [tenantId, OPEN_LOAD_STATUSES],
   );
-  return computeQuemPodeAssumir(
-    rows.map((r) => ({ ...r, carga: Number(r.carga) })),
-    now,
+
+  // Viewer não é insumo de roteamento — mesmo corte do roster da API.
+  const atendentes = rows.filter(
+    (r) => ROLE_RANK[r.role as Role] !== undefined && ROLE_RANK[r.role as Role] >= ROLE_RANK.agent,
   );
-}
 
-/**
- * Mesma REGRA (computeQuemPodeAssumir), cliente supabase-js — para chamadores
- * que rodam dentro do request (tools MCP, ex.: crm_request_human_handoff) e já
- * têm `ctx.supabase` (admin, bypassa RLS) em vez de um pool `pg` cru. Três
- * queries em vez de um JOIN porque supabase-js não faz subquery correlacionada
- * — mesmo troca-off que `loadEligibleAttendants` (lib/routing/eligibles.ts)
- * já assume para o mesmo tipo de leitura.
- */
-export async function quemPodeAssumirAgoraViaSupabase(
-  supabase: SupabaseClient,
-  tenantId: string,
-  now: Date,
-): Promise<QuemPodeAssumir> {
-  const { data: roster, error: rosterErr } = await supabase
-    .from("user_organizations")
-    .select("user_id, role")
-    .eq("organization_id", tenantId)
-    .is("revoked_at", null);
-  if (rosterErr) throw new Error(rosterErr.message);
+  // `capacity === null` = nunca salvou uma linha em attendant_availability
+  // (o LEFT JOIN não deu match nenhum). Agora is_available NÃO faz parte da
+  // condição do join — quem configurou uma vez e está offline no momento
+  // continua aqui, com a linha, só com `is_available: false`.
+  const configurados = atendentes.filter((r) => r.capacity !== null);
 
-  const { data: avail, error: availErr } = await supabase
-    .from("attendant_availability")
-    .select("user_id, is_available, capacity, schedule")
-    .eq("organization_id", tenantId);
-  if (availErr) throw new Error(availErr.message);
+  const agendas = configurados.map((r) => availabilityScheduleSchema.parse(r.schedule ?? {}));
 
-  const availByUser = new Map(
-    ((avail ?? []) as { user_id: string; is_available: boolean | null; capacity: number | null; schedule: unknown }[]).map(
-      (a) => [a.user_id, a],
+  // `disponiveis` (quem pode assumir DE VERDADE agora) continua exigindo
+  // is_available AO VIVO — é o mesmo cálculo que o roteamento usa, e prometer
+  // com quem está offline prometeria o que o roteamento nunca entregaria.
+  const disponiveis = configurados.filter((r, i) =>
+    isAttendantEligible(
+      { isAvailable: r.is_available === true, capacity: r.capacity as number, currentLoad: Number(r.carga), schedule: agendas[i]! },
+      now,
     ),
-  );
+  ).length;
 
-  const userIds = ((roster ?? []) as { user_id: string; role: string }[]).map((r) => r.user_id);
-  const loadByUser = new Map<string, number>();
-  if (userIds.length > 0) {
-    const { data: openConvs, error: convErr } = await supabase
-      .from("conversations")
-      .select("assigned_to_user_id")
-      .eq("organization_id", tenantId)
-      .in("assigned_to_user_id", userIds)
-      .in("status", OPEN_LOAD_STATUSES as unknown as string[]);
-    if (convErr) throw new Error(convErr.message);
-    for (const c of (openConvs ?? []) as { assigned_to_user_id: string | null }[]) {
-      if (c.assigned_to_user_id) {
-        loadByUser.set(c.assigned_to_user_id, (loadByUser.get(c.assigned_to_user_id) ?? 0) + 1);
-      }
-    }
-  }
+  // Ignora capacidade E o toggle is_available de propósito (ver doc de
+  // `agendas` acima): se a AGENDA de alguém diz que está no horário agora
+  // (esteja ele logado ou não), o motivo de `disponiveis === 0` não é
+  // previsível por horário — pode ser fila cheia ou só ninguém ter aberto o
+  // inbox ainda hoje, e prometer "volta às Xh" seria inventar um horário que
+  // já passou.
+  const motivoEHorario =
+    configurados.length > 0 && configurados.every((r, i) => !isWithinSchedule(agendas[i]!, now));
 
-  const rows: LinhaDeDisponibilidade[] = ((roster ?? []) as { user_id: string; role: string }[]).map((r) => {
-    const a = availByUser.get(r.user_id);
-    return {
-      user_id: r.user_id,
-      role: r.role,
-      is_available: a?.is_available ?? null,
-      capacity: a?.capacity ?? null,
-      schedule: a?.schedule ?? null,
-      carga: loadByUser.get(r.user_id) ?? 0,
-    };
-  });
-
-  return computeQuemPodeAssumir(rows, now);
+  return { disponiveis, total: atendentes.length, motivoEHorario, agendas };
 }
 
 /**
@@ -237,7 +166,7 @@ export function fraseDeExpectativa(
     );
   }
   if (q.disponiveis === 0) {
-    if (q.motivoEHorario) {
+    if (q.motivoEHorario && q.agendas) {
       const proxima = proximaAberturaGeral(q.agendas, now);
       if (proxima) return fraseDaProximaAbertura(proxima, now, timezone);
     }

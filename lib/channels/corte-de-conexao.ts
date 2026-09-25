@@ -1,5 +1,5 @@
 /**
- * O corte de conexão (migration 0281): mensagem sincronizada pelo WAHA de
+ * O corte de conexão (migration 0398): mensagem sincronizada pelo WAHA de
  * ANTES do pareamento não é gatilho de NADA que fale com o contato.
  *
  * WAHA/NOWEB (baileys) sincroniza histórico do WhatsApp ao parear um número

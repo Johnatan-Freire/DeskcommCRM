@@ -31,12 +31,12 @@ import { generateText, stepCountIs, type LanguageModel, type StopCondition, type
 // Repetir a URL aqui criaria dois lugares para consertar quando ela mudar.
 import {
   cabecalhosDeAtribuicaoOpenRouter,
+  DEEPSEEK_ENDPOINT,
   OPENROUTER_ENDPOINT,
 } from "@/lib/agent-engine/edge/llm/providers";
 import { CredentialUnavailableError, loadCredential } from "@/lib/ai/credentials";
-import { loadOrgMemoryViaSupabase, renderOrgMemory } from "@/lib/agent-engine/agent/org-memory";
-import { quemPodeAssumirAgoraViaSupabase } from "@/lib/escalacao/disponibilidade";
-import { textoDeConfirmacaoDeHandoff } from "@/lib/escalacao/texto-de-confirmacao";
+import { decidirElegibilidadeDaConversaViaSupabase } from "@/lib/ai/elegibilidade/consulta-supabase";
+import { ttlDaAutorizacaoMs } from "@/lib/ai/elegibilidade/gate";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { audit } from "@/lib/audit";
 import type { McpAuthResult } from "@/lib/mcp/auth";
@@ -48,6 +48,7 @@ import { finalizeHandoff } from "./handoff";
 import { loadHistoryWithBudget } from "./history";
 import { mintEphemeralToken, revokeEphemeralToken } from "./mcp_token";
 import { pickToolsFromMcp, type RuntimeHandoffSignal } from "./tools";
+import { modulosLigados } from "@/lib/instalacao/modulos";
 import { serializeSteps } from "./serialize";
 import {
   CHANNEL_SESSION_REF_COLUMNS,
@@ -63,12 +64,6 @@ export interface RunAgentInput {
   override?: {
     sampleMessage?: string;
     sampleContact?: { name?: string; phone?: string };
-    /**
-     * Turnos anteriores da sessão de teste (cliente mantém o transcript — não
-     * há `conversation_id` real de onde carregar). Ausente/vazio preserva o
-     * comportamento antigo: cada teste isolado, sem continuidade.
-     */
-    priorTurns?: { role: "user" | "assistant"; content: string }[];
   };
 }
 
@@ -188,7 +183,13 @@ export function buildModel(provider: string, apiKey: string, modelId: string): L
         apiKey,
         baseURL: OPENROUTER_ENDPOINT,
         headers: cabecalhosDeAtribuicaoOpenRouter(),
-      })(modelId);
+      }).chat(modelId); // chat/completions: a OpenRouter não serve /responses para todo modelo (#1130)
+    // Mesma fábrica OpenAI-compatível que o registry de produção usa. Sem este
+    // caso, o dono que publicou em DeepSeek receberia `unsupported_provider` no
+    // ensaio enquanto o worker responderia a mensagem real — ensaio mais
+    // rígido que a produção mente sobre o que está quebrado.
+    case "deepseek":
+      return createOpenAI({ apiKey, baseURL: DEEPSEEK_ENDPOINT })(modelId);
     default:
       throw new Error(`unsupported_provider: ${provider}`);
   }
@@ -378,6 +379,30 @@ export async function runAgent(input: RunAgentInput): Promise<RunAgentResult> {
           waLid: conv.contacts?.wa_lid,
         });
       }
+
+      // GATE DE ELEGIBILIDADE — este runtime legado (@deprecated, hoje só o
+      // dispatcher aposentado o alcança com envio real) TAMBÉM não pode
+      // responder uma conversa que uma origem elegível não autorizou. Mesma
+      // regra pura do drain/turno. Fail-closed: erro de leitura → falha o run
+      // antes de qualquer custo de LLM.
+      try {
+        const elegib = await decidirElegibilidadeDaConversaViaSupabase(admin, {
+          organizationId: run.organization_id,
+          conversationId: run.conversation_id,
+          agora: new Date(),
+          ttlMs: ttlDaAutorizacaoMs(process.env),
+        });
+        if (elegib !== null && !elegib.permite) {
+          return await failRun(run, "nao_elegivel_para_ia", `elegibilidade: ${elegib.motivo}`, startedAt);
+        }
+      } catch (err) {
+        return await failRun(
+          run,
+          "nao_elegivel_para_ia",
+          `elegibilidade indeterminada: ${err instanceof Error ? err.message.slice(0, 120) : "erro"}`,
+          startedAt,
+        );
+      }
     }
 
     if (!inboundBody) {
@@ -396,25 +421,10 @@ export async function runAgent(input: RunAgentInput): Promise<RunAgentResult> {
         latencyMs: Date.now() - startedAt,
         isDryRun: run.is_dry_run,
       });
-      // Zero-custo por desenho (regex, sem LLM) — mesmo motivo pelo qual a
-      // confirmação não pode ser gerada por modelo aqui. Mesmo texto
-      // determinístico do sentinela de produção (inbound-turn.ts), pra quem
-      // testa pelo painel ver a mesma coisa que o lead veria, não um status
-      // técnico sem mensagem nenhuma (achado ao vivo: "handoff"/sem
-      // final_text não dizia nada sobre o que o cliente ia ler).
-      let sentinelText: string | undefined;
-      try {
-        const now = new Date();
-        const quem = await quemPodeAssumirAgoraViaSupabase(admin, run.organization_id, now);
-        sentinelText = textoDeConfirmacaoDeHandoff(quem, now, "America/Sao_Paulo", run.contact_id ?? run.id);
-      } catch {
-        // segue sem final_text — o status "handoff" ainda é visível na tela
-      }
       return {
         run_id: run.id,
         status: "handoff",
         abort_reason: "sentinel:requested_human",
-        ...(sentinelText !== undefined ? { final_text: sentinelText } : {}),
         latency_ms: Date.now() - startedAt,
         tokens_in: 0,
         tokens_out: 0,
@@ -475,13 +485,11 @@ export async function runAgent(input: RunAgentInput): Promise<RunAgentResult> {
       handoffToolEnabled: version.handoff_tool_enabled,
       // `?? []` — o clone sem a coluna 0125 nasce FECHADO.
       pipelineIds: (version as { pipeline_ids?: string[] }).pipeline_ids ?? [],
+      modulosLigados: await modulosLigados(admin),
       handoffSignal,
     });
 
-    // 8) Load history with budget. Test runs não têm `conversation_id` (não é
-    // conversa de verdade); a continuidade vem do transcript que o CLIENTE
-    // mantém e reenvia em `override.priorTurns` — sem isso, cada mensagem de
-    // teste é isolada, mesmo que o usuário mande "mensagem 2" logo após "1".
+    // 8) Load history with budget.
     const history = run.conversation_id
       ? await loadHistoryWithBudget(admin, {
           conversationId: run.conversation_id,
@@ -490,7 +498,7 @@ export async function runAgent(input: RunAgentInput): Promise<RunAgentResult> {
           tokenWindow: version.history_token_window,
           excludeMessageId: run.inbound_message_id ?? undefined,
         })
-      : (input.override?.priorTurns ?? []);
+      : [];
 
     // 9) Build LM directly against the provider (BYOK credential — see buildModel doc).
     const model = buildModel(version.provider, credentialApiKey, version.model);
@@ -527,24 +535,9 @@ export async function runAgent(input: RunAgentInput): Promise<RunAgentResult> {
       { role: "user" as const, content: inboundBody },
     ];
 
-    // Memória Geral da Org (mesmo bloco que o runtime de produção injeta —
-    // lib/agent-engine/agent/org-memory.ts): sem isto, "Testar agente" não via
-    // nada publicado em /app/ai/memory (endereço, políticas, aprendizados) e o
-    // agente escalava pra humano por não ter uma informação que a organização
-    // já tinha dado. Falha de leitura aqui NÃO derruba o teste — só some o
-    // bloco, igual a uma org sem memória nenhuma.
-    let systemPrompt = version.system_prompt;
-    try {
-      const orgMemory = await loadOrgMemoryViaSupabase(admin, version.organization_id);
-      const memoryBlock = renderOrgMemory(orgMemory);
-      if (memoryBlock !== "") systemPrompt = `${version.system_prompt}\n\n${memoryBlock}`;
-    } catch {
-      // segue com o prompt publicado, sem o bloco de memória
-    }
-
     const result = await generateText({
       model,
-      system: systemPrompt,
+      system: version.system_prompt,
       messages,
       tools,
       stopWhen: [stepCountIs(version.max_steps), budgetGuard],

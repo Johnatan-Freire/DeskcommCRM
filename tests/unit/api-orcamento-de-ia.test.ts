@@ -47,6 +47,7 @@ function sessao(papel: Role) {
     full_name: "Admin",
     avatar_url: null,
     is_platform_admin: false,
+    idioma: "pt-BR" as const,
     organizations: [{ organization_id: ORG, organization_name: "Org", role: papel }],
   };
   vi.mocked(requireRole).mockImplementation(async (min: Role) =>
@@ -647,3 +648,10 @@ describe("desarmar devolve a carência inteira — a coluna NÃO fica pré-gasta
     ).toBe(false);
   });
 });
+
+// Este teste isola o handler; autoridade de suporte é exercitada na suíte própria.
+vi.mock("@/lib/impersonate/support", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/lib/impersonate/support")>(),
+  requireSupportWrite: vi.fn(async () => null),
+  authenticatedSessionId: vi.fn(async () => "f2200000-0000-4000-8000-000000000099"),
+}));

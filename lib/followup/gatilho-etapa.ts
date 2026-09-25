@@ -1,3 +1,4 @@
+import { serviceForEvent } from "@/lib/atendimento/origem";
 /**
  * Gatilho de ETAPA DO FUNIL (`trigger_config.kind='stage_change'`) — o
  * follow-up passa a nascer sozinho quando o negócio entra numa etapa escolhida.
@@ -32,10 +33,9 @@
  *     org-wide `(organization_id, contact_id)`: um contato vivo em QUALQUER
  *     fluxo barra o insert. `23505` é caminho normal — vira `skipped_existing`,
  *     nunca erro.
- *   - **Gate do agente.** `resolveAgentForAutomaticTrigger` — só enrolla se
- *     algum agente PUBLICADO da org arma este pointer. É o que impede fluxo
- *     rascunho de disparar em produção; e o `agent_id` que ele devolve é pinado
- *     no enrollment (persona + exibição na fila).
+ *   - **Gate do agente.** `decidirAgenteDoEnrollmentAutomatico` — grafo que
+ *     pede IA só enrolla se algum agente PUBLICADO da org arma este pointer.
+ *     Texto fixo / template segue com `agent_id` nulo, igual a `manual`.
  *   - **Trigger Postgres nunca faz HTTP.** Nada aqui roda dentro da transação
  *     do banco: o trigger só emitiu a linha, quem consome é este worker.
  *
@@ -50,7 +50,12 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { EventRow } from "@/lib/event-log/dispatcher";
 import { flowGraphSchema } from "./graph-schema";
 import { triggerConfigSchema } from "./api-schemas";
-import { resolveAgentForAutomaticTrigger, type FollowupGateDb } from "./agent-followup-gate";
+import {
+  decidirAgenteDoEnrollmentAutomatico,
+  noDeGatilhoDoGrafo,
+  type FollowupGateDb,
+  type NoDeGatilho,
+} from "./agent-followup-gate";
 
 /** O evento que este produtor consome. Constante porque o handler e os testes
  *  precisam do MESMO literal — duas cópias divergiriam no primeiro ajuste. */
@@ -73,9 +78,11 @@ export interface GatilhoEtapaDb {
   /** `contact_id` do negócio — `null` quando o negócio não tem contato (coluna é nullable). */
   carregaContatoDoNegocio(orgId: string, leadId: string): Promise<string | null>;
   /** id do nó `trigger` do grafo pinado; `null` se a version sumiu (defensivo). */
-  carregaNoDeGatilho(orgId: string, versionId: string): Promise<string | null>;
+  carregaNoDeGatilho(orgId: string, versionId: string): Promise<NoDeGatilho | null>;
   /** `inserted:false` = 23505 (contato já vivo em algum fluxo) → skip silencioso. */
   insereEnrollment(input: {
+    service_origin?: unknown;
+    event_id?: string;
     organization_id: string;
     pointer_id: string;
     version_id: string;
@@ -93,7 +100,7 @@ export interface GatilhoEtapaDb {
      */
     next_eval_at?: string;
     agent_id: string | null;
-  }): Promise<{ inserted: boolean; id: string | null }>;
+  }): Promise<{ inserted: boolean; id: string | null; reason?: "stale_origin" }>;
   /** A linha de proveniência na timeline do enrollment. */
   insereEventoDoEnrollment(evento: {
     organization_id: string;
@@ -112,6 +119,7 @@ export interface GatilhoEtapaSummary {
   pointers_barrados_pelo_gate: number;
   enrolled: number;
   skipped_existing: number;
+  skipped_stale_origin?: number;
   /** Negócio entrou na etapa mas não tem contato — não há a quem escrever. Contado, nunca calado. */
   sem_contato: number;
 }
@@ -172,27 +180,34 @@ export async function aplicaGatilhoDeEtapa(
   }
 
   for (const pointer of armados) {
-    const agentId = await resolveAgentForAutomaticTrigger(deps.gateDb, row.organization_id, pointer.id);
-    if (agentId === null) {
+    const noDeGatilho = await deps.db.carregaNoDeGatilho(row.organization_id, pointer.active_version_id);
+    if (!noDeGatilho) continue;
+    const { agentId, barrado } = await decidirAgenteDoEnrollmentAutomatico(
+      deps.gateDb,
+      row.organization_id,
+      pointer.id,
+      noDeGatilho.pedeAgente,
+    );
+    if (barrado) {
       summary.pointers_barrados_pelo_gate++;
       continue;
     }
 
-    const noDeGatilho = await deps.db.carregaNoDeGatilho(row.organization_id, pointer.active_version_id);
-    if (!noDeGatilho) continue;
-
-    const { inserted, id } = await deps.db.insereEnrollment({
+    const { inserted, id, reason } = await deps.db.insereEnrollment({
+      service_origin: row.payload.service_origin,
+      event_id: row.id,
       organization_id: row.organization_id,
       pointer_id: pointer.id,
       version_id: pointer.active_version_id,
       contact_id: contatoId,
-      current_node_id: noDeGatilho,
+      current_node_id: noDeGatilho.id,
       // `next_eval_at` NÃO vai: o default do banco decide. Ver o comentário na
       // interface e a migration 0147.
       agent_id: agentId,
     });
     if (!inserted) {
-      summary.skipped_existing++;
+      if (reason === "stale_origin") summary.skipped_stale_origin = (summary.skipped_stale_origin ?? 0) + 1;
+      else summary.skipped_existing++;
       continue;
     }
     summary.enrolled++;
@@ -204,7 +219,7 @@ export async function aplicaGatilhoDeEtapa(
       await deps.db.insereEventoDoEnrollment({
         organization_id: row.organization_id,
         enrollment_id: id,
-        node_id: noDeGatilho,
+        node_id: noDeGatilho.id,
         event_type: "enrolled_by_stage_change",
         payload: {
           lead_id: negocioId,
@@ -229,7 +244,7 @@ export function createSupabaseGatilhoEtapaDb(admin: SupabaseClient): GatilhoEtap
     async carregaPointersDeEtapa(orgId) {
       const { data, error } = await admin
         .from("followup_flow_pointers")
-        .select("id, organization_id, active_version_id, trigger_config")
+        .select("id, organization_id, active_version_id, trigger_config, surface")
         .eq("organization_id", orgId)
         .eq("status", "active")
         .not("active_version_id", "is", null);
@@ -241,8 +256,11 @@ export function createSupabaseGatilhoEtapaDb(admin: SupabaseClient): GatilhoEtap
         organization_id: string;
         active_version_id: string | null;
         trigger_config: unknown;
+        surface?: string | null;
       }>) {
-        if (!row.active_version_id) continue;
+        // Roteiro de atendimento (0394) é do turno, nunca do relógio: o banco
+        // já o prende em gatilho manual, e este corte é a segunda porta.
+        if (!row.active_version_id || row.surface === "atendimento") continue;
         // O parse é o MESMO schema do publish — um `trigger_config` que não
         // passa nele não arma nada, em vez de armar torto.
         const parsed = triggerConfigSchema.safeParse(row.trigger_config);
@@ -278,15 +296,18 @@ export function createSupabaseGatilhoEtapaDb(admin: SupabaseClient): GatilhoEtap
       if (error) throw new Error(error.message);
       if (!data) return null;
       const graph = flowGraphSchema.parse(data.graph);
-      return graph.nodes.find((n) => n.type === "trigger")?.id ?? null;
+      return noDeGatilhoDoGrafo(graph);
     },
 
     async insereEnrollment(input) {
+      const { service_origin: _origin, event_id, ...values } = input;
+      const boundary = event_id ? await serviceForEvent(admin, input.organization_id, event_id, input.contact_id) : null;
+      if (!boundary) return { inserted: false, id: null, reason: "stale_origin" };
       // O `.select("id")` não é enfeite: sem o id não há linha de proveniência,
       // e o enrollment apareceria na fila sem dizer de onde veio.
       const { data, error } = await admin
         .from("followup_enrollments")
-        .insert(input)
+        .insert({ ...values, conversation_id: boundary.conversation_id, service_boundary: boundary })
         .select("id")
         .maybeSingle();
       if (error) {

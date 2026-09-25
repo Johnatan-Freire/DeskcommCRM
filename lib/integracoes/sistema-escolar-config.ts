@@ -6,7 +6,7 @@
  * escrita — só `api_key_last4` (mesmo padrão de `ai_provider_credentials`).
  *
  * A tabela nasceu com `revoke select ... from authenticated, anon` (migration
- * 0169) porque não havia tela ainda — nenhum caminho de browser precisava ler
+ * 0399) porque não havia tela ainda — nenhum caminho de browser precisava ler
  * as colunas cifradas. Esta é a primeira leitura, e ela usa SEMPRE o admin
  * client no servidor (nunca PostgREST direto do browser), filtrando
  * `organization_id` manualmente a partir do cookie/JWT resolvido por

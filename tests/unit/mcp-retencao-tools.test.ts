@@ -108,6 +108,7 @@ function fakeSupabase(resolve: Resolver, cap: Capturas) {
     from,
     rpc: (fn: string, args: Record<string, unknown>) => {
       cap.rpcs.push({ fn, args });
+      if (fn === 'fn_service_begin') return Promise.resolve({ data: { organization_id: ORG, contact_id: CONTATO, conversation_id: 'conv-1', service_revision: 1, demanda_id: null, demanda_revision: null, status: 'open', demanda_fechada_em: null }, error: null });
       return Promise.resolve({ data: null, error: null });
     },
   };
@@ -590,6 +591,28 @@ describe("crm_list_followups", () => {
   });
 });
 
+/**
+ * `crm_close_demand` é a segunda porta de won/lost (a primeira é
+ * `update_lead_state`) — ganhou um gate de autorização terminal (migration
+ * 0401, `verificarAutorizacaoTerminal`) que resolve `agent_version_id` via
+ * `ai_agent_runs` e então lê `can_mark_won`/`can_mark_lost` de
+ * `ai_agent_versions`. Os testes que usam isto verificam OUTRO eixo (motivo,
+ * texto da timeline, ensino de erro de negócio) — o ator aqui é um agente
+ * PLENAMENTE autorizado nos dois sentidos, de propósito, pra não confundir
+ * com os testes dedicados do próprio gate (lib/mcp/tools/retencao.test.ts).
+ */
+const comAgenteAutorizado =
+  (resto: Resolver): Resolver =>
+  (c) => {
+    if (c.table === "ai_agent_runs" && c.terminal === "maybeSingle") {
+      return { data: { agent_version_id: "version-fixture-1" }, error: null };
+    }
+    if (c.table === "ai_agent_versions" && c.terminal === "maybeSingle") {
+      return { data: { can_mark_won: true, can_mark_lost: true }, error: null };
+    }
+    return resto(c);
+  };
+
 describe("crm_close_demand", () => {
   const leadAberto = {
     id: LEAD,
@@ -602,13 +625,13 @@ describe("crm_close_demand", () => {
 
   it("encerra como perdido, exige o motivo e EMITE atividade", async () => {
     const cap = novasCapturas();
-    const resolver: Resolver = (c) => {
+    const resolver: Resolver = comAgenteAutorizado((c) => {
       if (c.table === "crm_leads" && c.terminal === "maybeSingle") return { data: leadAberto, error: null };
       if (c.table === "crm_stages" && c.terminal === "maybeSingle") {
         return { data: { id: STAGE_PERDA, name: "Perdido" }, error: null };
       }
       return { data: c.terminal === "list" ? [] : null, error: null };
-    };
+    });
 
     const res = (await crmCloseDemand.handler(
       { lead_id: LEAD, outcome: "lost", reason: "sem orçamento" },
@@ -632,7 +655,7 @@ describe("crm_close_demand", () => {
     const cap = novasCapturas();
     const res = (await crmCloseDemand.handler(
       { lead_id: LEAD, outcome: "lost", reason: undefined },
-      ctxDe(() => ({ data: null, error: null }), cap),
+      ctxDe(comAgenteAutorizado(() => ({ data: null, error: null })), cap),
     )) as { encerrado: boolean; motivo: string };
 
     expect(res.encerrado).toBe(false);
@@ -642,10 +665,10 @@ describe("crm_close_demand", () => {
 
   it("funil sem estágio terminal vira ensino, não exceção", async () => {
     const cap = novasCapturas();
-    const semEstagio: Resolver = (c) => {
+    const semEstagio: Resolver = comAgenteAutorizado((c) => {
       if (c.table === "crm_leads" && c.terminal === "maybeSingle") return { data: leadAberto, error: null };
       return { data: null, error: null };
-    };
+    });
 
     const res = (await crmCloseDemand.handler(
       { lead_id: LEAD, outcome: "won", reason: undefined },
@@ -791,7 +814,7 @@ describe("o texto que aparece na linha do tempo", () => {
 
   it("encerrar: o reason acrescenta o desfecho, não repete 'Demanda encerrada'", async () => {
     const cap = novasCapturas();
-    const resolver: Resolver = (c) => {
+    const resolver: Resolver = comAgenteAutorizado((c) => {
       if (c.table === "crm_leads" && c.terminal === "maybeSingle") {
         return {
           data: { id: LEAD, organization_id: ORG, pipeline_id: "p1", stage_id: STAGE, status: "open", contact_id: CONTATO },
@@ -802,7 +825,7 @@ describe("o texto que aparece na linha do tempo", () => {
         return { data: { id: STAGE_PERDA, name: "Perdido" }, error: null };
       }
       return { data: c.terminal === "list" ? [] : null, error: null };
-    };
+    });
     await crmCloseDemand.handler(
       { lead_id: LEAD, outcome: "lost", reason: "sem orçamento" },
       ctxDe(resolver, cap),
@@ -826,6 +849,7 @@ describe("crm_list_at_risk_leads", () => {
     // às irmãs: a garantia é POR CONSULTA, não por função.
     const espiao: Resolver = (c) => {
       filtros.push({ table: c.table, ...c.filtros });
+      if(c.table==="organizations") return {data:{settings:{}},error:null};
       if (c.table !== "crm_leads") return { data: [], error: null };
       return {
         data: [
@@ -858,13 +882,15 @@ describe("crm_list_at_risk_leads", () => {
       "conversations",
       "contacts",
       "demandas",
+      "organizations",
+      "calendar_appointments",
     ]) {
       // Guarda de vacuidade por tabela: uma leitura que deixe de acontecer não
       // pode passar como "leitura sem vazamento".
       expect(tabelas, `o radar não leu "${esperada}"`).toContain(esperada);
     }
     for (const leitura of filtros) {
-      expect(leitura.organization_id, `leitura de "${leitura.table}" sem filtro de org`).toBe(ORG);
+      expect(leitura.table === "organizations" ? leitura.id : leitura.organization_id, `leitura de "${leitura.table}" sem filtro de org`).toBe(ORG);
     }
   });
 

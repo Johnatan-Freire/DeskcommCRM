@@ -14,6 +14,8 @@
 import { readdirSync } from "node:fs";
 import path from "node:path";
 
+import { relativoEmBarraNormal } from "./caminho";
+
 /** Raiz do repo — o vitest roda com cwd na raiz (ver vitest.config.ts). */
 export const RAIZ_DO_REPO = process.cwd();
 
@@ -44,11 +46,10 @@ export function arquivosDeCodigo(raizes: readonly string[]): string[] {
 /**
  * O caminho de um arquivo varrido, relativo à raiz e em barra normal.
  *
- * A varredura devolve ABSOLUTO e quem compara com uma lista declarada
- * precisa dele relativo. Barra normal sempre — no Windows, `path.relative`
- * devolve `app\api\v1\...`, e uma lista escrita com `/` (como toda allowlist
- * deste repo) nunca bateria com o que a varredura achou.
+ * A varredura devolve ABSOLUTO e os três chamadores precisam dele relativo
+ * para comparar com uma lista declarada — os três faziam o mesmo `relative`
+ * à mão, e no Windows os três erravam junto.
  */
 export function caminhoRelativo(absoluto: string): string {
-  return path.relative(RAIZ_DO_REPO, absoluto).split(path.sep).join("/");
+  return relativoEmBarraNormal(RAIZ_DO_REPO, absoluto);
 }

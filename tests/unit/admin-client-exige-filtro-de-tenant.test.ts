@@ -15,67 +15,75 @@ import { RAIZ_DO_REPO, arquivosDeCodigo, caminhoRelativo } from "./helpers/varre
 /**
  * A OUTRA METADE DA RLS: O CLIENTE DE SERVIÇO ALCANÇANDO TABELA TENANT-AWARE.
  *
- * ## Por que este arquivo existe
+ * ## O defeito que fez este arquivo existir (issue #834)
  *
- * `tests/invariants/rls-isolation.test.ts` percorre uma lista de tabelas e
- * prova que a POLÍTICA de RLS as protege — ele mede o mundo como um papel
- * restrito o vê (`set_config('request.jwt.claims', …)`, o mesmo caminho de
- * `auth.uid()` e `fn_user_org_ids()` que as policies usam).
+ * `tests/invariants/rls-isolation.test.ts` percorre uma lista de tabelas e prova
+ * que a POLÍTICA de RLS as protege — ele mede o mundo como um papel restrito o
+ * vê (`set_config('request.jwt.claims', …)`, o mesmo caminho de `auth.uid()` e
+ * `fn_user_org_ids()` que as policies usam).
  *
- * Isso mede só METADE do risco. `createAdminClient()` usa a **service
- * role**, que **contorna a RLS por desenho** — e é exatamente esse caminho
- * que o item 14 da triagem do CHANGELOG upstream expôs: `sendMessageHandler`
- * chamado pelo servidor MCP (client de serviço) alcançava a conversa de
- * OUTRA organização, porque a consulta filtrava só por `id`.
- * `conversations`/`messages` estavam na lista do invariante de RLS o tempo
- * todo — ele seguia verde enquanto o handler vazava pelo caminho que a RLS
- * não cobre.
+ * O vazamento de 14/set não passava por ali. `createAdminClient()` usa a
+ * **service role**, que **contorna a RLS por desenho**, e as duas tabelas do
+ * episódio (`conversations` e `messages`) estavam na lista do invariante: ele
+ * seguia verde enquanto o handler alcançava a conversa de OUTRA organização.
+ * Medido contra Postgres real, um chamador com contexto da org A inseriu
+ * mensagem na conversa da org B.
  *
- * A doutrina já dizia o certo (CLAUDE.md, anti-pattern 10: "service role
- * usado em request handler sem filtrar `organization_id` manualmente") — e
- * regra sem mecanismo é intenção. Achado ao triar o CHANGELOG do upstream
- * (`melgarafael/DeskcommCRM`, issue #834): o commit `3224d7a65` construiu
- * esta mesma varredura lá; aqui ela é reimplementada contra o NOSSO
- * inventário de tabelas e chamadores — não copiada.
+ * A doutrina já dizia o certo (CLAUDE.md, anti-pattern 10: "service role usado
+ * em request handler sem filtrar `organization_id` manualmente") — e regra sem
+ * mecanismo é intenção. É a mesma lição das definer expostas a `anon`: o gate
+ * que existia media a outra metade.
  *
  * ## As duas regras
  *
  *   - **R1 — escrita que CRIA linha** (`insert`/`upsert`) em tabela com
- *     `organization_id` precisa carregar o tenant: no payload, no
- *     `onConflict` ou no filtro. Sem isso a linha nova não tem dono
- *     declarado por quem escreveu — a forma exata do vazamento do item 14.
- *   - **R2 — nenhuma cadeia sem filtro ALGUM**: `select`/`update`/`delete`
- *     que não filtra coluna nenhuma alcança a tabela inteira, de todos os
- *     tenants.
+ *     `organization_id` precisa carregar o tenant: no payload, no `onConflict`
+ *     ou no filtro. Sem isso a linha nova não tem dono declarado por quem
+ *     escreveu — e foi exatamente esta a forma do episódio (mensagem inserida
+ *     na conversa de outra organização).
+ *   - **R2 — nenhuma cadeia sem filtro ALGUM**: `select`/`update`/`delete` que
+ *     não filtra coluna nenhuma varre (ou reescreve) a tabela inteira, de todos
+ *     os tenants. Vale para leitura e para mutação.
  *
- * `update`/`delete` por chave primária NÃO entram em R1 de propósito: a
- * linha já existe e foi (ou deveria ter sido) lida com escopo antes; exigir
+ * `update`/`delete` por chave primária NÃO entram em R1 de propósito: a linha
+ * já existe e foi (ou deveria ter sido) lida com escopo antes; exigir
  * `organization_id` em toda mutação por id seria ruído, e ruído se aprende a
- * ignorar. Quem esta régua cobra é a linha NOVA.
+ * ignorar. Quem essa régua cobra é a linha NOVA.
  *
  * ## Por que uma varredura, e não mais uma lista
  *
  * Lista fixa cobre as tabelas que alguém lembrou de escrever. O que define o
- * risco é o PAR: quem pega o cliente de serviço × que tabela alcança — e
- * isso muda a cada handler novo. A varredura lê as duas coisas do próprio
- * código e do próprio schema (`supabase/baseline.sql` + migrations), então
- * tabela nova com `organization_id` entra na régua sozinha.
+ * risco é o PAR: quem pega o cliente de serviço × que tabela alcança — e isso
+ * muda a cada handler novo. A varredura lê as duas coisas do próprio código e
+ * do próprio schema (`supabase/baseline.sql` + migrations), então tabela nova
+ * com `organization_id` entra na régua sozinha.
  *
  * ## O que este arquivo NÃO mede (declarado, não escondido)
  *
- *   - cliente admin RECEBIDO por PARÂMETRO — o caminho de
- *     `lib/mcp/server.ts`, que entrega o cliente de serviço ao handler (é
- *     por onde o vazamento do item 14 nasceu). Atravessar arquivos é a
- *     varredura seguinte;
+ *   - cliente admin RECEBIDO por PARÂMETRO — o caminho de `lib/mcp/server.ts`,
+ *     que entrega o cliente de serviço ao mesmo handler. É por onde o defeito
+ *     de 14/set nasceu; atravessar arquivos é a varredura seguinte;
  *   - `rpc(...)`: as funções são medidas por
- *     `tests/invariants/hardening-definer-varredura.test.ts` e pelos testes
- *     de ACL de cada domínio;
- *   - a PROCEDÊNCIA do `organization_id` (se veio de cookie/JWT/path token,
- *     e não do body). A régua cobra presença; a fonte continua matéria de
- *     revisão;
- *   - o aceite de R1 olha a FORMA: um payload que ESPALHA uma linha que
- *     carrega `organization_id` passa, mesmo que a linha venha de outro
- *     tenant.
+ *     `tests/invariants/hardening-definer-varredura.test.ts` e pelos testes de
+ *     ACL de cada domínio;
+ *   - a PROCEDÊNCIA do `organization_id` (se veio de cookie/JWT/path token, e
+ *     não do body). A régua cobra presença; a fonte continua matéria de revisão
+ *     — o mesmo recorte do gate irmão;
+ *   - o aceite de R1 olha a FORMA: um payload que ESPALHA uma linha que carrega
+ *     `organization_id` passa, mesmo que a linha venha de outro tenant;
+ *   - **R2 aceita QUALQUER filtro como escopo — inclusive só a chave.** Uma
+ *     cadeia `admin.from("conversations").select().eq("id", x)` passa, sem
+ *     `organization_id` nenhum. É exatamente a forma do anti-pattern 10 do
+ *     CLAUDE.md, e a forma do defeito de 14/set. Medido na triagem, com a
+ *     previsão escrita antes de rodar: tirar o filtro de org das duas buscas
+ *     da conversa em `messages/_handler.ts` → 6/6 verde (e ali ainda vale o
+ *     ponto cego do parâmetro); tirar o filtro de org de uma rota com cliente
+ *     admin LOCAL, deixando só `.eq("id")` → 6/6 verde; tirar TODOS os filtros
+ *     → vermelho em R2. Cobrar `organization_id` em toda leitura por chave é o
+ *     passo seguinte, e é mais ruidoso que este — por isso não entrou aqui.
+ *     O defeito de 14/set segue guardado por um invariante de COMPORTAMENTO,
+ *     `tests/invariants/envio-nao-alcanca-conversa-de-outro-tenant.test.ts`,
+ *     não por esta varredura.
  */
 
 const RAIZES = ["app", "lib", "workers"] as const;
@@ -91,36 +99,49 @@ const CRIAM_LINHA = new Set(["insert", "upsert"]);
 const COLUNA_DO_TENANT = "organization_id";
 
 /**
- * A superfície de PLATAFORMA. `/admin/**` opera cross-tenant por desenho (é
- * o painel de quem administra a instalação, não de quem a usa): ali a
- * varredura não cobra filtro de tenant. Declarado — e não silenciado — para
- * que a lista seja revisada quando a superfície mudar.
+ * A superfície de PLATAFORMA. `/admin/**` opera cross-tenant por desenho (é o
+ * painel de quem administra a instalação, não de quem a usa): ali a varredura
+ * não cobra filtro de tenant. Declarado — e não silenciado — para que a lista
+ * seja revisada quando a superfície mudar.
  */
 const PLATAFORMA: readonly { caminho: string; motivo: string }[] = [
   {
     caminho: "app/api/v1/admin/",
     motivo:
-      "Painel de plataforma: opera vários tenants de propósito (organizações, " +
-      "usuários, incidentes, LGPD, uso), e é guardado por papel de plataforma " +
-      "(fn_is_platform_admin) — não por RLS de organização.",
+      "Painel de plataforma: lê e opera vários tenants de propósito (tenants, " +
+      "users, inbox, incidents, audit, lgpd, usage, impersonate), e é guardado " +
+      "por papel de plataforma — não por RLS de organização.",
   },
 ];
 
 /**
- * Exceções de R2 com a razão escrita. Só encolhe: cada entrada está dizendo
- * por que uma cadeia de service role alcança a tabela sem filtro e por que
- * isso é correto.
+ * Exceções de R2 com a razão escrita. Só encolhe: cada entrada está dizendo por
+ * que uma cadeia de service role alcança a tabela sem filtro e por que isso é
+ * correto.
  */
 const SEM_FILTRO_LIBERADO: readonly { arquivo: string; tabela: string; motivo: string }[] = [
+  {
+    arquivo: "app/admin/(protected)/extensoes/page.tsx",
+    tabela: "organization_extensions",
+    motivo:
+      "A pergunta É cross-tenant: 'em quantas empresas esta extensão está ligada'. O " +
+      "`select` traz apenas `installation_id,enabled` — nenhum nome, nenhum dado de " +
+      "cliente, nenhuma coluna que identifique a organização —, e a tela mostra a " +
+      "CONTAGEM, não a lista. Filtrar por uma organização responderia outra pergunta. " +
+      "O gate é de papel, como nas irmãs de `/admin`: `is_platform_admin` no topo da " +
+      "página e `notFound()` para o resto. " +
+      "⚠️ A dispensa VENCE se a tela passar a mostrar QUAIS empresas: aí o `select` " +
+      "carrega `organization_id` e volta a ser leitura de dado de inquilino, que " +
+      "precisa de decisão própria sobre o que o dono da instalação pode ver.",
+  },
   {
     arquivo: "lib/notifications/web_push.ts",
     tabela: "push_subscriptions",
     motivo:
-      "`store(admin)` devolve o BUILDER (`admin.from(\"push_subscriptions\")`); a " +
-      "varredura não atravessa a fronteira da função para ver o `.select(...).eq(...)` " +
-      "que os DOIS chamadores encadeiam em cima do retorno — `enviarPushDaOrg` filtra " +
-      "por `organization_id`, e a remoção de assinatura morta filtra por `id`. A " +
-      "cadeia sem filtro em si não consulta nada: ela nunca é aguardada sozinha.",
+      "`store(admin)` devolve o BUILDER (`admin.from(\"push_subscriptions\")`); quem " +
+      "filtra é cada chamador — `enviarPushDaOrg`/`removerPush` filtram por " +
+      "`organization_id` e, na remoção, por `endpoint`. A cadeia sem filtro não " +
+      "consulta nada: ela não foi aguardada.",
   },
 ];
 
@@ -150,8 +171,7 @@ function arquivosDeSchema(): string[] {
 
 /**
  * As tabelas que carregam `organization_id` — lidas do SQL, não declaradas à
- * mão: tabela nova com a coluna entra na régua sem ninguém editar esta
- * lista.
+ * mão: tabela nova com a coluna entra na régua sem ninguém editar esta lista.
  */
 function tabelasTenantAware(): Set<string> {
   const nomes = new Set<string>();
@@ -205,10 +225,9 @@ function identificadores(no: ts.Expression, acc: Set<string>): void {
 /**
  * O texto da declaração de um nome NO MESMO arquivo.
  *
- * É o que faz a régua enxergar a forma real da casa: o payload quase nunca é
- * um objeto inline, ele é uma variável construída algumas linhas acima
- * (`row`, `insertRow`, `linha`) — e ler só a cadeia daria vermelho em código
- * correto.
+ * É o que faz a régua enxergar a forma real da casa: o payload quase nunca é um
+ * objeto inline, ele é uma variável construída três linhas acima (`rows`,
+ * `insertRow`, `linha`) — e ler só a cadeia daria vermelho em código correto.
  */
 function textoDaDeclaracao(fonte: ts.SourceFile, nome: string): string {
   let texto = "";
@@ -255,8 +274,8 @@ function analisar(caminho: string, doTenant: ReadonlySet<string>): Cadeia[] {
         const criaLinha = passos.some((p) => CRIAM_LINHA.has(p.metodo));
 
         // O que o autor ESCREVEU na cadeia: payload inline, `onConflict` e o
-        // argumento de cada filtro. Uma variável de payload não aparece
-        // aqui — é o caso que `textoDaDeclaracao` cobre.
+        // argumento de cada filtro. Uma variável de payload não aparece aqui —
+        // é o caso que `textoDaDeclaracao` cobre.
         const ultima = passos.length > 0 ? (passos[passos.length - 1] as { chamada: ts.CallExpression }) : null;
         const fim = ultima === null ? no.getEnd() : ultima.chamada.getEnd();
         const textoDaCadeia = fonte.text.slice(no.getStart(), fim);
@@ -311,7 +330,7 @@ describe("o cliente de serviço também responde ao tenant", () => {
   it("a varredura enxerga o schema e os arquivos (guarda de vacuidade)", () => {
     // Sem isto, um regex que deixasse de casar (ou um caminho de schema
     // renomeado) faria as asserções abaixo passarem por AUSÊNCIA de dado —
-    // verde de instrumento cego.
+    // verde de instrumento cego. As duas tabelas do episódio são o piso.
     expect(ARQUIVOS.length).toBeGreaterThan(500);
     expect(DO_TENANT.size).toBeGreaterThan(50);
     expect(DO_TENANT.has("conversations")).toBe(true);
@@ -329,7 +348,7 @@ describe("o cliente de serviço também responde ao tenant", () => {
   it("a varredura reconhece o payload que carrega o tenant (controle positivo)", () => {
     // Gêmeo conhecido: o worker monta a linha da mensagem numa variável
     // (`insertRow`) com `organization_id` e só depois insere. Se ele aparecer
-    // como achado de R1, a régua está lendo só a cadeia e não a declaração.
+    // como achado, a régua está lendo a cadeia e não a declaração.
     const gemeo = CADEIAS.find(
       (c) => c.arquivo === "workers/ai-response-worker.ts" && c.tabela === "messages" && c.criaLinha,
     );

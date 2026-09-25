@@ -7,15 +7,16 @@
  */
 import { describe, expect, it } from "vitest";
 
+import { ehEventoNosso, idDeEventoDoGoogle } from "@/lib/agenda/google/escrita";
+
 import {
   type AgendamentoParaGoogle,
   type EventoDoGoogle,
   type EventoExternoLido,
   type LeituraDeEvento,
   doEventoDoGoogle,
-  ehIcalUidNosso,
-  icalUidDoAgendamento,
   paraEventoDoGoogle,
+  participantesDoAgendamento,
 } from "@/lib/agenda/google/evento";
 
 const ORG = "11111111-1111-4111-8111-111111111111";
@@ -72,6 +73,17 @@ describe("paraEventoDoGoogle", () => {
     expect(paraEventoDoGoogle(agendamento()).transparency).toBe("opaque");
   });
 
+  it("a observação vira descrição do evento, e o endereço vira o local", () => {
+    const corpo = paraEventoDoGoogle(agendamento());
+    expect(corpo.description).toBe("Primeira consulta");
+    expect(corpo.location).toBe("Rua das Acácias, 120");
+    // Em branco não manda a chave: o Google trata "" como descrição, e o
+    // evento nasceria com um campo vazio em vez de sem campo.
+    expect(paraEventoDoGoogle(agendamento({ description: "   " }))).not.toHaveProperty(
+      "description",
+    );
+  });
+
   it("traduz os cinco status nossos nos três do Google", () => {
     const de = (status: AgendamentoParaGoogle["status"]) => paraEventoDoGoogle(agendamento({ status })).status;
     expect(de("pending")).toBe("tentative");
@@ -83,13 +95,31 @@ describe("paraEventoDoGoogle", () => {
     expect(de("no_show")).toBe("confirmed");
   });
 
-  it("a identidade do evento é estável e reaproveitada, nunca regerada", () => {
-    const novo = paraEventoDoGoogle(agendamento());
-    expect(novo.iCalUID).toBe(icalUidDoAgendamento(AGENDAMENTO));
-    // Segunda escrita do MESMO agendamento tem de mandar o MESMO uid: é ele
-    // que amarra o evento de lá à linha daqui.
-    const jaGravado = paraEventoDoGoogle(agendamento({ google_ical_uid: "outro-uid@deskcomm.app" }));
-    expect(jaGravado.iCalUID).toBe("outro-uid@deskcomm.app");
+  it("⚠️ o corpo NÃO leva iCalUID — mandá-lo junto do id é o que produzia 400", () => {
+    // ─── A ASSERÇÃO INVERTIDA, e o porquê ────────────────────────────────
+    //
+    // Este caso exigia `iCalUID` no corpo. A referência do `events.insert` diz
+    // que `id` e `iCalUID` "only one of them should be supplied at event
+    // creation time" — e o push manda o `id` sempre.
+    //
+    // Medido em produção em 2026-09-01, a cada 5 minutos, por horas:
+    //
+    //   HTTP 400 — {"reason":"invalid","message":"Invalid resource id value."}
+    //
+    // O `id` foi medido e É válido (43 caracteres, todos em [a-v0-9]). O que
+    // violava contrato era a COPRESENÇA. Nenhum compromisso jamais chegou ao
+    // Google, em instalação nenhuma — e este teste passava verde o tempo todo,
+    // porque media o corpo contra si mesmo e nunca contra a API.
+    const corpo = paraEventoDoGoogle(agendamento());
+    expect(corpo, "iCalUID de volta ao corpo — o 400 volta junto").not.toHaveProperty("iCalUID");
+
+    // O que amarra o evento de lá à linha daqui passa a ser o ID, que é nosso
+    // por construção e que o Google preserva.
+    expect(idDeEventoDoGoogle(AGENDAMENTO).startsWith("deskcommapp")).toBe(true);
+    expect(ehEventoNosso(idDeEventoDoGoogle(AGENDAMENTO))).toBe(true);
+    // E o controle: evento de terceiro não é reconhecido como nosso.
+    expect(ehEventoNosso("abc123doGoogle")).toBe(false);
+    expect(ehEventoNosso(null)).toBe(false);
   });
 
   it("carrega a identidade do tenant nas propriedades privadas", () => {
@@ -155,6 +185,26 @@ describe("paraEventoDoGoogle", () => {
     expect(corpo).not.toHaveProperty("attendees");
   });
 
+  it("o e-mail da ficha e o convidado digitado viram attendees, sem repetir", () => {
+    expect(
+      participantesDoAgendamento({
+        contactEmail: "lead@clinica.test",
+        contactName: "Ian",
+        guestEmail: "acompanhante@casa.test",
+      }),
+    ).toEqual([
+      { email: "lead@clinica.test", nome: "Ian", aguardandoResposta: true },
+      { email: "acompanhante@casa.test", aguardandoResposta: true },
+    ]);
+    expect(
+      participantesDoAgendamento({
+        contactEmail: "MESMO@clinica.test",
+        guestEmail: "mesmo@clinica.test",
+      }),
+    ).toEqual([{ email: "MESMO@clinica.test", aguardandoResposta: true }]);
+    expect(participantesDoAgendamento({ contactEmail: "  ", guestEmail: null })).toEqual([]);
+  });
+
   it("recusa a linha que não é traduzível, em vez de mandar evento pela metade", () => {
     expect(() => paraEventoDoGoogle(agendamento({ title: "   " }))).toThrow(/sem título/);
     expect(() => paraEventoDoGoogle(agendamento({ starts_at: "ontem" }))).toThrow(/starts_at inválido/);
@@ -165,16 +215,6 @@ describe("paraEventoDoGoogle", () => {
     expect(() =>
       paraEventoDoGoogle(agendamento({ participantes: [{ email: "  " }] })),
     ).toThrow(/participante sem e-mail/);
-  });
-});
-
-describe("ehIcalUidNosso", () => {
-  it("reconhece o que criamos e ignora o resto — é a primeira camada anti-eco", () => {
-    expect(ehIcalUidNosso(icalUidDoAgendamento(AGENDAMENTO))).toBe(true);
-    expect(ehIcalUidNosso("abc@Deskcomm.App")).toBe(true);
-    expect(ehIcalUidNosso("qualquer-coisa@google.com")).toBe(false);
-    expect(ehIcalUidNosso("")).toBe(false);
-    expect(ehIcalUidNosso(null)).toBe(false);
   });
 });
 
@@ -530,4 +570,10 @@ describe("doEventoDoGoogle", () => {
       expect(() => doEventoDoGoogle(evento, FUSO_DO_CALENDARIO)).not.toThrow();
     }
   });
+});
+
+it("URL assíncrona Meet não altera projeção de local; vídeo manual continua publicado", () => {
+  const pending = agendamento({ location_kind: "google_meet", location_details: "Atendimento online", meeting_url: null });
+  expect(paraEventoDoGoogle({ ...pending, meeting_url: "https://meet.google.com/abc-defg-hij" })).toEqual(paraEventoDoGoogle(pending));
+  expect(paraEventoDoGoogle({ ...pending, location_kind: "video_link", meeting_url: "https://video.example/room" }).location).toBe("https://video.example/room");
 });

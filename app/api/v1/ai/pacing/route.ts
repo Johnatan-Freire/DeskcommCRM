@@ -1,3 +1,4 @@
+import { requireSupportWrite } from "@/lib/impersonate/support";
 /**
  * Épico Operação Visível (F2ii) — knobs do anti-ban por conexão.
  *
@@ -14,6 +15,8 @@ import { ok, fail } from "@/lib/api/wrappers";
 import { audit } from "@/lib/audit";
 import { requireRole } from "@/lib/auth/require-role";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { traduzir } from "@/lib/i18n/dicionario";
+import { PROVIDERS_DE_MENSAGEM } from "@/lib/channels/capabilities";
 import {
   pacingKnobsUpdateSchema,
   knobsView,
@@ -28,28 +31,46 @@ export const dynamic = "force-dynamic";
 const KNOB_COLUMNS =
   "throttle_ms, jitter_max_ms, window_start_hour, window_end_hour, allow_sunday, timezone, warmup_daily_caps, number_activated_at";
 
+/**
+ * `organizations.timezone`, para a tela mostrar o fuso em que o motor avalia a
+ * janela de quem não escolheu um no número (`fusoDaJanela`). Falha vira `null`
+ * e a tela cai no padrão — é exibição, não pode derrubar a ficha.
+ */
+async function lerFusoDaOrganizacao(
+  admin: ReturnType<typeof createAdminClient>,
+  orgId: string,
+): Promise<string | null> {
+  const { data } = await admin.from("organizations").select("timezone").eq("id", orgId).maybeSingle();
+  return (data as { timezone?: string | null } | null)?.timezone ?? null;
+}
+
 export async function GET(): Promise<Response> {
   const requestId = randomUUID();
   const authz = await requireRole("agent", { requestId, resource: "channel_knobs" });
   if (!authz.ok) return authz.response;
+  const t = (texto: string) => traduzir(texto, authz.user.idioma);
   const { org } = authz;
 
   const admin = createAdminClient();
-  const [{ data: sessions, error: sErr }, { data: knobs, error: kErr }] = await Promise.all([
+  const [{ data: sessions, error: sErr }, { data: knobs, error: kErr }, fusoDaOrg] = await Promise.all([
     admin
       .from("channel_sessions")
       .select("id, waha_session_name, display_name, phone_number, status, daily_message_limit")
       .eq("organization_id", org.orgId)
       // Canal arquivado foi excluído pelo usuário: não volta como opção aqui.
       .is("archived_at", null)
+      // Ritmo de envio é regra de canal de MENSAGEM. A linha de chamada de voz
+      // (spec 18) não dispara nada e não tem intervalo a calibrar.
+      .in("provider", [...PROVIDERS_DE_MENSAGEM])
       .order("created_at", { ascending: true }),
     admin
       .from("channel_knobs")
       .select(`channel_session_id, ${KNOB_COLUMNS}`)
       .eq("organization_id", org.orgId),
+    lerFusoDaOrganizacao(admin, org.orgId),
   ]);
   if (sErr || kErr) {
-    return fail("internal_error", "Falha ao carregar conexões/knobs.", 500, { requestId });
+    return fail("internal_error", t("Falha ao carregar conexões/knobs."), 500, { requestId });
   }
 
   const byuSession = new Map<string, ChannelKnobsRow>(
@@ -57,36 +78,54 @@ export async function GET(): Promise<Response> {
   );
   const items = (sessions ?? []).map((s) => ({
     channel_session: s,
-    ...knobsView(byuSession.get(s.id) ?? null),
+    ...knobsView(byuSession.get(s.id) ?? null, new Date(), fusoDaOrg),
   }));
   return ok({ items }, { requestId });
 }
 
 export async function PUT(req: NextRequest): Promise<Response> {
+  const supportDenied = await requireSupportWrite();
+  if (supportDenied) return supportDenied;
+
   const requestId = randomUUID();
   const authz = await requireRole("manager", { requestId, resource: "channel_knobs" });
   if (!authz.ok) return authz.response;
+  const t = (texto: string) => traduzir(texto, authz.user.idioma);
   const { user: authUser, org } = authz;
 
   let raw: unknown;
   try {
     raw = await req.json();
   } catch {
-    return fail("invalid_request", "Body JSON inválido.", 400, { requestId });
+    return fail("invalid_request", t("Body JSON inválido."), 400, { requestId });
   }
   const parsed = pacingKnobsUpdateSchema.safeParse(raw);
   if (!parsed.success) {
-    return fail("validation_failed", "Campos inválidos.", 422, {
+    return fail("validation_failed", t("Campos inválidos."), 422, {
       requestId,
       details: parsed.error.flatten(),
     });
   }
-  const { channel_session_id, daily_message_limit, skip_warmup, ...camposDiretos } = parsed.data;
+  const {
+    channel_session_id,
+    daily_message_limit,
+    skip_warmup,
+    number_activated_at,
+    ...camposDiretos
+  } = parsed.data;
   // `skip_warmup` é pergunta da TELA; a coluna guarda a forma que o motor lê.
   // A tradução mora aqui, num lugar só: a tela não deveria precisar conhecer o
   // formato dos degraus para dizer "este número já está aquecido".
   const knobFields = {
     ...camposDiretos,
+    // `null` na data é "não estou declarando", NUNCA "grave nulo": esta é a
+    // única coluna `not null` da tabela, e um null explícito ANULA o
+    // `default now()` em vez de cair nele — 23502, e a ficha inteira deixava de
+    // salvar para quem nunca informou a data (toda instalação nova). Omitindo,
+    // a linha nova nasce com `now()` (idade 0 — o "recém-criado" que a tela
+    // promete) e a linha existente preserva a data que já tem, em vez de
+    // rejuvenescer o número em silêncio de volta ao teto de 20 envios/dia.
+    ...(number_activated_at != null ? { number_activated_at } : {}),
     ...(skip_warmup !== undefined
       ? { warmup_daily_caps: skip_warmup ? [...WARMUP_PULADO] : null }
       : {}),
@@ -105,7 +144,7 @@ export async function PUT(req: NextRequest): Promise<Response> {
     .is("archived_at", null)
     .maybeSingle();
   if (!session) {
-    return fail("session_not_found", "Conexão não encontrada nesta organização.", 404, {
+    return fail("session_not_found", t("Conexão não encontrada nesta organização."), 404, {
       requestId,
     });
   }
@@ -150,7 +189,13 @@ export async function PUT(req: NextRequest): Promise<Response> {
       { onConflict: "organization_id,channel_session_id" },
     );
     if (upErr) {
-      return fail("internal_error", "Falha ao salvar os knobs.", 500, { requestId });
+      // O motivo cru vai em `details`, não na `message` que o operador lê: foi a
+      // ausência dele que transformou um `not null` num diagnóstico de horas —
+      // nem a tela nem o log diziam QUAL campo o banco recusou.
+      return fail("internal_error", t("Falha ao salvar os knobs."), 500, {
+        requestId,
+        details: { motivo: upErr.message },
+      });
     }
   }
 
@@ -161,7 +206,7 @@ export async function PUT(req: NextRequest): Promise<Response> {
       .eq("id", channel_session_id)
       .eq("organization_id", org.orgId);
     if (dlErr) {
-      return fail("internal_error", "Falha ao salvar o teto diário.", 500, { requestId });
+      return fail("internal_error", t("Falha ao salvar o teto diário."), 500, { requestId });
     }
   }
 
@@ -181,7 +226,14 @@ export async function PUT(req: NextRequest): Promise<Response> {
     .eq("channel_session_id", channel_session_id)
     .maybeSingle();
   return ok(
-    { channel_session_id, ...knobsView((savedRow as unknown as ChannelKnobsRow) ?? null) },
+    {
+      channel_session_id,
+      ...knobsView(
+        (savedRow as unknown as ChannelKnobsRow) ?? null,
+        new Date(),
+        await lerFusoDaOrganizacao(admin, org.orgId),
+      ),
+    },
     { requestId },
   );
 }

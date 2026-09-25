@@ -21,9 +21,12 @@ vi.mock('@/lib/event-log/drain', () => ({ drainEventLog }));
 vi.mock('@/lib/event-log/register-handlers', () => ({ ensureHandlersRegistered }));
 vi.mock('@/lib/supabase/admin', () => ({ createAdminClient }));
 
-const { proximaEspera, runEventLogDrainLoop, prontidaoDoLacoDeEventLog } = await import(
-  '@/lib/event-log/drain-loop'
-);
+const {
+  _reiniciarProntidaoDoLaco,
+  prontidaoDoLacoDeEventLog,
+  proximaEspera,
+  runEventLogDrainLoop,
+} = await import('@/lib/event-log/drain-loop');
 
 const knobs = { intervalMs: 2_000, idleIntervalMs: 10_000, batchSize: 50 };
 const vazio: DrainSummary = { scanned: 0, done: 0, retried: 0, failed: 0, dead: 0 };
@@ -37,6 +40,7 @@ const logger = log as unknown as Logger;
 beforeEach(() => {
   vi.clearAllMocks();
   createAdminClient.mockReturnValue({ marcador: 'admin' });
+  _reiniciarProntidaoDoLaco();
 });
 
 describe('proximaEspera — a regra de ritmo', () => {
@@ -71,21 +75,19 @@ describe('runEventLogDrainLoop', () => {
 
     expect(ensureHandlersRegistered).toHaveBeenCalledOnce();
     expect(drainEventLog).toHaveBeenCalledWith({ marcador: 'admin' }, { limit: 50 });
-    // Carga bem-sucedida publica prontidão — é o que o /healthz do worker lê.
-    expect(prontidaoDoLacoDeEventLog()).toEqual({ carregado: true, motivo: null });
   });
 
-  it('admin client indisponível DESLIGA o laço sem derrubar o worker, e é INCIDENTE, não rotina', async () => {
-    // `@/lib/supabase/admin` importa `@/lib/env`, mas `env` já foi validado
-    // ANTES de `startWorker` ser chamado (main.ts resolve `Env` primeiro) — uma
-    // falha aqui nunca é "faltou configurar", é bug: import quebrado, forma de
-    // `createAdminClient` mudada, etc. Por isso `log.error`, não `log.warn`, e
-    // por isso o /healthz passa a publicar `event_log_drain` — sem isso um laço
-    // morto por bug (e não por escolha) fica invisível. Achado ao triar o
-    // CHANGELOG do upstream (melgarafael/DeskcommCRM #648): o laço ficou
-    // parado 10 dias com o /healthz respondendo saudável.
+  it('admin client indisponível DESLIGA o laço sem derrubar o worker', async () => {
+    // `@/lib/supabase/admin` importa `@/lib/env`, que faz throw no topo do
+    // módulo quando falta variável obrigatória. Num `.env` enxuto, um import
+    // estático mataria o worker INTEIRO — fila durável, cron e turnos — por
+    // causa de um laço acessório. Ele tem que se desligar sozinho e avisar.
+    //
+    // `error`, e não o `warn` de antes: era o `warn` que fazia o laço desligado
+    // parecer ruído — a #648 ficou dez dias assim, com o `/healthz` verde
+    // (#604). A prontidão publicada é o que transforma isso em sinal visível.
     createAdminClient.mockImplementation(() => {
-      throw new Error('Cannot find module \'@react-pdf/hyphenate\'');
+      throw new Error('env inválido — verifique no .env: INTERNAL_SECRET');
     });
     const abort = new AbortController();
 
@@ -95,11 +97,11 @@ describe('runEventLogDrainLoop', () => {
 
     expect(drainEventLog).not.toHaveBeenCalled();
     expect(log.error).toHaveBeenCalledOnce();
-    expect(log.warn).not.toHaveBeenCalled();
     expect(prontidaoDoLacoDeEventLog()).toEqual({
       carregado: false,
-      motivo: expect.stringContaining('@react-pdf/hyphenate'),
+      motivo: expect.stringContaining('INTERNAL_SECRET'),
     });
+    expect(log.warn).not.toHaveBeenCalled();
   });
 
   it('erro num tick não interrompe o laço nem acelera as tentativas', async () => {

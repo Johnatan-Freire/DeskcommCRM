@@ -103,4 +103,16 @@ describe("versionCreateSchema aceita as flags por-agente que a tela edita", () =
     expect(parsed.success && parsed.data.split_messages).toBe(false);
     expect(parsed.success && parsed.data.split_max_chars).toBe(600);
   });
+
+  it("agente novo nasce fechado — can_mark_won/can_mark_lost default false (migration 0401)", () => {
+    const parsed = versionCreateSchema.safeParse(base);
+    expect(parsed.success && parsed.data.can_mark_won).toBe(false);
+    expect(parsed.success && parsed.data.can_mark_lost).toBe(false);
+  });
+
+  it("aceita autorização explícita quando o payload informa, inclusive granular", () => {
+    const parsed = versionCreateSchema.safeParse({ ...base, can_mark_won: false, can_mark_lost: true });
+    expect(parsed.success && parsed.data.can_mark_won).toBe(false);
+    expect(parsed.success && parsed.data.can_mark_lost).toBe(true);
+  });
 });

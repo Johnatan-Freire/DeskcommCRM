@@ -8,41 +8,38 @@ import type { SendMessageInput } from "@/lib/schemas";
 import { pgComoSupabase } from "../pg-como-supabase";
 
 /**
- * QUEM ENVIA POR SERVICE-ROLE NÃO ALCANÇA A CONVERSA DA ORGANIZAÇÃO VIZINHA.
+ * QUEM ENVIA POR TOKEN NÃO ALCANÇA A CONVERSA DA ORGANIZAÇÃO VIZINHA.
  *
  * ═══ POR QUE ESTE ARQUIVO EXISTE ═══
  *
- * `sendMessageHandler` é a ÚNICA porta de saída de mensagem do produto, e é
+ * `sendMessageHandler` é a ÚNICA porta de saída de mensagem do produto, e ela é
  * chamada por caminhos com garantias OPOSTAS:
  *
- *  - pela rota REST com sessão de navegador (app/api/v1/messages/route.ts), o
- *    client é o de RLS — a policy de `conversations` já barra a linha do
- *    vizinho, e o handler não precisa fazer nada;
- *  - pelo servidor MCP (lib/mcp/server.ts), o client é `createAdminClient()`
- *    — service-role, que **bypassa RLS**. Aí o ÚNICO filtro que existe é o
- *    que o handler escrever à mão.
+ *  - pela rota REST com sessão de navegador, o client é o de RLS — a policy de
+ *    `conversations` já barra a linha do vizinho, e o handler não precisa fazer
+ *    nada;
+ *  - pelo servidor MCP (`lib/mcp/server.ts:41`) e pela rota REST autenticada por
+ *    `Authorization: Bearer dsk_…` (`lib/api/auth-dual.ts`), o client é
+ *    `createAdminClient()` — service-role, que **bypassa RLS**. Aí o ÚNICO
+ *    filtro que existe é o que o handler escrever à mão.
  *
- * É o anti-pattern 10 do CLAUDE.md em estado puro: "service role usado em
- * request handler sem filtrar organization_id manualmente". E era real: a
- * consulta da conversa filtrava só por `id`. Um chamador de service-role com
+ * É o anti-pattern 10 do CLAUDE.md em estado puro. E ele era real: a consulta
+ * da conversa filtrava só por `id`. Um chamador de service-role com
  * `organization_id` da org A passava um `conversation_id` da org B e a linha
- * vinha; daí em diante todo o resto do handler usa `c.organization_id` — a
- * org da VÍTIMA — e a mensagem seria inserida e enviada pelo canal dela.
- *
- * Achado ao triar o CHANGELOG do upstream (`melgarafael/DeskcommCRM`
- * v1.23.0), que teve o mesmo vazamento no mesmo handler.
+ * vinha; daí em diante TODO o resto do handler usa `c.organization_id` — a org
+ * da VÍTIMA — e a mensagem era inserida e enviada pelo canal dela.
  *
  * ═══ COMO SE MEDE ═══
  *
  * `pgComoSupabase` conecta como `postgres`: NÃO há RLS neste teste. É
- * deliberado — é exatamente assim que o service-role vê o banco, e é o
- * cenário que precisa ser barrado pelo próprio handler. Ler o código não
- * bastaria: `organization_id` aparece dezenas de vezes neste handler sem que
- * nenhuma delas filtrasse a consulta que importa.
+ * deliberado — é exatamente assim que o service-role vê o banco, e é o cenário
+ * que precisa ser barrado pelo próprio handler. Ler o código não bastaria:
+ * `organization_id` aparece dezenas de vezes neste handler sem que nenhuma
+ * delas filtre a consulta que importa.
  *
- * O desfecho medido é DUPLO de propósito: a resposta (404) E o estado do
- * banco (nenhuma linha em `messages` na conversa da vítima). Só a resposta
- * deixaria passar um conserto que recusa DEPOIS de gravar.
+ * O desfecho medido é DUPLO de propósito: a resposta (404) E o estado do banco
+ * (nenhuma linha em `messages` na conversa da vítima). Só a resposta deixaria
+ * passar um conserto que recusa DEPOIS de gravar.
  */
 const container = process.env.TEST_DB_CONTAINER;
 if (!container) {
@@ -56,7 +53,7 @@ const pool = new pg.Pool({
 });
 const db = pgComoSupabase(pool);
 
-/** A organização de quem está agindo (o token/agente). */
+/** A organização do token que está agindo. */
 const ORG_A = "ce000781-0000-4000-8000-00000000000a";
 /** A vítima: outra organização, com a conversa dela. */
 const ORG_B = "ce000781-0000-4000-8000-00000000000b";
@@ -69,12 +66,12 @@ const CONTATO_A = "ce000781-0000-4000-8000-0000000000a1";
 const SESSAO_A = "ce000781-0000-4000-8000-0000000000a2";
 const CONVERSA_A = "ce000781-0000-4000-8000-0000000000a3";
 
-/** O contexto que o servidor MCP monta com `createAdminClient()`, org A. */
-function ctxDoAgenteDeA(): HandlerCtx {
+/** O contexto que `resolveAuthDual` monta no ramo do token (`via: "token"`). */
+function ctxDoTokenDeA(): HandlerCtx {
   return {
     organization_id: ORG_A,
-    actor: { type: "ai_agent", id: "run-de-a", role: "agent" },
-    requestId: "req-cross-tenant",
+    actor: { type: "ai_agent", id: "tok-de-a", role: "agent" },
+    requestId: "req-781-cross-tenant",
   };
 }
 
@@ -89,7 +86,6 @@ function texto(conversationId: string): SendMessageInput {
 async function semearOrg(
   org: string,
   slug: string,
-  telefone: string,
   ids: { contato: string; sessao: string; conversa: string },
 ): Promise<void> {
   await pool.query(
@@ -100,7 +96,7 @@ async function semearOrg(
   await pool.query(
     `insert into contacts (id, organization_id, name, phone_number)
      values ($1, $2, 'Lead ' || $3, $4) on conflict (id) do nothing`,
-    [ids.contato, org, slug, telefone],
+    [ids.contato, org, slug, `+55119${org.slice(-8, -1)}`.slice(0, 14)],
   );
   await pool.query(
     `insert into channel_sessions (id, organization_id, waha_session_name, status, webhook_secret_encrypted)
@@ -123,12 +119,12 @@ async function mensagensDa(conversa: string): Promise<number> {
 }
 
 beforeAll(async () => {
-  await semearOrg(ORG_A, "envio-cross-a", "+5511900000101", {
+  await semearOrg(ORG_A, "envio-cross-a", {
     contato: CONTATO_A,
     sessao: SESSAO_A,
     conversa: CONVERSA_A,
   });
-  await semearOrg(ORG_B, "envio-cross-b", "+5511900000102", {
+  await semearOrg(ORG_B, "envio-cross-b", {
     contato: CONTATO_B,
     sessao: SESSAO_B,
     conversa: CONVERSA_B,
@@ -156,7 +152,7 @@ describe("a conversa da outra organização", () => {
     const { data, error } = await db
       .from("conversations")
       .select(
-        "id, organization_id, contacts:contact_id(phone_number, is_blocked), channel_sessions:channel_session_id(waha_session_name, status)",
+        "id, organization_id, contacts:contact_id(phone_number, is_blocked), channel_sessions:channel_session_id(provider, waha_session_name, status)",
       )
       .eq("id", CONVERSA_B)
       .maybeSingle();
@@ -172,13 +168,17 @@ describe("a conversa da outra organização", () => {
   it("o envio pela PRÓPRIA organização funciona — o controle positivo", async () => {
     // Sem este caso, um handler que recusasse TODO envio ficaria verde no caso
     // principal: a ausência de vazamento viria de o produto estar morto.
-    const msg = await sendMessageHandler(db, ctxDoAgenteDeA(), texto(CONVERSA_A));
+    const msg = await sendMessageHandler(
+      db,
+      { ...ctxDoTokenDeA(), organization_id: ORG_A },
+      texto(CONVERSA_A),
+    );
     expect(msg.id).toBeTruthy();
     expect(await mensagensDa(CONVERSA_A)).toBe(1);
   });
 
   it("NÃO recebe mensagem de um chamador de service-role de outra org", async () => {
-    await expect(sendMessageHandler(db, ctxDoAgenteDeA(), texto(CONVERSA_B))).rejects.toMatchObject({
+    await expect(sendMessageHandler(db, ctxDoTokenDeA(), texto(CONVERSA_B))).rejects.toMatchObject({
       status: 404,
       code: "not_found",
     });

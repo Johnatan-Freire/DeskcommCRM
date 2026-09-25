@@ -110,7 +110,7 @@ describe("POST /api/v1/pipelines/[id]/stages", () => {
         organization_id: ORG_ID,
         pipeline_id: PIPE,
         name: "Pós-venda",
-        slug: "pos_venda",
+        slug: "pos-venda",
         // A última posição do funil é 4000 (a fixture chega embaralhada): a etapa
         // nova entra DEPOIS dela, não no meio.
         position: 5000,
@@ -140,7 +140,7 @@ describe("POST /api/v1/pipelines/[id]/stages", () => {
     const res = await POST(reqPost({ name: "Retorno" }), ctx);
 
     expect(res.status).toBe(201);
-    expect(db.escritas[0]?.patch).toMatchObject({ slug: "retorno_2" });
+    expect(db.escritas[0]?.patch).toMatchObject({ slug: "retorno-2" });
   });
 
   it("caminho feliz audita pipeline.stage_created", async () => {
@@ -193,3 +193,10 @@ describe("POST /api/v1/pipelines/[id]/stages", () => {
     expect(audit).not.toHaveBeenCalled();
   });
 });
+
+// Este teste isola o handler; autoridade de suporte é exercitada na suíte própria.
+vi.mock("@/lib/impersonate/support", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/lib/impersonate/support")>(),
+  requireSupportWrite: vi.fn(async () => null),
+  authenticatedSessionId: vi.fn(async () => "f2200000-0000-4000-8000-000000000099"),
+}));

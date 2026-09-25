@@ -10,6 +10,7 @@
  * Auth: cookie session, role >= admin.
  */
 import { randomUUID } from "node:crypto";
+import { valorDaInstalacao } from "@/lib/instalacao/config";
 import type { NextRequest } from "next/server";
 
 import { ok, fail } from "@/lib/api/wrappers";
@@ -17,6 +18,7 @@ import { requireRole } from "@/lib/auth/require-role";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { collectExportData } from "@/lib/lgpd/export-collector";
 import { maskEmail, maskPhone } from "@/lib/lgpd/mask";
+import { traduzir } from "@/lib/i18n/dicionario";
 
 export const dynamic = "force-dynamic";
 
@@ -34,6 +36,7 @@ export async function GET(
     allowPlatformAdmin: true,
   });
   if (!authz.ok) return authz.response;
+  const t = (texto: string) => traduzir(texto, authz.user.idioma);
   const { org: activeOrg } = authz;
 
   const { id } = await params;
@@ -52,11 +55,15 @@ export async function GET(
     return fail("internal_error", reqErr.message, 500, { requestId });
   }
   if (!request) {
-    return fail("not_found", "Solicitação não encontrada.", 404, { requestId });
+    return fail("not_found", t("Solicitação não encontrada."), 404, { requestId });
   }
 
   // collectExportData — read-only, never writes
   const payload = await collectExportData({
+      // O piso do encarregado é resolvido AQUI e injetado: o coletor de LGPD
+      // não consulta configuração, para a coleta sem identificador continuar
+      // visitando só `organizations` (tests/invariants/agenda-meet-export).
+      dpoDaInstalacao: (await valorDaInstalacao("LGPD_DPO_EMAIL")).valor?.trim() || null,
     organizationId: orgId,
     requestId: id,
     contactId: request.contact_id,

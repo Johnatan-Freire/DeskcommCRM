@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { apiClient } from "@/lib/api/client";
 import { showApiError } from "@/components/feedback/ApiErrorToast";
+import { useT } from "@/hooks/i18n/useT";
 import type { ConfigSeguraSistemaEscolar } from "@/lib/integracoes/sistema-escolar-config";
 
 const formSchema = z.object({
@@ -43,6 +44,7 @@ interface Props {
 }
 
 export function SistemaEscolarForm({ initialConfig, canWrite }: Props) {
+  const t = useT();
   const router = useRouter();
   const [config, setConfig] = useState(initialConfig);
   const [baseUrl, setBaseUrl] = useState(initialConfig.base_url ?? "");
@@ -74,11 +76,11 @@ export function SistemaEscolarForm({ initialConfig, canWrite }: Props) {
       setConfig(res.data.config);
       setApiKey("");
       if (!isActive) {
-        toast.success("Configuração salva. Ative para testar a conexão.");
+        toast.success(t("Configuração salva. Ative para testar a conexão."));
       } else if (res.data.teste_de_conexao.ok) {
-        toast.success("Configuração salva — conexão testada com sucesso.");
+        toast.success(t("Configuração salva — conexão testada com sucesso."));
       } else {
-        toast.warning("Configuração salva, mas o teste de conexão falhou.", {
+        toast.warning(t("Configuração salva, mas o teste de conexão falhou."), {
           description: res.data.teste_de_conexao.erro,
         });
       }
@@ -94,7 +96,7 @@ export function SistemaEscolarForm({ initialConfig, canWrite }: Props) {
     setDeleting(true);
     try {
       await apiClient.delete("/api/v1/settings/sistema-escolar");
-      toast.success("Integração removida.");
+      toast.success(t("Integração removida."));
       setDeleteOpen(false);
       setConfig({ configurado: false, base_url: null, api_key_last4: null, is_active: false, updated_at: null });
       setBaseUrl("");
@@ -113,22 +115,22 @@ export function SistemaEscolarForm({ initialConfig, canWrite }: Props) {
       {config.configurado && (
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <Badge variant={config.is_active ? "default" : "outline"}>
-            {config.is_active ? "Ativa" : "Desativada"}
+            {config.is_active ? t("Ativa") : t("Desativada")}
           </Badge>
           <span>
-            Chave atual termina em <span className="font-mono">…{config.api_key_last4}</span>
+            {t("Chave atual termina em")} <span className="font-mono">…{config.api_key_last4}</span>
           </span>
         </div>
       )}
 
       <form onSubmit={onSubmit} className="space-y-4">
         <div className="space-y-2">
-          <Label htmlFor="se-base-url">URL base da API</Label>
+          <Label htmlFor="se-base-url">{t("URL base da API")}</Label>
           <Input
             id="se-base-url"
             value={baseUrl}
             onChange={(e) => setBaseUrl(e.target.value)}
-            placeholder="https://sistema.capitalcode.com.br"
+            placeholder="https://sistema.example.com"
             disabled={!canWrite}
             required
           />
@@ -136,13 +138,17 @@ export function SistemaEscolarForm({ initialConfig, canWrite }: Props) {
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="se-api-key">Chave de API</Label>
+          <Label htmlFor="se-api-key">{t("Chave de API")}</Label>
           <Input
             id="se-api-key"
             type="password"
             value={apiKey}
             onChange={(e) => setApiKey(e.target.value)}
-            placeholder={config.configurado ? "Deixe em branco para manter a chave atual" : "Obrigatória na primeira configuração"}
+            placeholder={
+              config.configurado
+                ? t("Deixe em branco para manter a chave atual")
+                : t("Obrigatória na primeira configuração")
+            }
             autoComplete="off"
             disabled={!canWrite}
           />
@@ -151,9 +157,9 @@ export function SistemaEscolarForm({ initialConfig, canWrite }: Props) {
 
         <div className="flex items-center justify-between">
           <div>
-            <Label htmlFor="se-is-active">Integração ativa</Label>
+            <Label htmlFor="se-is-active">{t("Integração ativa")}</Label>
             <p className="text-xs text-muted-foreground">
-              Desativada, os agentes deixam de oferecer consulta ao sistema escolar.
+              {t("Desativada, os agentes deixam de oferecer consulta ao sistema escolar.")}
             </p>
           </div>
           <Switch
@@ -167,7 +173,7 @@ export function SistemaEscolarForm({ initialConfig, canWrite }: Props) {
         {canWrite && (
           <div className="flex items-center justify-between pt-2">
             <Button type="submit" disabled={submitting}>
-              {submitting ? "Salvando…" : "Salvar"}
+              {submitting ? t("Salvando…") : t("Salvar")}
             </Button>
             {config.configurado && (
               <Button
@@ -177,7 +183,7 @@ export function SistemaEscolarForm({ initialConfig, canWrite }: Props) {
                 disabled={submitting}
                 onClick={() => setDeleteOpen(true)}
               >
-                Remover integração
+                {t("Remover integração")}
               </Button>
             )}
           </div>
@@ -187,16 +193,17 @@ export function SistemaEscolarForm({ initialConfig, canWrite }: Props) {
       <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Remover integração com o sistema escolar?</AlertDialogTitle>
+            <AlertDialogTitle>{t("Remover integração com o sistema escolar?")}</AlertDialogTitle>
             <AlertDialogDescription>
-              Os agentes &ldquo;Alunos&rdquo; e &ldquo;Interessados&rdquo; deixam de conseguir
-              consultar matrícula, notas e catálogo de cursos. Esta ação não pode ser desfeita.
+              {t(
+                "Os agentes “Alunos” e “Interessados” deixam de conseguir consultar matrícula, notas e catálogo de cursos. Esta ação não pode ser desfeita.",
+              )}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={deleting}>Cancelar</AlertDialogCancel>
+            <AlertDialogCancel disabled={deleting}>{t("Cancelar")}</AlertDialogCancel>
             <AlertDialogAction onClick={onDelete} disabled={deleting}>
-              Remover
+              {t("Remover")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

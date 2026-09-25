@@ -13,6 +13,7 @@
  * não na primeira mensagem que não sai — com o lead do outro lado esperando.
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { metadataInicialDoCanal } from "@/lib/ai/elegibilidade/pre-go-live";
 
 import { ARCHIVED_AT, queryTolerantToMissingArchived } from "./archived";
 import { CHANNEL_PROVIDER_ZERNIO } from "./capabilities";
@@ -37,6 +38,15 @@ export const PARTNER_CHANNEL_PROVIDER: ChannelProvider = CHANNEL_PROVIDER_ZERNIO
  * decisão de quem desenha a tela.
  */
 export const PARTNER_CHANNEL_LABEL = "Zernio";
+
+/**
+ * Endpoint base do parceiro — o que a tela mostra para o operador reaproveitar
+ * em outro sistema. Não é segredo (endereço público do provedor); a credencial
+ * continua sem voltar nunca.
+ */
+export function partnerEndpoint(): string {
+  return zernioBaseUrl();
+}
 
 export interface PartnerCredentialsInput {
   accountId: string;
@@ -216,7 +226,9 @@ export async function savePartnerSession(
 
   const { error } = input.existingId
     ? await admin.from("channel_sessions").update(linha).eq("id", input.existingId)
-    : await admin.from("channel_sessions").insert(linha);
+    : await admin
+        .from("channel_sessions")
+        .insert({ ...linha, metadata: metadataInicialDoCanal() });
 
   return { error: error?.message ?? null };
 }

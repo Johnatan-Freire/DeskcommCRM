@@ -1,5 +1,5 @@
 /**
- * Corte de conexão (migration 0281) — caminho pré-engine (org SEM agente
+ * Corte de conexão (migration 0398) — caminho pré-engine (org SEM agente
  * publicado, `workers/ai-response-worker.ts`). Irmão do teste equivalente em
  * `lib/agent-engine/edge/crm/drain.test.ts`, que cobre o caminho com engine.
  *
@@ -23,7 +23,7 @@ vi.mock("@/lib/logger", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
 vi.mock("@/lib/ai/gateway", () => ({
-  DEFAULT_BOT_MODEL: "anthropic/claude-sonnet-4-6",
+  DEFAULT_BOT_MODEL: "anthropic/claude-sonnet-5",
   gatewayConfig: {},
   gatewayHeaders: () => ({}),
   isAiGatewayConfigured: () => true,
@@ -55,6 +55,7 @@ function makeAdminStub(tables: StubTables, queried: string[]) {
     const chain: any = {
       select: () => chain,
       eq: () => chain,
+      is: () => chain,
       order: () => chain,
       limit: () => chain,
       maybeSingle: () => Promise.resolve({ data: result, error: null }),
@@ -103,7 +104,7 @@ beforeEach(() => {
 
 const CONECTOU_EM = "2026-09-21T10:00:00.000Z";
 
-describe("corte de conexão (migration 0281) — caminho pré-engine", () => {
+describe("corte de conexão (migration 0398) — caminho pré-engine", () => {
   it("mensagem anterior à conexão: skip 'message_before_connection', ANTES de consultar agente", async () => {
     const queried: string[] = [];
     vi.mocked(createAdminClient).mockReturnValue(
@@ -144,7 +145,7 @@ describe("corte de conexão (migration 0281) — caminho pré-engine", () => {
     expect(result.reason).toBe("agent_inactive_or_missing");
   });
 
-  it("sessão sem first_connected_at (já conectada antes da migration 0281): nenhum corte, comportamento de sempre", async () => {
+  it("sessão sem first_connected_at (já conectada antes da migration 0398): nenhum corte, comportamento de sempre", async () => {
     const queried: string[] = [];
     vi.mocked(createAdminClient).mockReturnValue(
       makeAdminStub(

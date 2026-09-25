@@ -1,6 +1,7 @@
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DragDropContext, type DropResult } from "@hello-pangea/dnd";
+import { useT } from "@/hooks/i18n/useT";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
@@ -19,12 +20,12 @@ import { camposDoFunil } from "@/lib/leads/campos-do-funil";
 
 /**
  * As colunas de estágio rolam na horizontal (`overflow-x-auto`) sem nenhum
- * indício visual — quem tem mais de ~4 estágios não descobre sozinho que dá
- * pra arrastar pro lado. As setas só aparecem quando há overflow real
- * (`canScrollLeft`/`canScrollRight`), então um board com poucos estágios que
- * cabem na tela nunca as mostra.
+ * indício visual — quem tem mais estágios do que cabem na tela não descobre
+ * sozinho que dá pra arrastar pro lado. As setas só aparecem quando há
+ * overflow real (`canScrollLeft`/`canScrollRight`): um board com poucos
+ * estágios que já cabem inteiros na viewport nunca as mostra.
  */
-function useBoardScroll() {
+export function useBoardScroll() {
   const ref = useRef<HTMLDivElement>(null);
   const [canScrollLeft, setCanScrollLeft] = useState(false);
   const [canScrollRight, setCanScrollRight] = useState(false);
@@ -119,6 +120,7 @@ export function KanbanBoard({
   onSelectionChange,
   leadInicial,
 }: KanbanBoardProps) {
+  const t = useT();
   const { ref: scrollRef, canScrollLeft, canScrollRight, scrollBy } = useBoardScroll();
   const useExternal = stagesProp !== undefined && leadsProp !== undefined;
   const queryResult = useBoard(useExternal ? null : pipelineId);
@@ -191,20 +193,22 @@ export function KanbanBoard({
     return groupLeadsByStage(data.stages, data.leads);
   }, [data]);
 
-  const handleSelect = useCallback(
-    (leadId: string, additive: boolean) => {
+  // Um conjunto por vez, e não um card por vez: o board recebe o resultado do
+  // gesto já resolvido pela coluna (um card, um intervalo, a etapa inteira). A
+  // versão anterior só sabia alternar UM id, e é por isso que "selecionar tudo"
+  // não existia — cada card exigia uma volta pelo estado.
+  const handleSelectMany = useCallback(
+    (leadIds: string[], marcar: boolean) => {
       const apply = (prev: Set<string>): Set<string> => {
-        const next = new Set(additive ? prev : []);
-        if (additive && prev.has(leadId)) {
-          next.delete(leadId);
-        } else {
-          next.add(leadId);
+        const next = new Set(prev);
+        for (const id of leadIds) {
+          if (marcar) next.add(id);
+          else next.delete(id);
         }
         return next;
       };
       if (onSelectionChange) {
-        const nextSet = apply(selectedLeadIds);
-        onSelectionChange(Array.from(nextSet));
+        onSelectionChange(Array.from(apply(selectedLeadIds)));
       } else {
         setInternalSelected((prev) => apply(prev));
       }
@@ -263,7 +267,7 @@ export function KanbanBoard({
   if (isError) {
     return (
       <Card className="m-4 p-6 text-sm text-text-muted">
-        Falha ao carregar o board.
+        {t("Falha ao carregar o board.")}
         {error instanceof Error ? ` ${error.message}` : null}
       </Card>
     );
@@ -276,7 +280,7 @@ export function KanbanBoard({
   if (data.stages.length === 0) {
     return (
       <Card className="m-4 p-6 text-sm text-text-muted">
-        Nenhum lead nesta pipeline ainda.
+        {t("Nenhum lead nesta pipeline ainda.")}
       </Card>
     );
   }
@@ -285,20 +289,20 @@ export function KanbanBoard({
     <DragDropContext onDragEnd={handleDragEnd}>
       <div className="relative h-full min-h-0">
         {/*
-         * As colunas de estágio (StageColumn) não têm scroll vertical próprio —
-         * crescem com a quantidade de leads, e é a PÁGINA inteira que rola.
-         * Por isso as setas NÃO podem se centralizar em `top-1/2` do container
-         * (que herda essa altura sem limite: com 11 leads numa coluna, o centro
-         * fica ~1200px abaixo da dobra, fora da tela). `top-24` ancora logo
-         * abaixo do cabeçalho das colunas — sempre visível na carga inicial,
-         * que é quando a maioria decide se vai descobrir o scroll.
+         * As colunas (StageColumn) não têm scroll vertical próprio — crescem
+         * com a quantidade de leads, e é a PÁGINA inteira que rola. Por isso
+         * as setas NÃO se centralizam em `top-1/2` do container (que herda
+         * essa altura sem limite: com muitos leads numa coluna, o centro fica
+         * bem abaixo da dobra, fora da tela). `top-24` ancora logo abaixo do
+         * cabeçalho das colunas — sempre visível na carga inicial, que é
+         * quando a maioria decide se vai descobrir o scroll.
          */}
         {canScrollLeft && (
           <Button
             type="button"
             variant="secondary"
             size="icon"
-            aria-label="Rolar estágios para a esquerda"
+            aria-label={t("Rolar estágios para a esquerda")}
             data-testid="kanban-scroll-left"
             onClick={() => scrollBy(-320)}
             className="absolute left-2 top-24 z-10 rounded-full shadow-md"
@@ -311,7 +315,7 @@ export function KanbanBoard({
             type="button"
             variant="secondary"
             size="icon"
-            aria-label="Rolar estágios para a direita"
+            aria-label={t("Rolar estágios para a direita")}
             data-testid="kanban-scroll-right"
             onClick={() => scrollBy(320)}
             className="absolute right-2 top-24 z-10 rounded-full shadow-md"
@@ -332,7 +336,7 @@ export function KanbanBoard({
               pulses={pulsesProp ?? queryResult.pulses}
               canonicalTags={canonicalTags}
               selectedLeadIds={selectedLeadIds}
-              onSelect={handleSelect}
+              onSelectMany={handleSelectMany}
               onOpen={setDossieId}
             />
           ))}

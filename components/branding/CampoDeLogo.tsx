@@ -40,6 +40,7 @@ import { Label } from "@/components/ui/label";
 import { melhorFrenteSobre } from "@/lib/branding/contraste";
 import { TAMANHO_MAXIMO_DO_LOGO } from "@/lib/branding/logo";
 import { REGUA_DO_PRODUTO } from "@/lib/branding/regua-do-produto";
+import { useT } from "@/hooks/i18n/useT";
 
 /** A superfície onde o logo de fato aparece, em cada tema. Lida, nunca digitada. */
 function superficie(tema: "claro" | "escuro"): string {
@@ -101,6 +102,7 @@ export function CampoDeLogo({
   origemDoHerdado,
   nomeEmVigor,
 }: Props) {
+  const t = useT();
   const router = useRouter();
   const entrada = useRef<HTMLInputElement>(null);
   const [enviando, setEnviando] = useState(false);
@@ -207,7 +209,7 @@ export function CampoDeLogo({
       | { error?: { code?: string; message?: string } }
       | null;
     const codigo = corpo?.error?.code ?? "";
-    return ERRO_EM_PORTUGUES[codigo] ?? corpo?.error?.message ?? "Não consegui trocar o logo agora.";
+    return t(ERRO_EM_PORTUGUES[codigo] ?? corpo?.error?.message ?? "Não consegui trocar o logo agora.");
   }
 
   async function enviar(arquivo: File) {
@@ -221,7 +223,7 @@ export function CampoDeLogo({
         toast.error(await razaoDaFalha(resposta));
         return;
       }
-      toast.success("Logo atualizado.");
+      toast.success(t("Logo atualizado."));
       const gravado = await logoDaResposta(resposta);
       if (gravado !== undefined) setLogoGravado(gravado);
       startTransition(() => router.refresh());
@@ -241,7 +243,7 @@ export function CampoDeLogo({
         toast.error(await razaoDaFalha(resposta));
         return;
       }
-      toast.success("Logo removido.");
+      toast.success(t("Logo removido."));
       // A rota devolve `logo_url: null` — "esta camada ficou sem logo próprio" —,
       // e é isso que faz a prévia cair no herdado sem esperar o refresh.
       const gravado = await logoDaResposta(resposta);
@@ -255,7 +257,7 @@ export function CampoDeLogo({
   return (
     <div className="space-y-4" data-campo-de-logo={escopo} data-hidratado={hidratado ? "" : undefined}>
       <div className="space-y-2">
-        <Label htmlFor={`logo-${escopo}`}>Logo</Label>
+        <Label htmlFor={`logo-${escopo}`}>{t("Logo")}</Label>
         <div className="flex flex-wrap items-center gap-3">
           <input
             ref={entrada}
@@ -274,14 +276,15 @@ export function CampoDeLogo({
           />
           {logoGravado ? (
             <Button type="button" variant="outline" onClick={() => void remover()} disabled={enviando}>
-              Remover
+              {t("Remover")}
             </Button>
           ) : null}
         </div>
         <p className="text-xs text-text-muted">
-          PNG ou JPG, até {Math.round(TAMANHO_MAXIMO_DO_LOGO / 1024)} KB. Prefira fundo
-          transparente. SVG não é aceito: ele pode executar código quando aberto direto pelo
-          endereço da imagem.
+          {t("PNG ou JPG, até")} {Math.round(TAMANHO_MAXIMO_DO_LOGO / 1024)}{" "}
+          {t(
+            "KB. Prefira fundo transparente. SVG não é aceito: ele pode executar código quando aberto direto pelo endereço da imagem.",
+          )}
         </p>
       </div>
 
@@ -293,35 +296,52 @@ export function CampoDeLogo({
             subir, até o refresh chegar (ou para sempre, quando ele é abortado).
           */}
           {logoGravado
-            ? "Como o logo aparece nas duas aparências do sistema:"
-            : `Sem logo próprio, o sistema usa o logo ${origemDoHerdado}. Assim ele aparece:`}
+            ? t("Como o logo aparece nas duas aparências do sistema:")
+            : `${t("Sem logo próprio, o sistema usa o logo")} ${t(origemDoHerdado)}. ${t("Assim ele aparece:")}`}
         </p>
         <div className="grid gap-3 sm:grid-cols-2">
           {(
             [
-              { rotulo: "Aparência clara", fundo: SUPERFICIE_CLARA },
-              { rotulo: "Aparência escura", fundo: SUPERFICIE_ESCURA },
+              { rotulo: t("Aparência clara"), fundo: SUPERFICIE_CLARA },
+              { rotulo: t("Aparência escura"), fundo: SUPERFICIE_ESCURA },
             ] as const
           ).map(({ rotulo, fundo }) => (
             <div key={rotulo} className="space-y-1">
               <div
-                data-previa-do-logo={rotulo === "Aparência clara" ? "claro" : "escuro"}
+                data-previa-do-logo={rotulo === t("Aparência clara") ? "claro" : "escuro"}
                 className="flex h-24 items-center justify-center rounded-sm border border-border px-4"
                 style={{ backgroundColor: fundo }}
               >
                 {emVigor ? (
-                  // <img> e não next/image pelo mesmo motivo da barra lateral e da
-                  // tela de acesso: a URL é do projeto de quem hospeda, e
-                  // `next/image` exige allowlist de domínios fechada em BUILD — a
-                  // imagem pré-buildada do self-host recusaria o domínio do
-                  // operador. Altura fixa e largura livre para não distorcer arte
-                  // de proporção desconhecida.
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={emVigor}
-                    alt={nomeEmVigor}
-                    className="max-h-12 w-auto max-w-full object-contain"
-                  />
+                  // O chip claro na aparência escura é o MESMO que a barra
+                  // lateral e a tela de entrada aplicam de verdade
+                  // (`components/shell/Sidebar.tsx`, `app/(public)/layout.tsx`):
+                  // esta prévia deixaria de ser prévia se mostrasse o logo cru
+                  // onde o app real desenha um chip por baixo. Aqui não dá pra
+                  // usar a variante `dark:` do Tailwind — as duas caixas
+                  // renderizam lado a lado no MESMO tema real, simulando os
+                  // dois via `style` — então a condição é o rótulo da caixa, não
+                  // o tema da página.
+                  <span
+                    className={
+                      rotulo === t("Aparência escura")
+                        ? "rounded-md bg-white px-2 py-1 shadow-sm"
+                        : undefined
+                    }
+                  >
+                    {/* <img> e não next/image pelo mesmo motivo da barra lateral e da
+                      tela de acesso: a URL é do projeto de quem hospeda, e
+                      `next/image` exige allowlist de domínios fechada em BUILD — a
+                      imagem pré-buildada do self-host recusaria o domínio do
+                      operador. Altura fixa e largura livre para não distorcer arte
+                      de proporção desconhecida. */}
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={emVigor}
+                      alt={nomeEmVigor}
+                      className="max-h-12 w-auto max-w-full object-contain"
+                    />
+                  </span>
                 ) : (
                   <span
                     className="text-sm font-semibold tracking-tight"
@@ -336,7 +356,7 @@ export function CampoDeLogo({
                   </span>
                 )}
               </div>
-              <p className="text-xs text-text-muted">{rotulo}</p>
+              <p className="text-xs text-text-muted">{t(rotulo)}</p>
             </div>
           ))}
         </div>

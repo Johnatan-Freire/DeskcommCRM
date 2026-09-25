@@ -1,3 +1,4 @@
+import { requireSupportWrite } from "@/lib/impersonate/support";
 /**
  * GET  /api/v1/channels/official — estado da conexão oficial + o que colar na Meta.
  * POST /api/v1/channels/official — VALIDA a credencial e só então grava.
@@ -25,15 +26,22 @@ import type { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
 import { fail, ok } from "@/lib/api/wrappers";
-import { requireAuth, resolveActiveOrg } from "@/lib/auth/server";
-import { ROLE_RANK } from "@/lib/auth/types";
+import { requireRole } from "@/lib/auth/require-role";
 import { ARCHIVED_AT, queryTolerantToMissingArchived } from "@/lib/channels/archived";
 import { CHANNEL_PROVIDER_META } from "@/lib/channels/capabilities";
+import { appDaMeta, appDaMetaDoAmbiente } from "@/lib/channels/meta/app";
+import { metaGraphBase } from "@/lib/channels/meta/credentials";
 import { validateMetaCredentials } from "@/lib/channels/meta/validate-credentials";
+import {
+  COLUNAS_DO_DESFECHO_DO_WEBHOOK,
+  registrarWebhookDaSessao,
+} from "@/lib/channels/meta/webhook-da-sessao";
 import { reactivateChannelSession } from "@/lib/channels/reactivate";
-import { env } from "@/lib/env";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { metadataInicialDoCanal } from "@/lib/ai/elegibilidade/pre-go-live";
 import { encryptWebhookSecret } from "@/lib/webhooks/secrets";
+import { basePublicaDoWebhookMeta } from "@/lib/webhooks/url-publica";
+import { traduzir } from "@/lib/i18n/dicionario";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -44,38 +52,74 @@ const conectarSchema = z.object({
   token: z.string().min(20),
 });
 
-type Gate = { ok: true; orgId: string; userId: string } | { ok: false; resposta: NextResponse };
-
-async function adminGate(requestId: string): Promise<Gate> {
-  const user = await requireAuth();
-  const org = await resolveActiveOrg(user);
-  if (!org || ROLE_RANK[org.role] < ROLE_RANK.admin) {
-    return { ok: false, resposta: fail("forbidden", "admin_required", 403, { requestId }) };
-  }
-  return { ok: true, orgId: org.orgId, userId: user.id };
+interface DesfechoGravado {
+  meta_webhook_override_uri: string | null;
+  meta_webhook_override_erro: string | null;
+  meta_webhook_override_em: string | null;
 }
 
 /**
- * Base pública desta instalação — é o que o operador cola no dashboard da Meta.
+ * O desfecho do registro do webhook desta sessão, lido em consulta PRÓPRIA.
  *
- * `env.*` e NÃO `process.env.NEXT_PUBLIC_APP_URL` direto: variáveis
- * `NEXT_PUBLIC_` são substituídas no BUILD, e a imagem genérica do self-host é
- * construída com `https://placeholder.invalid` (Dockerfile). Lendo direto do
- * `process.env`, a tela mostrava essa URL — e quem a colasse no dashboard
- * apontaria o webhook para o nada, sem erro em lugar nenhum.
+ * Separado do select principal de propósito: as três colunas chegam na migration
+ * 0311, e num banco sem ela o select inteiro voltaria 42703 — a tela perderia o
+ * canal (conectado, número, URL) por causa de um EXTRA. Aqui a ausência só significa
+ * "estado do registro indisponível".
  */
-function publicBase(req: NextRequest): string {
-  const configurada = env.NEXT_PUBLIC_APP_URL;
-  const usavel = configurada && !configurada.includes("placeholder.invalid") ? configurada : null;
-  return (
-    usavel ?? req.headers.get("origin") ?? `${req.nextUrl.protocol}//${req.nextUrl.host}`
-  );
+async function lerDesfechoDoWebhook(
+  admin: ReturnType<typeof createAdminClient>,
+  channelSessionId: string,
+): Promise<DesfechoGravado | null> {
+  const { data, error } = await admin
+    .from("channel_sessions")
+    .select(COLUNAS_DO_DESFECHO_DO_WEBHOOK)
+    .eq("id", channelSessionId)
+    .maybeSingle();
+  if (error) return null;
+  return data as DesfechoGravado | null;
+}
+
+/**
+ * O token de verificação que esta tela pode MOSTRAR — e de onde vem o que vale.
+ *
+ * Isto lia `process.env.META_WEBHOOK_VERIFY_TOKEN` direto, e a migration 0257
+ * tornou a leitura errada nos dois sentidos: com o App da Meta cadastrado pela
+ * tela de administração, o handshake passa a conferir o token do BANCO, e esta
+ * rota seguia mostrando o do `.env` (que a Meta recusaria) ou, sem `.env`,
+ * "defina no servidor" para quem já tinha configurado tudo.
+ *
+ * O valor do banco NÃO é devolvido: ele é mostrado uma vez, na resposta da
+ * action que o gera (`app/actions/settings/updateMetaApp.ts`), e aqui quem
+ * responde é o admin de UM tenant, não quem administra a instalação. O do `.env`
+ * continua sendo mostrado, como sempre foi — é o mesmo valor, na mesma rota.
+ *
+ * Por que "o que vale é igual ao do `.env`" basta para rotular a origem como
+ * `ambiente`: o token em vigor (`lib/channels/meta/app.ts`) é OU o do banco OU o
+ * do `.env` — o do banco só vale com o par inteiro decifrado; fora disso vale o
+ * que o `.env` tiver, até pela metade. Então a igualdade só engana num caso: o
+ * token do banco coincidir com o do `.env`. E o do banco ninguém escolhe — é
+ * gerado pelo servidor com 32 bytes aleatórios —, então coincidir exige alguém
+ * ter COPIADO o token gerado para o `.env`. Nesse caso o rótulo erra a origem,
+ * mas o valor exibido é o mesmo que já está no `.env`, que esta rota sempre
+ * mostrou: não sai nada que antes não saía.
+ */
+async function tokenDeVerificacaoParaATela(): Promise<{
+  verifyToken: string | null;
+  verifyTokenOrigem: "ambiente" | "instalacao" | null;
+}> {
+  const { verifyToken: emVigor } = await appDaMeta();
+  if (!emVigor) return { verifyToken: null, verifyTokenOrigem: null };
+  if (emVigor === appDaMetaDoAmbiente().verifyToken) {
+    return { verifyToken: emVigor, verifyTokenOrigem: "ambiente" };
+  }
+  return { verifyToken: null, verifyTokenOrigem: "instalacao" };
 }
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
   const requestId = randomUUID();
-  const g = await adminGate(requestId);
-  if (!g.ok) return g.resposta;
+  const authz = await requireRole("admin", { requestId, resource: "channels_official" });
+  if (!authz.ok) return authz.response;
+  const orgId = authz.org.orgId;
 
   const admin = createAdminClient();
   // Canal ARQUIVADO não conta como conectado. A linha sobrevive à exclusão como
@@ -88,21 +132,25 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     admin
       .from("channel_sessions")
       .select("id, meta_phone_number_id, meta_waba_id, meta_token_encrypted, phone_number, display_name, webhook_path_token, status")
-      .eq("organization_id", g.orgId)
+      .eq("organization_id", orgId)
       .eq("provider", CHANNEL_PROVIDER_META);
   const { data } = await queryTolerantToMissingArchived(
     () => consultar().is(ARCHIVED_AT, null).maybeSingle(),
     () => consultar().maybeSingle(),
   );
 
-  const base = publicBase(req);
+  const base = basePublicaDoWebhookMeta(req);
+  const desfecho = data?.id ? await lerDesfechoDoWebhook(admin, data.id) : null;
   return ok({
     connected: Boolean(data),
+    channel_session_id: data?.id ?? null,
     // `hasToken` em vez do token: uma vez gravado, a tela mostra que EXISTE, nunca
     // qual é. Devolver o segredo para preencher o campo seria vazá-lo a cada render.
     hasToken: Boolean(data?.meta_token_encrypted),
     phoneNumberId: data?.meta_phone_number_id ?? null,
     wabaId: data?.meta_waba_id ?? null,
+    /** Base pública da Graph API — para o operador reaproveitar em outro sistema. */
+    endpoint: data ? metaGraphBase() : null,
     displayName: data?.display_name ?? null,
     phoneNumber: data?.phone_number ?? null,
     status: data?.status ?? null,
@@ -110,21 +158,46 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     webhook: data
       ? {
           callbackUrl: `${base}/api/v1/webhooks/meta/${data.webhook_path_token}`,
-          verifyToken: process.env.META_WEBHOOK_VERIFY_TOKEN ?? null,
+          ...(await tokenDeVerificacaoParaATela()),
+          // A porta para quem PODE abrir a tela da instalação — mesma regra do
+          // link de `/admin/google` na Agenda. Para o admin de um tenant qualquer
+          // o link seria um 404; a tela diz a ele quem procurar.
+          configurarEm: authz.user.is_platform_admin && !authz.user.support ? "/admin/meta" : null,
           fields: ["messages", "message_template_status_update"],
+        }
+      : null,
+    /**
+     * E o que a instalação já fez SOZINHA (fatia F1): o webhook deste número está
+     * registrado na Meta ou ainda não? `registrado: false` com `erro` é estado
+     * esperado e não falha da conexão — o canal ENVIA normalmente; o que depende
+     * disto é a ENTREGA. A tela mostra o motivo e oferece tentar de novo.
+     */
+    webhookRegistro: data
+      ? {
+          registrado:
+            Boolean(desfecho?.meta_webhook_override_uri) && !desfecho?.meta_webhook_override_erro,
+          url: desfecho?.meta_webhook_override_uri ?? null,
+          erro: desfecho?.meta_webhook_override_erro ?? null,
+          em: desfecho?.meta_webhook_override_em ?? null,
         }
       : null,
   });
 }
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
+  const supportDenied = await requireSupportWrite();
+  if (supportDenied) return supportDenied;
+
   const requestId = randomUUID();
-  const g = await adminGate(requestId);
-  if (!g.ok) return g.resposta;
+  const authz = await requireRole("admin", { requestId, resource: "channels_official" });
+  if (!authz.ok) return authz.response;
+  const t = (texto: string) => traduzir(texto, authz.user.idioma);
+  const orgId = authz.org.orgId;
+  const userId = authz.user.id;
 
   const parsed = conectarSchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) {
-    return fail("invalid_request", "phone_number_id, waba_id e token são obrigatórios", 422, {
+    return fail("invalid_request", t("phone_number_id, waba_id e token são obrigatórios"), 422, {
       requestId,
     });
   }
@@ -132,7 +205,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   // VALIDA ANTES DE GRAVAR — a rota não sabe com quem fala; ela pergunta se a
   // credencial presta e o canal responde.
-  const validacao = await validateMetaCredentials({ phoneNumberId: phone_number_id, token });
+  //
+  // `wabaId` junto desde a fatia F1: a checagem do número sozinha aceita o par
+  // trocado (número de uma conta, id de outra), e o registro do webhook logo abaixo
+  // apontaria o override de um número que esta instalação não controla.
+  const validacao = await validateMetaCredentials({
+    phoneNumberId: phone_number_id,
+    token,
+    wabaId: waba_id,
+  });
   if (!validacao.ok) {
     return fail("invalid_request", validacao.motivo, 422, { requestId });
   }
@@ -144,7 +225,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     // recusar. O operador precisa saber que falta uma configuração de servidor.
     return fail(
       "invalid_request",
-      "cifra indisponível nesta instalação (GUC app.nuvemshop_oauth_key ausente) — o token não foi gravado",
+      t("cifra indisponível nesta instalação (GUC app.nuvemshop_oauth_key ausente) — o token não foi gravado"),
       422,
       { requestId },
     );
@@ -158,17 +239,21 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     admin
       .from("channel_sessions")
       .select(colunas)
-      .eq("organization_id", g.orgId)
+      .eq("organization_id", orgId)
       .eq("provider", CHANNEL_PROVIDER_META)
       .maybeSingle();
   const { data: existenteRaw } = await queryTolerantToMissingArchived(
-    () => buscarExistente(`id, ${ARCHIVED_AT}`),
-    () => buscarExistente("id"),
+    () => buscarExistente(`id, ${ARCHIVED_AT}, webhook_path_token`),
+    () => buscarExistente("id, webhook_path_token"),
   );
-  const existente = existenteRaw as { id: string; archived_at?: string | null } | null;
+  const existente = existenteRaw as {
+    id: string;
+    archived_at?: string | null;
+    webhook_path_token?: string | null;
+  } | null;
 
   const linha = {
-    organization_id: g.orgId,
+    organization_id: orgId,
     provider: CHANNEL_PROVIDER_META,
     meta_phone_number_id: phone_number_id,
     meta_waba_id: waba_id,
@@ -191,22 +276,44 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // devolver a linha à vida, ou o canal fica "conectado" na tela e excluído para
   // todo o resto do sistema. Para o canal que já estava ativo é um no-op — e a
   // auditoria de volta sai de lá, junto da ressurreição, não daqui.
-  const { error } = existente
-    ? await reactivateChannelSession(
-        admin,
-        {
-          organizationId: g.orgId,
-          channelSessionId: existente.id,
-          archivedAt: existente.archived_at ?? null,
-        },
-        linha,
-        {
-          userId: g.userId,
-          requestId,
-          metadata: { provider: CHANNEL_PROVIDER_META, phone_number: linha.phone_number },
-        },
-      )
-    : await admin.from("channel_sessions").insert({ ...linha, webhook_secret_encrypted: cifrado });
+  let idDaSessao: string | null = existente?.id ?? null;
+  let webhookPathToken: string | null = existente?.webhook_path_token ?? null;
+  let error: { message?: string | null } | null = null;
+
+  if (existente) {
+    ({ error } = await reactivateChannelSession(
+      admin,
+      {
+        organizationId: orgId,
+        channelSessionId: existente.id,
+        archivedAt: existente.archived_at ?? null,
+      },
+      linha,
+      {
+        userId: userId,
+        requestId,
+        metadata: { provider: CHANNEL_PROVIDER_META, phone_number: linha.phone_number },
+      },
+    ));
+  } else {
+    // `select("id, webhook_path_token")` porque o registro do webhook logo abaixo
+    // precisa dos DOIS: o id para gravar o desfecho na mesma linha, e o token porque
+    // é ele que compõe a URL que a Meta vai chamar. O INSERT não os devolve sozinho,
+    // e reler a linha por (org, provider) seria uma segunda ida ao banco pelo dado
+    // que este INSERT acabou de criar.
+    const inserida = await admin
+      .from("channel_sessions")
+      .insert({
+        ...linha,
+        webhook_secret_encrypted: cifrado,
+        metadata: metadataInicialDoCanal(),
+      })
+      .select("id, webhook_path_token")
+      .maybeSingle();
+    error = inserida.error;
+    idDaSessao = inserida.data?.id ?? null;
+    webhookPathToken = inserida.data?.webhook_path_token ?? null;
+  }
 
   if (error) {
     return fail("internal_error", error.message ?? "channel_session_write_failed", 500, {
@@ -214,9 +321,35 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     });
   }
 
+  // ─── O webhook DESTE número, registrado pela própria instalação (fatia F1) ──
+  // DEPOIS de gravar, nunca antes: o GET de verificação da Meta chega no instante
+  // em que o override é registrado e procura a sessão pelo `webhook_path_token` —
+  // registrar antes de a linha existir devolveria 404 e a Meta marcaria o webhook
+  // como inválido, que é pior que não registrar.
+  //
+  // E o desfecho volta na RESPOSTA, não só no log: quem colou as credenciais precisa
+  // saber que o canal envia mas ainda não entrega, com o motivo em mãos.
+  const webhook =
+    idDaSessao && webhookPathToken
+      ? await registrarWebhookDaSessao({
+          admin,
+          channelSessionId: idDaSessao,
+          phoneNumberId: phone_number_id,
+          wabaId: waba_id,
+          tokenCifrado: cifrado,
+          webhookPathToken,
+          base: basePublicaDoWebhookMeta(req),
+          requestId,
+        })
+      : null;
+
   return ok({
     connected: true,
     displayName: linha.display_name,
     phoneNumber: linha.phone_number,
+    /** `registrado: false` NÃO desfaz a conexão — o canal envia; falta a entrega. */
+    webhookRegistro: webhook
+      ? { registrado: webhook.registrado, url: webhook.url, erro: webhook.erro, em: webhook.em }
+      : null,
   });
 }
