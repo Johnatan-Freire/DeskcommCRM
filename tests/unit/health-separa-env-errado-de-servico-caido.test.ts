@@ -35,7 +35,14 @@ function pedido(): NextRequest {
 function comEnv(redisUrl: string, redisToken: string) {
   vi.doMock("@/lib/env", () => ({
     env: {
-      NEXT_PUBLIC_SUPABASE_URL: "https://projeto-do-cliente.supabase.co",
+      // Porta 9 (discard) e não um domínio `*.supabase.co` de mentira: o
+      // domínio real RESOLVE e a conexão fica pendurada até TIMEOUT_MS
+      // (3s) — medido, 2.76s nesta rede — o que empurra QUALQUER teste
+      // deste arquivo para perto do teto de tempo sem nenhuma relação com
+      // o que o teste afirma (o caminho do REDIS). A porta 9 recusa na
+      // hora, sempre, em qualquer rede — o mesmo motivo do `127.0.0.1:9`
+      // já usado no controle positivo abaixo.
+      NEXT_PUBLIC_SUPABASE_URL: "http://127.0.0.1:9",
       SUPABASE_SERVICE_ROLE_KEY: "chave-de-teste",
       UPSTASH_REDIS_REST_URL: redisUrl,
       UPSTASH_REDIS_REST_TOKEN: redisToken,
