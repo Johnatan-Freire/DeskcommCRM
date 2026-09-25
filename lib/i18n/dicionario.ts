@@ -838,6 +838,44 @@ export const DICIONARIO: Traducoes = {
   Funis: { es: "Embudos" },
   "Etapas do funil": { es: "Etapas del embudo" },
   "Tipos de agendamento": { es: "Tipos de cita" },
+  "Sistema escolar": { es: "Sistema escolar" },
+  "URL e chave da API que os agentes usam para consultar matrícula e notas.": {
+    es: "URL y clave de API que los agentes usan para consultar matrícula y notas.",
+  },
+  "Esta organização tem a integração com o sistema escolar configurada. Escolha o que ESTE agente pode consultar nela.": {
+    es: "Esta organización tiene la integración con el sistema escolar configurada. Elige qué puede consultar ESTE agente en ella.",
+  },
+  "Consultar dados de aluno já matriculado (matrícula, notas, faltas e situação financeira) pelo telefone da conversa": {
+    es: "Consultar datos de alumno ya matriculado (matrícula, notas, faltas y situación financiera) por el teléfono de la conversación",
+  },
+  "Consultar catálogo público de cursos e pacotes (preço, parcelamento, trilha)": {
+    es: "Consultar catálogo público de cursos y paquetes (precio, cuotas, trayectoria)",
+  },
+  "A URL e a chave da API do seu sistema escolar externo, que os agentes “Alunos” e “Interessados” consultam para matrícula, notas, frequência e catálogo de cursos. A chave é cifrada e nunca volta a aparecer na tela depois de salva.": {
+    es: "La URL y la clave de API de tu sistema escolar externo, que los agentes “Alumnos” e “Interesados” consultan para matrícula, notas, asistencia y catálogo de cursos. La clave se cifra y nunca vuelve a aparecer en la pantalla después de guardada.",
+  },
+  "Configuração salva. Ative para testar a conexão.": {
+    es: "Configuración guardada. Actívala para probar la conexión.",
+  },
+  "Configuração salva — conexão testada com sucesso.": {
+    es: "Configuración guardada — conexión probada con éxito.",
+  },
+  "Configuração salva, mas o teste de conexão falhou.": {
+    es: "Configuración guardada, pero la prueba de conexión falló.",
+  },
+  "Integração removida.": { es: "Integración eliminada." },
+  "Chave atual termina em": { es: "La clave actual termina en" },
+  "URL base da API": { es: "URL base de la API" },
+  "Obrigatória na primeira configuração": { es: "Obligatoria en la primera configuración" },
+  "Integração ativa": { es: "Integración activa" },
+  "Desativada, os agentes deixam de oferecer consulta ao sistema escolar.": {
+    es: "Desactivada, los agentes dejan de ofrecer consulta al sistema escolar.",
+  },
+  "Remover integração": { es: "Eliminar integración" },
+  "Remover integração com o sistema escolar?": { es: "¿Eliminar la integración con el sistema escolar?" },
+  "Os agentes “Alunos” e “Interessados” deixam de conseguir consultar matrícula, notas e catálogo de cursos. Esta ação não pode ser desfeita.": {
+    es: "Los agentes “Alumnos” e “Interesados” dejan de poder consultar matrícula, notas y catálogo de cursos. Esta acción no se puede deshacer.",
+  },
   Automação: { es: "Automatización" },
   Agentes: { es: "Agentes" },
   "Follow-ups": { es: "Seguimientos" },

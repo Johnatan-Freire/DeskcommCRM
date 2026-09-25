@@ -185,6 +185,8 @@ export const AUDIT_ACTIONS = [
   "ai.credential_created",
   "ai.credential_deleted",
   "ai.credential_revalidated",
+  "sistema_escolar.config_salva",
+  "sistema_escolar.config_removida",
   "ai_agent.created",
   "ai_agent.updated",
   "ai_agent.archived",

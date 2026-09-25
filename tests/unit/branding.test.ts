@@ -251,6 +251,30 @@ const MARCA_CONGELADA: Record<string, EntradaDeMarca> = {
       "User-Agent exigido pela Nuvemshop, que identifica a aplicação registrada na plataforma deles. Trocar pelo nome do revendedor descreveria uma aplicação que não existe lá",
     marcas: ["deskcommcrm"],
   },
+  "lib/integracoes/sistema-escolar.ts": {
+    categoria: "PROTOCOLO",
+    motivo:
+      "path /api/deskcomm/* é a rota que o sistema escolar (Laravel externo, repo à parte) já tem registrada e publicada em produção (routes/api.php de lá). Renomear aqui sem renomear e reimplantar o outro lado quebra a integração em silêncio — 404 sem explicação",
+    marcas: ["deskcomm", "deskcomm"],
+  },
+  "lib/integracoes/sistema-escolar.test.ts": {
+    categoria: "PROTOCOLO",
+    motivo:
+      "é a guarda do contrato acima: prova que o client chama exatamente /api/deskcomm/aluno e /api/deskcomm/cursos. Trocar a string aqui para 'limpar a marca' desarmaria a única proteção que o contrato tem",
+    marcas: ["deskcomm", "deskcomm", "deskcomm"],
+  },
+  "lib/integracoes/sistema-escolar-config.ts": {
+    categoria: "PROTOCOLO",
+    motivo:
+      "mesmo path /api/deskcomm/cursos do sistema escolar Laravel, usado aqui como ping de teste de conexão logo após salvar a configuração pela tela. É a MESMA rota externa de `sistema-escolar.ts`, não uma nova — trocar quebraria o teste de conexão em silêncio",
+    marcas: ["deskcomm"],
+  },
+  "lib/integracoes/sistema-escolar-config.test.ts": {
+    categoria: "PROTOCOLO",
+    motivo:
+      "guarda do teste de conexão acima: prova que testarConexao chama exatamente /api/deskcomm/cursos",
+    marcas: ["deskcomm", "deskcomm"],
+  },
   "lib/agenda/google/evento.ts": {
     categoria: "PROTOCOLO",
     motivo:

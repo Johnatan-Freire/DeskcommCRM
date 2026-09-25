@@ -1,0 +1,167 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Pergunta do aluno → dado real do sistema escolar",
+    "subtitle": "telefone confiável da conversa, desambiguação sem vazamento e resposta acadêmica minimizada",
+    "output": "sistema-escolar.html",
+    "quality_profile": "standard"
+  },
+  "lanes": [
+    { "id": "conversa", "label": "WhatsApp e turno" },
+    { "id": "crm", "label": "Integração no CRM" },
+    { "id": "externo", "label": "Sistema escolar Laravel" },
+    { "id": "retorno", "label": "Continuidade e falha" }
+  ],
+  "mainPath": ["pergunta", "tool", "cliente", "api", "selecao", "resposta"],
+  "nodes": [
+    {
+      "id": "pergunta",
+      "lane": "conversa",
+      "col": 1,
+      "type": "external",
+      "label": "Pergunta do aluno",
+      "sublabel": "nota, faltas, curso, turma, horário ou situação financeira"
+    },
+    {
+      "id": "tool",
+      "lane": "conversa",
+      "col": 2,
+      "type": "tool",
+      "label": "consultar_aluno_sistema_escolar",
+      "sublabel": "usa o telefone da conversa; nunca aceita telefone inventado pelo modelo"
+    },
+    {
+      "id": "config",
+      "lane": "crm",
+      "col": 2,
+      "type": "table",
+      "label": "org_sistema_escolar_config",
+      "sublabel": "base URL por organização e chave cifrada; sem linha, a tool nem entra no turno"
+    },
+    {
+      "id": "cliente",
+      "lane": "crm",
+      "col": 3,
+      "type": "lib",
+      "label": "lib/integracoes/sistema-escolar.ts",
+      "sublabel": "timeout, X-Api-Key e validação Zod do contrato externo"
+    },
+    {
+      "id": "api",
+      "lane": "externo",
+      "col": 4,
+      "type": "api",
+      "label": "GET /api/deskcomm/aluno",
+      "sublabel": "matrícula, notas, frequência e status financeiro; sem CPF, endereço, boleto ou PIX"
+    },
+    {
+      "id": "selecao",
+      "lane": "crm",
+      "col": 5,
+      "type": "lib",
+      "label": "selecionarAluno",
+      "sublabel": "um cadastro: projeta; vários: pede nome completo sem expor os candidatos"
+    },
+    {
+      "id": "resposta",
+      "lane": "conversa",
+      "col": 6,
+      "type": "external",
+      "label": "Resposta ao aluno",
+      "sublabel": "o modelo recebe só o cadastro confirmado e responde na própria conversa"
+    },
+    {
+      "id": "falha",
+      "lane": "retorno",
+      "col": 5,
+      "type": "service",
+      "label": "Erro instrutivo + log sem PII",
+      "sublabel": "não inventa; pede nova tentativa ou mantém a continuidade com uma pessoa"
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "from": "pergunta",
+      "to": "tool",
+      "label": "o agente identifica dado pessoal escolar"
+    },
+    {
+      "id": "e2",
+      "from": "config",
+      "to": "tool",
+      "label": "decide se a capacidade existe neste tenant"
+    },
+    { "id": "e3", "from": "tool", "to": "cliente", "label": "telefone vem do contexto confiável" },
+    {
+      "id": "e4",
+      "from": "config",
+      "to": "cliente",
+      "label": "fornece URL e chave decifrada no servidor"
+    },
+    { "id": "e5", "from": "cliente", "to": "api", "label": "GET autenticado com timeout" },
+    { "id": "e6", "from": "api", "to": "cliente", "label": "JSON minimizado" },
+    {
+      "id": "e7",
+      "from": "cliente",
+      "to": "selecao",
+      "label": "somente resposta validada por Zod"
+    },
+    {
+      "id": "e8",
+      "from": "selecao",
+      "to": "resposta",
+      "label": "um aluno confirmado, sem id interno"
+    },
+    {
+      "id": "e9",
+      "from": "selecao",
+      "to": "pergunta",
+      "label": "ambíguo: pergunta o nome completo"
+    },
+    { "id": "e10", "from": "cliente", "to": "falha", "label": "rede, HTTP ou contrato inválido" },
+    {
+      "id": "e11",
+      "from": "falha",
+      "to": "resposta",
+      "label": "explica que não conseguiu consultar, sem inventar"
+    },
+    {
+      "id": "e12",
+      "from": "resposta",
+      "to": "pergunta",
+      "label": "a conversa continua com nova demanda ou confirmação"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "rose",
+      "title": "Telefone compartilhado não autoriza escolher por aproximação",
+      "items": [
+        "um responsável pode ter dois alunos no mesmo número",
+        "antes, os dados completos dos dois chegavam ao modelo e a tool não aceitava o nome pedido na conversa",
+        "agora, sem nome só sai a quantidade; com nome, a igualdade normalizada precisa selecionar exatamente um cadastro"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Configuração pela tela — dívida paga",
+      "items": [
+        "/app/settings/tenant/sistema-escolar (admin edita, manager visualiza) substitui o provisionamento direto no banco",
+        "leitura e escrita passam pelo admin client no servidor com organization_id do JWT — a tabela mantém revoke select de authenticated/anon (migration 0399), nenhum caminho de browser lê api_key_encrypted/iv/tag",
+        "salvar fecha o laço de retorno na hora: com is_active=true, testa GET /api/deskcomm/cursos com a chave recém-salva e mostra o resultado ao operador, em vez de só quando um aluno perguntar algo"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Escopo por agente — quem pode consultar o quê (migration 0400)",
+      "items": [
+        "antes: org configurada bastava — QUALQUER agente publicado ganhava as duas tools juntas, sem distinção de papel",
+        "agora: ai_agent_versions.sistema_escolar_tool_ids escolhe, por agente, entre consultar dados de aluno matriculado e consultar catálogo de cursos — editável na aba Configuração do agente, só quando a org tem a integração ativa",
+        "gate em duas camadas (lib/agent-engine/agent/sistema-escolar-gate.ts): org desativada bloqueia sempre; sem agente publicado (fallback de playbook) as duas entram juntas, como antes deste escopo — não há onde marcar 'só uma' nesse caminho",
+        "agente novo nasce fechado (nenhuma tool); agentes que já existiam mantiveram o comportamento anterior via backfill da migration"
+      ]
+    }
+  ]
+}

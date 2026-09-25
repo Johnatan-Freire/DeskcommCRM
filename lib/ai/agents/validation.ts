@@ -11,6 +11,7 @@ import { z } from "zod";
 import { VALID_TOOL_IDS } from "@/lib/mcp/tools/catalog";
 import { TETO_TOOLS_POR_AGENTE } from "@/lib/mcp/tools/selecao-por-pacote";
 import { IDS_DE_PROVEDOR } from "@/lib/ai/pontos/provedores";
+import { SISTEMA_ESCOLAR_TOOL_IDS } from "@/lib/integracoes/sistema-escolar-tools";
 
 /**
  * Derivado de `lib/ai/pontos/provedores.ts` (a lista única desde a 0127). Como
@@ -214,6 +215,15 @@ const versionShapeSchema = z
      * organização é o servidor.
      */
     knowledge_source_ids: z.array(z.string().uuid()).default([]),
+    /**
+     * Quais das duas tools de sistema escolar este agente pode usar — escopo
+     * POR AGENTE, independente de `org_sistema_escolar_config` (que é da org
+     * inteira). Vazio = NENHUMA: agente novo nasce fechado, mesma direção
+     * segura de `operator_tool_ids`/`pipeline_ids` acima. Domínio fixo (2
+     * valores em código, não linha de tabela), por isso o `.refine()` de
+     * existência é aceitável aqui — ao contrário de pipeline/material.
+     */
+    sistema_escolar_tool_ids: z.array(z.enum(SISTEMA_ESCOLAR_TOOL_IDS)).default([]),
   })
   .strict();
 
@@ -241,6 +251,7 @@ export const versionPatchSchema = versionShapeSchema
     operator_tool_ids: versionShapeSchema.shape.operator_tool_ids.removeDefault(),
     pipeline_ids: versionShapeSchema.shape.pipeline_ids.removeDefault(),
     knowledge_source_ids: versionShapeSchema.shape.knowledge_source_ids.removeDefault(),
+    sistema_escolar_tool_ids: versionShapeSchema.shape.sistema_escolar_tool_ids.removeDefault(),
   })
   .partial();
 

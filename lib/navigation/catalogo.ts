@@ -322,6 +322,24 @@ export const NAV_CATALOG = [
     // na navegação" — a porta existia, era outra.
   },
   {
+    // Fecha a dívida declarada em `docs/architecture/sistema-escolar.architecture.json`:
+    // `org_sistema_escolar_config` só existia via provisionamento direto no
+    // banco — não havia tela. A tabela nasceu com `revoke select ... from
+    // authenticated, anon` (migration 0399) de propósito: sem tela, nenhum
+    // caminho de browser precisava lê-la.
+    href: "/app/settings/tenant/sistema-escolar",
+    label: "Sistema escolar",
+    description: "URL e chave da API que os agentes usam para consultar matrícula e notas.",
+    icon: "GraduationCap",
+    group: "organizacao",
+    section: "Sua empresa",
+    // Ver é `manager` (mesma role da rota GET); editar é `admin` (mesma role
+    // do PUT/DELETE) — a tela esconder os controles não é autorização, é
+    // cortesia (checado de novo em SistemaEscolarConfigPage).
+    minRole: "manager",
+    // SEM `sidebar`, mesmo padrão da entrada de Tipos de agendamento acima.
+  },
+  {
     // O BALCÃO. Fica em CRM, e não em Configurações, porque é uso diário de quem
     // está com a cliente na frente — a tela irmã, em Configurações › Financeiro,
     // é onde o negócio se descreve uma vez.

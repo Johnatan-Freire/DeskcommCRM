@@ -147,6 +147,12 @@ type Props = (EditProps | CreateProps) & {
    * algo importante.
    */
   materiais?: MaterialDoAcervo[];
+  /**
+   * A org tem `org_sistema_escolar_config` ativa? Sem isto a seção de escopo
+   * do sistema escolar não aparece — não faz sentido marcar tools que a org
+   * nem tem ligadas (ver `sistema-escolar-gate.ts`, o gate por trás do runtime).
+   */
+  sistemaEscolarConfigurado?: boolean;
 };
 
 interface FormState {
@@ -178,6 +184,7 @@ interface FormState {
   operator_tool_ids: string[];
   pipeline_ids: string[];
   knowledge_source_ids: string[];
+  sistema_escolar_tool_ids: string[];
 }
 
 interface FollowupValue {
@@ -252,6 +259,9 @@ function buildState(args: {
     pipeline_ids: version?.pipeline_ids ?? [],
     // `?? []` = nenhum material. Mesma direção segura: agir de menos.
     knowledge_source_ids: version?.knowledge_source_ids ?? [],
+    // `?? []` = nenhuma das duas tools do sistema escolar. Agente novo nasce
+    // fechado, mesma direção segura das duas linhas acima.
+    sistema_escolar_tool_ids: version?.sistema_escolar_tool_ids ?? [],
   };
 }
 
@@ -306,6 +316,7 @@ function toVersionPayload(s: FormState) {
     operator_tool_ids: s.operator_tool_ids,
     pipeline_ids: s.pipeline_ids,
     knowledge_source_ids: s.knowledge_source_ids,
+    sistema_escolar_tool_ids: s.sistema_escolar_tool_ids,
   };
 }
 
@@ -313,6 +324,7 @@ export function AgentForm(props: Props) {
   const t = useT();
   const funis = props.funis ?? [];
   const materiais = props.materiais ?? [];
+  const sistemaEscolarConfigurado = props.sistemaEscolarConfigurado ?? false;
   const router = useRouter();
   const isEdit = props.mode === "edit";
   const readOnly = props.readOnly ?? false;
@@ -1127,6 +1139,63 @@ export function AgentForm(props: Props) {
               <p className="text-xs text-destructive">{validation.tool_ids}</p>
             ) : null}
           </Card>
+
+          {/* Escopo do sistema escolar — só aparece quando a org tem a
+              integração configurada (Configurações › Sua empresa › Sistema
+              escolar). Sem isto, qualquer agente publicado ganhava as duas
+              tools juntas: um agente de vendas podia puxar nota de aluno
+              matriculado sabendo só o telefone, e um de suporte podia cotar
+              preço de curso. */}
+          {sistemaEscolarConfigurado ? (
+            <Card className="space-y-3 p-4">
+              <h3 className="text-sm font-medium">{t("Sistema escolar")}</h3>
+              <p className="text-xs text-muted-foreground">
+                {t(
+                  "Esta organização tem a integração com o sistema escolar configurada. Escolha o que ESTE agente pode consultar nela.",
+                )}
+              </p>
+              <div className="flex items-start gap-2">
+                <Switch
+                  id="sistema_escolar_aluno"
+                  checked={form.sistema_escolar_tool_ids.includes("consultar_aluno_sistema_escolar")}
+                  onCheckedChange={(v) =>
+                    patch({
+                      sistema_escolar_tool_ids: v
+                        ? [...form.sistema_escolar_tool_ids, "consultar_aluno_sistema_escolar"]
+                        : form.sistema_escolar_tool_ids.filter(
+                            (id) => id !== "consultar_aluno_sistema_escolar",
+                          ),
+                    })
+                  }
+                  disabled={disabled}
+                />
+                <Label htmlFor="sistema_escolar_aluno" className="font-normal">
+                  {t(
+                    "Consultar dados de aluno já matriculado (matrícula, notas, faltas e situação financeira) pelo telefone da conversa",
+                  )}
+                </Label>
+              </div>
+              <div className="flex items-start gap-2">
+                <Switch
+                  id="sistema_escolar_catalogo"
+                  checked={form.sistema_escolar_tool_ids.includes("consultar_catalogo_cursos")}
+                  onCheckedChange={(v) =>
+                    patch({
+                      sistema_escolar_tool_ids: v
+                        ? [...form.sistema_escolar_tool_ids, "consultar_catalogo_cursos"]
+                        : form.sistema_escolar_tool_ids.filter(
+                            (id) => id !== "consultar_catalogo_cursos",
+                          ),
+                    })
+                  }
+                  disabled={disabled}
+                />
+                <Label htmlFor="sistema_escolar_catalogo" className="font-normal">
+                  {t("Consultar catálogo público de cursos e pacotes (preço, parcelamento, trilha)")}
+                </Label>
+              </div>
+            </Card>
+          ) : null}
 
           {/* O acervo que este assistente consulta (0181) */}
           <BasesDoAgente

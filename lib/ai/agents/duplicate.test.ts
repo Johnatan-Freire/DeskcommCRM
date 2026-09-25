@@ -48,6 +48,9 @@ const VERSAO_PUBLICADA = {
   split_messages: true,
   split_max_chars: 240,
   followup: { enabled: true, flow_pointer_ids: ["pointer-1"] },
+  pipeline_ids: ["pipeline-1"],
+  knowledge_source_ids: ["fonte-1"],
+  sistema_escolar_tool_ids: ["consultar_aluno_sistema_escolar"],
   status: "published",
   published_at: "2026-07-31T00:00:00Z",
   superseded_at: null,
@@ -118,6 +121,13 @@ describe("duplicateAgentWithVersion", () => {
     expect(versao!.row.credential_id).toBe("cred-1");
     expect(versao!.row.channel_session_id).toBe("chan-1");
     expect(versao!.row.system_prompt).toBe("prompt da versao");
+    // ESCOPO: mesma classe de bug que split_messages/followup acima — coluna
+    // presente no SELECT e ausente do INSERT faz a cópia nascer vazia. Duplicar
+    // um agente "Alunos" com o escopo do sistema escolar marcado não pode
+    // produzir um clone que não consulta nada.
+    expect(versao!.row.pipeline_ids).toEqual(["pipeline-1"]);
+    expect(versao!.row.knowledge_source_ids).toEqual(["fonte-1"]);
+    expect(versao!.row.sistema_escolar_tool_ids).toEqual(["consultar_aluno_sistema_escolar"]);
   });
 
   it("a cópia nasce como draft v1 e fora do ar", async () => {

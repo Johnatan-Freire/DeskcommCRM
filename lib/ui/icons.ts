@@ -147,4 +147,6 @@ export {
   GoogleLogo,
   MapPin,
   ArrowsOutSimple,
+  // sistema escolar (integração Capital Code)
+  GraduationCap,
 } from "@phosphor-icons/react/dist/ssr";

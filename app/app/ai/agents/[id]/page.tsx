@@ -18,6 +18,8 @@ import { coberturaDoFunil, type EtapaDoMapa } from "@/lib/leads/agent-mapping";
 import type { CoberturaPorFunil } from "./_components/FunisDoAgente";
 import { lerAmbiente } from "@/lib/instalacao/ambiente";
 import { escolherVersoesDaTela } from "@/lib/ai/agents/versoes-da-tela";
+import { lerConfigSegura } from "@/lib/integracoes/sistema-escolar-config";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 export const dynamic = "force-dynamic";
 
@@ -25,7 +27,7 @@ const AGENT_COLUMNS =
   "id, organization_id, name, description, model, system_prompt, is_active, is_default, kind, channel, priority, published_version_id, paused_at, operation_mode, operation_revision, archived_at, config, guardrails, active_kb_version_id, created_at, updated_at";
 
 const VERSION_COLUMNS =
-  "id, organization_id, agent_id, version_number, system_prompt, provider, model, credential_id, tool_ids, trigger_config, channel_session_id, max_steps, token_budget, cost_budget_cents, history_message_window, history_token_window, handoff_keywords, handoff_tool_enabled, cases_enabled, split_messages, split_max_chars, followup, operator_enabled, operator_model, operator_tool_ids, status, published_at, superseded_at, created_at, created_by,pipeline_ids,knowledge_source_ids,provisioning_origin";
+  "id, organization_id, agent_id, version_number, system_prompt, provider, model, credential_id, tool_ids, trigger_config, channel_session_id, max_steps, token_budget, cost_budget_cents, history_message_window, history_token_window, handoff_keywords, handoff_tool_enabled, cases_enabled, split_messages, split_max_chars, followup, operator_enabled, operator_model, operator_tool_ids, status, published_at, superseded_at, created_at, created_by,pipeline_ids,knowledge_source_ids,provisioning_origin,sistema_escolar_tool_ids";
 
 const CREDENTIAL_COLUMNS =
   "id, organization_id, provider, label, api_key_last4, validated_at, validation_error, models_available, is_active, created_by, created_at, updated_at";
@@ -100,8 +102,15 @@ export default async function AgentEditorPage({ params }: { params: Promise<{ id
   }
 
   // mcp_agent: busca versions + lookups.
-  const [versionsRes, credentialsRes, channelSessions, routerMemberRes, funisRes, acervoRes] =
-    await Promise.all([
+  const [
+    versionsRes,
+    credentialsRes,
+    channelSessions,
+    routerMemberRes,
+    funisRes,
+    acervoRes,
+    sistemaEscolarConfig,
+  ] = await Promise.all([
       supabase
         .from("ai_agent_versions")
         .select(VERSION_COLUMNS)
@@ -138,6 +147,11 @@ export default async function AgentEditorPage({ params }: { params: Promise<{ id
         .eq("organization_id", activeOrg.orgId)
         .eq("is_active", true)
         .order("created_at", { ascending: true }),
+      // `org_sistema_escolar_config` nasceu com `revoke select ... from
+      // authenticated` (migration 0399) — SEM RLS a favor, o client de sessão
+      // acima não a lê de jeito nenhum. Só o admin client, no servidor, com
+      // organization_id resolvido do JWT (nunca de query/param).
+      lerConfigSegura(createAdminClient(), activeOrg.orgId),
     ]);
 
   const versions = (versionsRes.data ?? []) as unknown as AgentVersionRow[];
@@ -232,6 +246,7 @@ export default async function AgentEditorPage({ params }: { params: Promise<{ id
         funis={funis}
         cobertura={cobertura}
         materiais={materiais}
+        sistemaEscolarConfigurado={sistemaEscolarConfig.configurado && sistemaEscolarConfig.is_active}
         routerMembership={routerMembership}
         readOnly={readOnly}
       />
