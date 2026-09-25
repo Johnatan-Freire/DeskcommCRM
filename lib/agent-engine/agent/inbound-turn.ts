@@ -80,6 +80,7 @@ import { enqueueJob, rescheduleJob, type JobRow, type Queryable } from '../queue
 import {
   applyLeadStateUpdate,
   getLeadState,
+  verificarAutorizacaoTerminal,
   type LeadStage,
   type LeadStateRow,
 } from './lead-state';
@@ -230,7 +231,8 @@ export const AGENT_TOOL_DEFS = {
       'Marca um avanço REAL no funil deste lead: stage (new → contacted → qualifying → qualified → ' +
       'negotiating → won | lost; só o PRÓXIMO estágio válido — regressão é rejeitada), qualification ' +
       '(budget/authority/need/timeline), next_action e reason (evidência curta do avanço). ' +
-      'Nunca invente avanço sem evidência na conversa.',
+      'Nunca invente avanço sem evidência na conversa. `won`/`lost` exigem autorização explícita da ' +
+      'configuração deste agente — sem ela a chamada é recusada antes de qualquer gravação.',
     // Schema LARGO só para o SDK (o modelo vê os campos); a validação REAL é a
     // whitelist .strict() dentro de applyLeadStateUpdate — campo extra/forjado
     // vira erro de ENSINO ao modelo, nunca exceção do SDK nem strip silencioso.
@@ -3469,6 +3471,24 @@ async function executarTurnoDoAgente(
     update_lead_state: tool({
       ...AGENT_TOOL_DEFS.update_lead_state,
       execute: async (raw) => {
+        // Bloqueio terminal — ANTES de qualquer escrita (harness ou CRM). Fail-closed:
+        // `agentConfig` null (sem agente publicado / fallback genérico) bloqueia as duas,
+        // porque ausência de config não é autorização (ver verificarAutorizacaoTerminal).
+        // `raw` ainda não passou pela whitelist .strict() de applyLeadStateUpdate — lido
+        // aqui só o suficiente pra saber SE é uma tentativa de won/lost; payload malformado
+        // segue intocado até lá (esta checagem nunca substitui a validação real).
+        const stageAlvo =
+          typeof raw === 'object' && raw !== null && 'stage' in raw
+            ? (raw as { stage?: unknown }).stage
+            : undefined;
+        if (stageAlvo === 'won' || stageAlvo === 'lost') {
+          const autorizacao =
+            agentConfig === null
+              ? null
+              : { canMarkWon: agentConfig.canMarkWon, canMarkLost: agentConfig.canMarkLost };
+          const auth = verificarAutorizacaoTerminal(stageAlvo, autorizacao);
+          if (!auth.ok) return auth;
+        }
         try {
           const update = await applyLeadStateUpdate(
             pool,

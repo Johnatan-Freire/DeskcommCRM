@@ -48,6 +48,7 @@ import {
 } from "@/lib/followup/retorno-crm";
 import { duracaoLegivel } from "@/lib/followup/retorno";
 import { ApiError } from "@/lib/api/types";
+import { verificarAutorizacaoTerminal } from "@/lib/agent-engine/agent/lead-state";
 import { encerraDemanda } from "@/lib/leads/encerramento";
 import { carregaRadarDeRisco } from "@/lib/leads/radar-de-risco";
 import { propoeReativacao } from "@/lib/leads/reactivation";
@@ -422,6 +423,45 @@ const encerrarShape = {
   reason: z.string().min(1).max(500).optional(),
 };
 
+/**
+ * `update_lead_state` (inbound-turn.ts) não é a única porta que move won/lost —
+ * esta tool MCP é a SEGUNDA (a auditoria do agente comercial achou uma terceira:
+ * arrastar o card à mão, que é ação HUMANA e fica de fora deste gate de
+ * propósito — capability terminal é sobre o AGENTE decidir sozinho, não sobre o
+ * dono operar o próprio CRM). Sem esta checagem, `can_mark_won`/`can_mark_lost`
+ * seria uma trava com uma porta destrancada ao lado.
+ *
+ * Só se aplica a `ctx.actor.type === 'ai_agent'` — um `api_token`/`user`
+ * chamando MCP programaticamente é funcionalmente a mesma coisa que usar a rota
+ * REST de ganho/perda (que nunca foi gated por capability de agente; RBAC
+ * já cobre quem pode chamar). Fail-closed: run não encontrado, versão não
+ * encontrada, ou coluna ausente (clone sem a migration 0401) — tudo bloqueia,
+ * nunca libera por acidente de lookup.
+ */
+async function autorizacaoTerminalDoAgente(
+  ctx: McpContext,
+  runId: string,
+): Promise<{ canMarkWon: boolean; canMarkLost: boolean } | null> {
+  const { data: run } = await ctx.supabase
+    .from("ai_agent_runs")
+    .select("agent_version_id")
+    .eq("id", runId)
+    .eq("organization_id", ctx.organizationId)
+    .maybeSingle();
+  if (!run?.agent_version_id) return null;
+  const { data: version } = await ctx.supabase
+    .from("ai_agent_versions")
+    .select("can_mark_won, can_mark_lost")
+    .eq("id", run.agent_version_id)
+    .eq("organization_id", ctx.organizationId)
+    .maybeSingle();
+  if (!version) return null;
+  return {
+    canMarkWon: version.can_mark_won === true,
+    canMarkLost: version.can_mark_lost === true,
+  };
+}
+
 export const crmCloseDemand: McpToolDefinition<typeof encerrarShape> = {
   name: "crm_close_demand",
   description:
@@ -435,6 +475,13 @@ export const crmCloseDemand: McpToolDefinition<typeof encerrarShape> = {
   requiresScope: "mcp:write",
   handler: async (input, ctx) => {
     try {
+      if (ctx.actor.type === "ai_agent") {
+        const autorizacao = await autorizacaoTerminalDoAgente(ctx, ctx.actor.id);
+        const auth = verificarAutorizacaoTerminal(input.outcome, autorizacao);
+        if (!auth.ok) {
+          throw new ApiError(403, auth.error.code, undefined, ctx.requestId, auth.error.message);
+        }
+      }
       const { lead, jaEstava } = await encerraDemanda(
         ctx.supabase,
         {
