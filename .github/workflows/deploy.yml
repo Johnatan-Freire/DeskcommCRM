@@ -46,22 +46,29 @@ jobs:
             git fetch --depth 1 origin main
             git reset --hard FETCH_HEAD
 
-            SUPABASE_DB_URL="$(sed -n "s/^SUPABASE_DB_URL=//p" .env | head -1)"
-            SUPABASE_DB_URL="${SUPABASE_DB_URL%\"}"
-            SUPABASE_DB_URL="${SUPABASE_DB_URL#\"}"
-            docker run --rm postgres:17-alpine psql "$SUPABASE_DB_URL" -c \
+            # `reaplicar_baseline` (hostgator-setup-kit/_common.sh) é o MESMO
+            # mecanismo que o update.sh do kit self-host usa — testado em
+            # tests/shell/baseline-reaplica-apos-disputa.test.sh. Substitui o
+            # grep manual que este arquivo tinha: aquele só AVISAVA em erro
+            # real de schema e seguia para o pull/up dos containers mesmo
+            # assim (achado real: migration 0401 falhou silenciosamente num
+            # deploy e só foi descoberta depois, por auditoria manual). Este
+            # aqui distingue erro benigno/disputa (idempotência, deadlock
+            # transitório — tenta de novo, até 3 passadas) de erro real
+            # (para com `exit 1` ANTES do pull/up — fail-closed).
+            source hostgator-setup-kit/_common.sh
+            enter_project
+
+            docker run --rm postgres:17-alpine psql "$(url_do_schema)" -c \
               "create extension if not exists vector with schema public; create extension if not exists citext with schema public; create extension if not exists pg_trgm with schema public;" \
               >/dev/null 2>&1 || true
 
-            raw="$(docker run --rm -i -v "$PWD/supabase/baseline.sql:/b.sql:ro" \
-                  postgres:17-alpine psql "$SUPABASE_DB_URL" -f /b.sql 2>&1 || true)"
-            benigno="already exists|multiple primary keys|multiple default values|is already a member|already a partition"
-            inesperado="$(printf "%s\n" "$raw" | grep -iE "ERROR|FATAL" | grep -viE "$benigno" || true)"
-            if [ -n "$inesperado" ]; then
-              echo "⚠ avisos inesperados ao reaplicar o baseline:"
-              printf "%s\n" "$inesperado" | head -20
+            if reaplicar_baseline supabase/baseline.sql /tmp/deploy-baseline.log; then
+              echo "✓ baseline reaplicado sem erro real de schema (passadas: $BASELINE_PASSADAS)"
             else
-              echo "✓ baseline reaplicado sem avisos inesperados"
+              echo "::error::baseline.sql reaplicado com ERRO REAL de schema — deploy interrompido ANTES de subir os containers novos:"
+              printf "%s\n" "$BASELINE_INESPERADO" | head -20
+              exit 1
             fi
 
             docker compose -f docker-compose.prod.yml pull app worker scheduler
