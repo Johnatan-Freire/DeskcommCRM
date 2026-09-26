@@ -166,6 +166,10 @@ function fazerAdmin(banco: Banco, rpcs: Linha[]) {
     from,
     rpc: (nome: string, args: Linha) => {
       rpcs.push({ nome, ...args });
+      // Corte de ativação (migration 0403): mensagem autorizada — o que este
+      // arquivo mede é QUAL limiar vale, não o corte (medido em
+      // tests/unit/ai-sentiment-worker-corte-de-conexao.test.ts).
+      if (nome === "fn_ia_pode_responder_mensagem") return Promise.resolve({ data: "autorizado", error: null });
       return Promise.resolve({ data: null, error: null });
     },
   };
