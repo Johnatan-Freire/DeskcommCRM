@@ -925,6 +925,20 @@ export async function moveLeadHandler(
     position = maxRow?.position_in_stage ? Number(maxRow.position_in_stage) + 1000 : 1000;
   }
 
+  // ── A MESMA ETAPA É REORDENAÇÃO, NÃO ENTRADA ────────────────────────────────
+  //
+  // O negócio que já está NA etapa de destino não está ENTRANDO nela: mover para
+  // onde ele já está só troca a posição. A rota do quadro compara o destino com
+  // `lead.stage_id` antes da régua e pula a régua por isso; aqui a comparação
+  // faltava, e este handler é o escritor de etapa de tudo que NÃO é o quadro (o
+  // MCP `crm_move_lead_stage`, a ação `create_or_move_lead`) — reordenar numa
+  // coluna exigente devolvia a frase de campos faltando e a execução aparecia
+  // como failed na aba Atividade.
+  //
+  // Fora da régua, e não dentro dela: `campos-exigidos.ts` segue sem saber o que
+  // é "mesma etapa" — quem sabe é quem lê a etapa atual ao lado do destino.
+  const mesmaEtapa = stage.id === lead.stage_id;
+
   // ── OS CAMPOS OBRIGATÓRIOS (issue #1536) ────────────────────────────────────
   //
   // Este handler é o escritor de etapa de TODOS os clientes que não são o board
@@ -932,15 +946,17 @@ export async function moveLeadHandler(
   // arrasto, decidida pela MESMA função: o que falta vira 422 com
   // `details.faltando`, e a tool do MCP devolve a frase ao modelo — que pergunta
   // ao cliente ou passa para o humano, em vez de mover calado.
-  const vereditoDeCampos = validaCamposExigidos({
-    lead: lead as Record<string, unknown>,
-    settingsDoFunil: settings,
-    destino: {
-      stageId: stage.id,
-      desfecho: stage.is_won ? "won" : stage.is_lost ? "lost" : null,
-    },
-    motivoDeGanho: input.won_reason ?? null,
-  });
+  const vereditoDeCampos = mesmaEtapa
+    ? { faltando: [] }
+    : validaCamposExigidos({
+        lead: lead as Record<string, unknown>,
+        settingsDoFunil: settings,
+        destino: {
+          stageId: stage.id,
+          desfecho: stage.is_won ? "won" : stage.is_lost ? "lost" : null,
+        },
+        motivoDeGanho: input.won_reason ?? null,
+      });
   if (vereditoDeCampos.faltando.length > 0) {
     const recusa = recusaDeCamposObrigatorios(vereditoDeCampos.faltando, ctx.idioma);
     throw new ApiError(
