@@ -11097,6 +11097,13 @@ export const DICIONARIO: Traducoes = {
   "O cliente NÃO foi avisado": { es: "El cliente NO fue avisado" },
   "ele está esperando sem saber.": { es: "está esperando sin saberlo." },
   "motivo desconhecido": { es: "motivo desconocido" },
+  // O TÍTULO do mesmo aviso, gravado pelos dois motores de passagem
+  // (`lib/ai/handoff/orchestrator.ts` e `lib/agent-engine/agent/human-handoff.ts`)
+  // pelo mesmo caminho do corpo: traduzido no servidor, no idioma da organização.
+  "Atendimento automático parou — assumir a conversa":
+    { es: "La IA pasó la conversación al equipo — asúmela" },
+  "Handoff humano solicitado — assumir a conversa":
+    { es: "Pidieron atención de una persona — asume la conversación" },
   // O CARTÃO da passagem, dentro da conversa (`components/inbox/PassagemCard.tsx`).
   // Os dois títulos são resolvidos por `montarCartoesDaPassagem` e chegam à tela
   // como variável — o gate de i18n só enxerga literal, então quem os cobra é
