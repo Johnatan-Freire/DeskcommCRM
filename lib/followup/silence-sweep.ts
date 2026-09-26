@@ -48,6 +48,7 @@ import {
   ttlDaAutorizacaoMs,
 } from "@/lib/ai/elegibilidade/gate";
 import { logger } from "@/lib/logger";
+import { AUTORIZADO, silencioPodeReengajarViaSupabase } from "@/lib/ai/ativacao/corte-de-ativacao";
 
 import { flowGraphSchema } from "./graph-schema";
 import { triggerConfigSchema } from "./api-schemas";
@@ -313,6 +314,23 @@ export function createSupabaseSilenceSweepDb(admin: SupabaseClient): SilenceSwee
         if (!v.permitidoPeloGate) continue;
         if (v.at > cutoff) continue; // conversou depois do corte — não é silêncio
         if (segments.length > 0 && !segments.some((s) => v.tags.includes(s))) continue;
+        // "LEAD SEM RESPOSTA" É O ATENDIMENTO AUTOMÁTICO ESPERANDO O LEAD
+        // (migration 0403). Contar só o último inbound — como acima — tratava
+        // como silêncio a conversa que um HUMANO encerrou ("Por nada ☺️") e a
+        // que estava em handoff: o `decidirElegibilidade` desta função recebe
+        // `forceHuman:false`/`assigneeKind:null`/`botSilencedUntil:null` fixos.
+        // Medido em produção (2026-09-26): 21 conversas reengajadas assim, com o
+        // agente PAUSADO. A régua completa — quem falou por último, humano,
+        // conversa aberta, agente no ar, último inbound depois da ativação, um
+        // reengajamento por silêncio — é da função SQL, a MESMA que o envio
+        // consulta. Erro lança: o pointer é pulado inteiro (fail-closed).
+        const motivo = await silencioPodeReengajarViaSupabase(
+          admin,
+          orgId,
+          v.boundary.conversation_id,
+          true,
+        );
+        if (motivo !== AUTORIZADO) continue;
         silentIds.push(contactId);
         origins.set(`${orgId}:${contactId}`, v.boundary);
       }

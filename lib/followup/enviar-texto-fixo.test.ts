@@ -74,14 +74,20 @@ function admin() {
   };
   return { from: (t: string) => make(t), rpc: async (name:string,args:Record<string,unknown>) => {
     if(name==="fn_followup_inline_settle") {statusUpdates.push(args.p_done?"done":"pending");return {data:true,error:null};}
+    // Corte no envio (migration 0403): `corteDoEnvio` decide o que a função SQL responde.
+    if(name==="fn_followup_pode_enviar") {corteConsultado.push(args);return {data:corteDoEnvio,error:null};}
     if(name==="fn_appointment_enrollment_current" || name==="fn_followup_job_current") return {data:true,error:null};
     return {data:{...boundary,status:"open",demanda_fechada_em:null},error:null};
   }} as never;
 }
 
+let corteDoEnvio = "autorizado";
+const corteConsultado: Array<Record<string, unknown>> = [];
 beforeEach(() => {
   vi.clearAllMocks();
   statusUpdates.length = 0;
+  corteDoEnvio = "autorizado";
+  corteConsultado.length = 0;
 });
 
 describe("enviarTextoFixoPendente · gate de elegibilidade", () => {
@@ -113,4 +119,40 @@ it.each(["queued","failed"])("%s não conta envio nem avança o fluxo",async sta
  decidir.mockResolvedValue({permite:true});sendMessageHandler.mockResolvedValueOnce({id:"msg-1",status});
  expect(await enviarTextoFixoPendente(admin())).toBe(0);
  expect(completeTurnForEnrollment).not.toHaveBeenCalled();expect(statusUpdates).toContain("pending");
+});
+
+describe("enviarTextoFixoPendente · corte de atendimento automático (migration 0403)", () => {
+  it.each([
+    "agente_fora_do_ar",
+    "humano_falou_por_ultimo",
+    "humano_atendendo",
+    "anterior_a_ativacao",
+    "fluxo_desligado",
+    "conversa_encerrada",
+  ])("função recusa (%s) → NÃO envia, inscrição encerrada como skipped, job done", async (motivo) => {
+    decidir.mockResolvedValue({ permite: true, motivo: "autorizado", bloqueioPorAllowlist: false });
+    corteDoEnvio = motivo;
+    expect(await enviarTextoFixoPendente(admin())).toBe(0);
+    expect(sendMessageHandler).not.toHaveBeenCalled();
+    expect(completeTurnForEnrollment).toHaveBeenCalledWith(
+      expect.anything(), expect.anything(), expect.anything(), expect.anything(),
+      expect.objectContaining({ kind: "skipped" }), undefined, expect.anything(), expect.anything(),
+    );
+    expect(statusUpdates).toContain("done");
+  });
+
+  it("a pergunta vai com a INSCRIÇÃO do job (não com o que vier do payload livre)", async () => {
+    decidir.mockResolvedValue({ permite: true, motivo: "autorizado", bloqueioPorAllowlist: false });
+    await enviarTextoFixoPendente(admin());
+    expect(corteConsultado).toHaveLength(1);
+    expect(corteConsultado[0]).toHaveProperty("p_enrollment");
+  });
+
+  it("função não responde texto (erro de leitura) → NÃO envia, job volta para pending", async () => {
+    decidir.mockResolvedValue({ permite: true, motivo: "autorizado", bloqueioPorAllowlist: false });
+    corteDoEnvio = null as unknown as string;
+    expect(await enviarTextoFixoPendente(admin())).toBe(0);
+    expect(sendMessageHandler).not.toHaveBeenCalled();
+    expect(statusUpdates).toContain("pending");
+  });
 });

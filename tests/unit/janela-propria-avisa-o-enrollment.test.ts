@@ -92,6 +92,8 @@ function job(): JobRow {
 
 function fakePool() {
   const query = vi.fn(async (sql: string): Promise<{ rows: Array<Record<string, unknown>>; rowCount?: number }> => {
+    // Corte no envio (migration 0403): inscrição autorizada — o que este arquivo mede é outra régua.
+    if (sql.includes("fn_followup_pode_enviar")) return { rows: [{ motivo: "autorizado" }] };
     if (sql.includes("d.fechada_em::text")) return { rows: [{ ...boundary, status: "open", demanda_fechada_em: null }] };
     if (/from conversations/.test(sql)) return { rows: [{ id: CONVERSA, channel_session_id: CANAL, archived_at: null }] };
     if (sql.includes("a.published_version_id")) return { rows: [{ followup: FOLLOWUP_COM_FAIXA }], rowCount: 1 };

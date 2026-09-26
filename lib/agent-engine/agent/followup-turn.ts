@@ -2,6 +2,7 @@ import {claimOfJob,type JobClaim} from "../queue/claim";
 import {resultadoDoEnvioDoFollowup} from "../edge/crm/send-ledger";
 import { parseServiceBoundary } from "@/lib/atendimento/fronteira";
 import { requireCurrentServiceBoundary } from "@/lib/atendimento/fronteira-server";
+import { AUTORIZADO, explicarCorte, followupPodeEnviar } from "@/lib/ai/ativacao/corte-de-ativacao";
 /**
  * Handler do job `followup_turn` (F3-03; blueprint 1.3) — a peça BUILD da
  * continuidade. A F3-01 (cron persistente) dispara e a F3-02 (tool schedule_followup)
@@ -434,6 +435,20 @@ async function runFlowDrivenTurn(
   const runLog = withFields(deps.log, { job_id: job.id, tenant_id: target.tenantId, lead_id: target.leadId, enrollment_id: enrollmentId });
 
   if (input.purpose === 'send_message') {
+    // CORTE NO INSTANTE DO ENVIO (migration 0403). Inscrição de SILÊNCIO só
+    // envia se, AGORA, o atendimento automático ainda é quem conduz a conversa:
+    // agente no ar, último inbound depois da ativação dele, sem humano/handoff,
+    // conversa aberta, fluxo ligado. Sem isto, pausar o agente ou desligar o
+    // fluxo não parava a inscrição já viva — medido em produção (2026-09-26):
+    // lembretes saindo com o agente pausado havia 16h. Recusa vira `skipped`
+    // (o enrollment segue o grafo e NÃO envia); erro de leitura lança e o job
+    // re-tenta — nunca envia na dúvida.
+    const corte = await followupPodeEnviar(pool, target.tenantId, enrollmentId);
+    if (corte !== AUTORIZADO) {
+      runLog.info('follow-up não enviado — fora do corte de atendimento automático', { motivo: corte });
+      await complete(pool,{jobId:job.id,jobClaim:claimOfJob(job),organizationId:target.tenantId,enrollmentId,nodeId,result:{kind:'skipped',reason:`Não enviado: ${explicarCorte(corte)}.`}});
+      return;
+    }
     const body = await resolveFlowSendBody(pool, target.tenantId, input);
     if (body !== null) {
       // Texto do operador: sem camada semântica (ver o cabeçalho de sendFixedOutbound).

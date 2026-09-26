@@ -239,6 +239,19 @@ export async function getLeadContext(
   );
   const lastHumanDecision = decisaoRows[0] ? paraDecisao(decisaoRows[0]) : null;
 
+  // O EPISÓDIO de atendimento: inbound pela revisão carimbada na persistência;
+  // outbound pelo início do episódio — por `sent_at` OU por `created_at`.
+  //
+  // Só `sent_at` cortava a mensagem que ABRE a conversa quando o humano inicia
+  // pelo celular: o episódio nasce na PERSISTÊNCIA dessa mensagem
+  // (`service_started_at`), 1,5–2,4s DEPOIS do horário real do WhatsApp dela.
+  // Medido em produção (2026-09-26): 18 de 18 mensagens cortadas eram essa
+  // abertura ("Olá Fulano… informações do curso"), e o agente respondia ao lead
+  // sem saber o que o humano tinha oferecido. Todas foram persistidas depois do
+  // início do episódio (0,2–0,6s); mensagem de episódio ENCERRADO foi
+  // persistida antes da reabertura e continua fora — a regra de
+  // `tests/invariants/service-boundary.test.ts` ("memória operacional deixa o
+  // diálogo antigo") segue valendo.
   const history: HistoryRow[] = conversationId
     ? (
         await db.query<HistoryRow>(
@@ -250,7 +263,8 @@ export async function getLeadContext(
              and exists(select 1 from conversations c where c.organization_id=$1 and c.id=$2
                and ((messages.direction='inbound' and messages.service_revision=c.service_revision
                  and messages.demanda_id is not distinct from c.current_demanda_id)
-                 or (messages.direction='outbound' and messages.sent_at >= c.service_started_at)))
+                 or (messages.direction='outbound' and (messages.sent_at >= c.service_started_at
+                   or messages.created_at >= c.service_started_at))))
            order by sent_at desc, id desc
            limit $3`,
           [input.tenantId, conversationId, knobs.historyLimit],

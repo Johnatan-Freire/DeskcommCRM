@@ -199,6 +199,7 @@ import { camadaLigada, lerCamadasDaOrg } from '../guardrails/camadas-da-org';
 import { fusoDaOrganizacao } from './fuso-da-org';
 import { renderAgora } from '@/lib/tempo/agora';
 import { decidirElegibilidadeDaConversa } from '@/lib/ai/elegibilidade/consulta-pg';
+import { AUTORIZADO, iaPodeResponderMensagem } from '@/lib/ai/ativacao/corte-de-ativacao';
 
 /**
  * Superfície ESTÁTICA das tools do agente (description + inputSchema) — parte do
@@ -4852,7 +4853,42 @@ export function createInboundTurnHandler(deps: InboundTurnDeps) {
       inbound: true,
     }, { log: deps.log });
     const operationAgent = resolvedAgent.config;
-    if (operationAgent?.operationMode === 'assisted') {
+
+    // CORTE TEMPORAL NO TURNO (migration 0403) — a segunda porta, com o agente
+    // que de fato vai responder. O drain já barrou com "algum agente no ar";
+    // aqui a pergunta é mais estreita e é a que vale: ESTE agente estava ligado
+    // quando a mensagem aconteceu? Cobre o que não passa pelo drain de novo —
+    // job represado por hold/janela, retry, redrive da fila, reprocessamento —
+    // e o agente pausado/despublicado entre o enqueue e a execução.
+    //
+    // Sem agente resolvido (o antigo "turno genérico") não há data de ativação
+    // contra a qual medir: fail-closed, não responde. O drain só enfileira com
+    // agente no ar, então isto só acontece quando ele saiu do ar no meio-tempo.
+    if (operationAgent === null) {
+      deps.log.info('turno pulado — nenhum agente no ar resolvido para esta conversa', {
+        job_id: job.id,
+        conversation_id: payload.conversation_id,
+        router_outcome: resolvedAgent.outcome,
+      });
+      return;
+    }
+    const corte = await iaPodeResponderMensagem(
+      pool,
+      job.organization_id,
+      payload.inbound_message_id,
+      operationAgent.agentId,
+    );
+    if (corte !== AUTORIZADO) {
+      deps.log.info('turno pulado — mensagem fora do corte de ativação do agente', {
+        job_id: job.id,
+        agent_id: operationAgent.agentId,
+        inbound_message_id: payload.inbound_message_id,
+        motivo: corte,
+      });
+      return;
+    }
+
+    if (operationAgent.operationMode === 'assisted') {
       // O GATE VALE TAMBÉM NO ASSISTIDO, e é aqui que ele precisa estar.
       //
       // O drain desliga a checagem antes de enfileirar quando a org tem agente

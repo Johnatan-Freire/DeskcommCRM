@@ -23,6 +23,7 @@ import { avisoDeEventoMorto, IA_QUE_NAO_RESPONDEU } from '@/lib/event-log/aviso-
 import { TIPOS_DERIVAVEIS, DERIVACAO_TERMINADA } from '@/lib/messaging/media/derivable';
 import { decidirElegibilidadeDaConversa } from '@/lib/ai/elegibilidade/consulta-pg';
 import { deveCederTurnoAoRetorno } from '@/lib/followup/ceder-turno-ao-retorno';
+import { AUTORIZADO, iaPodeResponderMensagem } from '@/lib/ai/ativacao/corte-de-ativacao';
 
 const DRAIN_CONSUMER = 'agent-engine';
 
@@ -412,35 +413,45 @@ async function processEvent(
   const { rows: msgRows } = await pool.query<{
     type: string;
     media_derived_status: string | null;
-    sent_at: string;
-    first_connected_at: string | null;
   }>(
-    `select m.type, m.media_derived_status, m.sent_at, cs.first_connected_at
+    `select m.type, m.media_derived_status
      from messages m
-     join channel_sessions cs on cs.id = m.channel_session_id
      where m.organization_id = $1 and m.id = $2`,
     [event.organization_id, p.inbound_message_id],
   );
   const msg = msgRows[0];
 
-  // Corte de conexão (migration 0398): WAHA/NOWEB sincroniza histórico do
-  // WhatsApp ao parear uma sessão nova, e o mesmo webhook que entrega mensagem
-  // NOVA entrega a ANTIGA também — sem nada no payload que distinga as duas.
-  // `first_connected_at` é gravado (uma vez, por trigger) no instante em que a
-  // sessão ficou WORKING pela PRIMEIRA vez; mensagem com `sent_at` (o horário
-  // REAL do WhatsApp) anterior a isso é histórico sincronizado, não turno de
-  // atendimento — o agente NUNCA pode responder por cima dela. NULL (sessão que
-  // já estava WORKING antes desta migration) não corta nada, de propósito: não
-  // dá para saber o instante real da conexão passada, e o comportamento de quem
-  // já atende hoje sem problema não pode mudar.
-  if (
-    msg !== undefined &&
-    msg.first_connected_at != null &&
-    new Date(msg.sent_at).getTime() < new Date(msg.first_connected_at).getTime()
-  ) {
-    log.info('drain: mensagem anterior à conexão do WhatsApp — turno pulado (sem gasto)', {
+  // CORTE TEMPORAL (migrations 0398 + 0403): a mensagem só vira turno se
+  // aconteceu — pelo horário REAL do WhatsApp (`sent_at`), não pelo da
+  // persistência — DEPOIS da conexão do número E depois de algum agente que
+  // atende este número ter sido ligado (publicação/despausa). A decisão é da
+  // função SQL `fn_ia_pode_responder_mensagem`, a MESMA que o turno consulta
+  // com o agente já resolvido.
+  //
+  // É isto que impede o backlog de ser drenado: evento que chega com o agente
+  // PAUSADO vira `done` aqui (antes, o drain só olhava `published_version_id`,
+  // enfileirava, e um job represado que rodasse depois da despausa respondia
+  // mensagem da pausa); histórico sincronizado, replay e redrive de evento
+  // antigo também param aqui, porque o `sent_at` deles é anterior ao corte.
+  // Fail-closed: erro da consulta lança e o evento re-tenta — nunca despacha.
+  const corte = await iaPodeResponderMensagem(
+    pool,
+    event.organization_id,
+    p.inbound_message_id,
+    null,
+  );
+  // Evento que aponta para mensagem INEXISTENTE não é "mensagem antiga": é
+  // anomalia do produtor. Lança — re-tenta, morre em `dead` e abre o aviso de
+  // despacho morto na Central (`avisarDespachoMorto`), em vez de sumir como
+  // `done` silencioso. Continua fail-closed: nada é despachado.
+  if (corte === 'mensagem_desconhecida') {
+    throw new Error('dispatch_para_mensagem_inexistente');
+  }
+  if (corte !== AUTORIZADO) {
+    log.info('drain: mensagem fora do corte de ativação — turno pulado (sem gasto)', {
       event_id: event.id,
       channel_session_id: p.channel_session_id,
+      motivo: corte,
     });
     return 'processado';
   }

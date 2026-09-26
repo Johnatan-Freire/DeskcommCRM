@@ -7,7 +7,8 @@
  *
  * · **`getLeadContext`** recorta pelo atendimento CORRENTE (inbound com
  *   `service_revision = c.service_revision` e `demanda_id is not distinct from
- *   c.current_demanda_id`, outbound com `sent_at >= c.service_started_at`). Um
+ *   c.current_demanda_id`, outbound com `sent_at` ou `created_at >=
+ *   c.service_started_at`). Um
  *   caso aberto num atendimento que depois foi encerrado e reaberto leria A
  *   CONVERSA ERRADA — e isso é caminho PREVISTO, não canto raro: o produto já
  *   modela "caso obsoleto" e tem tela para ele. A leitura daqui recorta pela

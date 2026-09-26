@@ -1,5 +1,6 @@
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import pg from "pg";
+import { publicarAgenteNaSessao } from "./agente-no-ar";
 
 import type * as InboundTurn from "@/lib/agent-engine/agent/inbound-turn";
 import type * as Providers from "@/lib/agent-engine/edge/llm/providers";
@@ -252,6 +253,16 @@ beforeAll(async () => {
        values ($1,$2,$3,$4,'open',false) on conflict (id) do nothing`,
       [conv, ORG, CONTACT, sessao],
     );
+  }
+  // Regra 0403: a IA só responde mensagem DEPOIS de um agente ser ligado. A
+  // mensagem de 30h é legítima porque o agente já estava no ar quando o lead
+  // escreveu — por isso a ativação é datada 3 dias atrás, não "agora".
+  const tresDiasAtras = new Date(Date.now() - 3 * 86_400_000).toISOString();
+  // Idem para a CONEXÃO (0398): a sessão nasce WORKING agora e o trigger
+  // carimbaria "conectado agora" — o número desta cena está conectado há dias.
+  for (const sessao of [SESSION_META, SESSION_WAHA]) {
+    await publicarAgenteNaSessao(pool, ORG, sessao, { ativoDesde: tresDiasAtras });
+    await pool.query("update channel_sessions set first_connected_at = $2 where id = $1", [sessao, tresDiasAtras]);
   }
   // 30 HORAS: a janela de 24h está FECHADA. É o que dá sentido ao template — e o que
   // faria o gate `messaging_window` vetar um envio de texto livre.

@@ -1,4 +1,4 @@
-import { expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type pg from 'pg';
 
 import { drainTick } from './drain';
@@ -56,6 +56,7 @@ function poolFalso(
     if (sql.includes('ai_dispatch_mode')) return { rows: [{ mode: null }] };
     if (sql.includes('is_group')) return { rows: [{ is_group: false }] };
     if (sql.includes('tem_agente')) return { rows: [capacidade] };
+    if (sql.includes('fn_ia_pode_responder_mensagem')) return { rows: [{ motivo: 'autorizado' }] };
     if (sql.includes('media_derived_status')) return { rows: [msgRow] };
     return { rows: [] };
   });
@@ -142,6 +143,7 @@ it('coalescência exclui job em hold (held_run_after) — sessão morta não seq
     if (sql.includes('ai_dispatch_mode')) return { rows: [{ mode: null }] };
     if (sql.includes('is_group')) return { rows: [{ is_group: false }] };
     if (sql.includes('tem_agente')) return { rows: [{ tem_agente: true, tem_roteador: false }] };
+    if (sql.includes('fn_ia_pode_responder_mensagem')) return { rows: [{ motivo: 'autorizado' }] };
     if (sql.includes('media_derived_status')) return { rows: [{ type: 'text', media_derived_status: null }] };
     // A coalescência real (com o predicado corrigido) não encontra nada — o
     // único job pendente do contato está em hold e a query já o exclui.
@@ -248,6 +250,7 @@ function poolElegibilidade(
         ],
       };
     }
+    if (sql.includes('fn_ia_pode_responder_mensagem')) return { rows: [{ motivo: 'autorizado' }] };
     if (sql.includes('media_derived_status')) return { rows: [{ type: 'text', media_derived_status: null }] };
     return { rows: [] };
   });
@@ -372,6 +375,7 @@ function poolComCorte(
     media_derived_status: string | null;
     sent_at?: string;
     first_connected_at?: string | null;
+    motivo?: string;
   },
   calls: string[],
 ) {
@@ -381,6 +385,16 @@ function poolComCorte(
     if (sql.includes('ai_dispatch_mode')) return { rows: [{ mode: null }] };
     if (sql.includes('is_group')) return { rows: [{ is_group: false }] };
     if (sql.includes('tem_agente')) return { rows: [{ tem_agente: true, tem_roteador: false }] };
+    // A régua mora em SQL (`fn_ia_pode_responder_mensagem`, migration 0403) e é
+    // medida contra Postgres real em tests/invariants/corte-temporal-de-ativacao.test.ts.
+    // Aqui o mock a SIMULA a partir da linha, para medir a REAÇÃO do drain.
+    if (sql.includes('fn_ia_pode_responder_mensagem')) {
+      if (msgRow.motivo !== undefined) return { rows: [{ motivo: msgRow.motivo }] };
+      const antes =
+        msgRow.first_connected_at != null && msgRow.sent_at !== undefined &&
+        new Date(msgRow.sent_at).getTime() < new Date(msgRow.first_connected_at).getTime();
+      return { rows: [{ motivo: antes ? 'anterior_a_conexao' : 'autorizado' }] };
+    }
     if (sql.includes('media_derived_status')) return { rows: [msgRow] };
     return { rows: [] };
   });
@@ -439,4 +453,50 @@ it('sessão sem first_connected_at (já conectada antes da migration 0398): nenh
     knobs, log,
   );
   expect(calls.some((s) => s.includes('job_queue'))).toBe(true);
+});
+
+describe('corte de ATIVAÇÃO do agente (migration 0403) — a reação do drain', () => {
+  for (const motivo of [
+    'anterior_a_ativacao',
+    'nenhum_agente_no_ar',
+    'agente_fora_do_ar',
+    'ativacao_desconhecida',
+    'horario_desconhecido',
+    'horario_ambiguo',
+  ]) {
+    it(`motivo '${motivo}': evento vira done SEM job (nem backlog para depois da despausa)`, async () => {
+      const calls: string[] = [];
+      await drainTick(poolComCorte({ type: 'text', media_derived_status: null, motivo }, calls), knobs, log);
+      expect(calls.some((s) => s.includes('job_queue'))).toBe(false);
+      expect(calls.some((s) => s.includes("status = 'done'"))).toBe(true);
+    });
+  }
+
+  it('a pergunta vai com a MENSAGEM do evento e sem agente (qualquer agente no ar do número)', async () => {
+    const query = vi.fn().mockImplementation((sql: string) => {
+      if (sql.includes('returning e.id')) return { rows: [event] };
+      if (sql.includes('is_group')) return { rows: [{ is_group: false }] };
+      if (sql.includes('tem_agente')) return { rows: [{ tem_agente: true, tem_roteador: false }] };
+      if (sql.includes('fn_ia_pode_responder_mensagem')) return { rows: [{ motivo: 'autorizado' }] };
+      return { rows: [] };
+    });
+    await drainTick({ query } as unknown as pg.Pool, knobs, log);
+    const chamada = query.mock.calls.find(([sql]) => String(sql).includes('fn_ia_pode_responder_mensagem'));
+    expect(chamada?.[1]).toEqual([event.organization_id, (event.payload as { inbound_message_id: string }).inbound_message_id, null]);
+  });
+
+  it('erro na consulta do corte NÃO despacha (fail-closed): evento volta a pending, sem job', async () => {
+    const calls: string[] = [];
+    const query = vi.fn().mockImplementation((sql: string) => {
+      calls.push(sql);
+      if (sql.includes('returning e.id')) return { rows: [event] };
+      if (sql.includes('is_group')) return { rows: [{ is_group: false }] };
+      if (sql.includes('tem_agente')) return { rows: [{ tem_agente: true, tem_roteador: false }] };
+      if (sql.includes('fn_ia_pode_responder_mensagem')) throw new Error('banco fora');
+      return { rows: [] };
+    });
+    await drainTick({ query } as unknown as pg.Pool, knobs, log);
+    expect(calls.some((s) => s.includes('job_queue'))).toBe(false);
+    expect(calls.some((s) => s.includes('last_error'))).toBe(true);
+  });
 });

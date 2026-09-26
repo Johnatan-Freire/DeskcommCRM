@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import pg from "pg";
+import { publicarAgenteNaSessao } from "./agente-no-ar";
 
 /**
  * Fase 4B (robustez BYOK) — turno SEM credencial nenhuma (nem env, nem BYOK).
@@ -75,6 +76,10 @@ beforeAll(async () => {
      values ($1, $2, $3, $4, 'open', false) on conflict (id) do nothing`,
     [CONV, ORG, CONTACT, SESSION],
   );
+  // Regra 0403: a IA só responde mensagem DEPOIS de um agente ser ligado, e o
+  // turno sem agente (o antigo "genérico") não responde mais. Esta fixture
+  // sempre presumiu "há quem atenda este número"; agora ela o declara.
+  await publicarAgenteNaSessao(pool, ORG, SESSION);
   await pool.query(
     `insert into messages (id, organization_id, conversation_id, channel_session_id, contact_id,
                            type, direction, status, body, sent_via, sent_at)

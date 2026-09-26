@@ -14,7 +14,8 @@ function supabaseComConversas(data: unknown[]) {
       },
     },
   );
-  return { from: () => chain } as never;
+  // Régua do silêncio (migration 0403) autorizada: o que este arquivo mede é outro filtro.
+  return { from: () => chain, rpc: async () => ({ data: "autorizado", error: null }) } as never;
 }
 
 const metadata = {

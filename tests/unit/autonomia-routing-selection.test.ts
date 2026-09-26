@@ -67,6 +67,12 @@ function setup(a: PublishedAgentConfig, b: PublishedAgentConfig, sticky: boolean
     if (sql.includes('newer_count')) {
       return { rows: [{ sent_at: new Date(), newer_count: '0' }] };
     }
+    // Corte de ativação (migration 0403): a pergunta vai com o agente que o
+    // router SELECIONOU — nunca com o sticky nem com o da sessão.
+    if (sql.includes('fn_ia_pode_responder_mensagem')) {
+      corteConsultado.push(values[2] as string);
+      return { rows: [{ motivo: corteResponde }] };
+    }
     // Contexto curto do classificador (id do signal + limite): não pesa na seleção testada aqui.
     if (sql.includes('id<>$3')) {
       expect(values.slice(0, 2)).toEqual([ids.org, ids.conversation]);
@@ -78,7 +84,9 @@ function setup(a: PublishedAgentConfig, b: PublishedAgentConfig, sticky: boolean
   });
   return { query };
 }
-beforeEach(() => vi.clearAllMocks());
+let corteResponde = 'autorizado';
+let corteConsultado: string[] = [];
+beforeEach(() => { vi.clearAllMocks(); corteResponde = 'autorizado'; corteConsultado = []; });
 
 describe('operação segue a identidade escolhida pelo router canônico', () => {
   it.each(['assisted', 'paused'] as const)('A %s não captura a assistência selecionada de B', async state => {
@@ -116,5 +124,22 @@ describe('operação segue a identidade escolhida pelo router canônico', () => 
     expect(mocks.classify).toHaveBeenCalledOnce();
     expect(mocks.draft).not.toHaveBeenCalled();
     expect(mocks.operation).not.toHaveBeenCalled();
+  });
+
+  it('corte de ativação recusa a mensagem do B selecionado: nem rascunho, nem operação', async () => {
+    const pool = setup(agent('A', 'automatic'), agent('B', 'automatic'), false);
+    corteResponde = 'anterior_a_ativacao';
+    await createInboundTurnHandler(deps)(job as never, pool as never, { workerId: 'worker' });
+    expect(corteConsultado).toEqual(['B']);
+    expect(mocks.draft).not.toHaveBeenCalled();
+    expect(mocks.operation).not.toHaveBeenCalled();
+  });
+
+  it('assistido também respeita o corte: mensagem de antes da ativação não gera rascunho', async () => {
+    const pool = setup(agent('A', 'automatic'), agent('B', 'assisted'), true);
+    corteResponde = 'anterior_a_ativacao';
+    await createInboundTurnHandler(deps)(job as never, pool as never, { workerId: 'worker' });
+    expect(corteConsultado).toEqual(['B']);
+    expect(mocks.draft).not.toHaveBeenCalled();
   });
 });

@@ -104,6 +104,8 @@ function job(payload: Record<string, unknown>): JobRow {
 /** Pool mínimo: resolve a conversa e devolve a escolha da organização. */
 function fakePool(camadaDaOrg: boolean) {
   const query = vi.fn(async (sql: string): Promise<{ rows: Array<Record<string, unknown>> }> => {
+    // Corte no envio (migration 0403): inscrição autorizada — o que este arquivo mede é outra régua.
+    if (sql.includes("fn_followup_pode_enviar")) return { rows: [{ motivo: "autorizado" }] };
     if (sql.includes("d.fechada_em::text")) return { rows: [{ ...boundary, status: "open", demanda_fechada_em: null }] };
     if (/from org_guardrail_layers/.test(sql)) {
       return { rows: [{ layer: "promessa_semantica", enabled: camadaDaOrg }] };

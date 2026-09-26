@@ -32,6 +32,10 @@ import { lerNumerosDeTeste, numeroPodeTestar, preGoLiveAtivo } from '@/lib/ai/el
 
 import type { Logger } from '../../obs/logger';
 
+/** Validade padrão da fila de reenvio (30 min): o suficiente para uma queda
+ * curta do número, pouco para uma resposta virar disparo fora de contexto. */
+export const REDRIVE_MAX_AGE_MS_PADRAO = 30 * 60 * 1000;
+
 export interface WatchdogConfig {
   wahaBaseUrl: string;
   wahaApiKey: string;
@@ -39,6 +43,12 @@ export interface WatchdogConfig {
   intervalMs: number;
   /** idade mínima de uma queued para redrive — evita corrida com o insert do handler */
   redriveMinAgeMs: number;
+  /**
+   * Validade de uma mensagem automática `queued`: passado isto, o resgate a
+   * marca `failed` (`fila_expirada`) em vez de reenviar. Opcional — sem valor,
+   * vale `REDRIVE_MAX_AGE_MS_PADRAO` (sem env nova: `.env` antigo não quebra).
+   */
+  redriveMaxAgeMs?: number;
   /** teto de redrives por tick (anti-rajada) */
   redriveBatchSize: number;
   /** espaçamento entre redrives (base + jitter) */
@@ -370,8 +380,13 @@ export async function redriveQueued(
       // A lista pode mudar enquanto a mensagem espera ou entre itens do lote.
       // Este redrive fala direto com o WAHA, portanto também precisa da guarda
       // do sink. Falha de leitura cai no catch e NÃO envia.
-      const { rows: acesso } = await pool.query<{ metadata: unknown; phone_number: string | null }>(
-        `select s.metadata, c.phone_number
+      const { rows: acesso } = await pool.query<{
+        metadata: unknown;
+        phone_number: string | null;
+        idade_ms: string;
+      }>(
+        `select s.metadata, c.phone_number,
+                (extract(epoch from (now() - m.created_at)) * 1000)::bigint::text as idade_ms
          from messages m
          join channel_sessions s on s.id = m.channel_session_id and s.organization_id = m.organization_id
          join contacts c on c.id = m.contact_id and c.organization_id = m.organization_id
@@ -380,6 +395,27 @@ export async function redriveQueued(
       );
       const atual = acesso[0];
       if (!atual) continue;
+      // A FILA TEM VALIDADE. Mensagem automática represada (número caído) que
+      // passou do teto deixa de ser resposta e vira disparo fora de contexto: a
+      // conversa seguiu, o humano pode ter assumido, o fluxo pode ter sido
+      // desligado, o agente pausado. Medido em produção (2026-09-26): um
+      // lembrete de follow-up ficou `queued` com o número desconectado DEPOIS
+      // de o fluxo ser desligado, e este resgate o mandaria no instante da
+      // reconexão, sem olhar nada disso. Vira `failed` com motivo legível —
+      // visível na conversa, nunca reenviado em silêncio.
+      if (Number(atual.idade_ms) > (cfg.redriveMaxAgeMs ?? REDRIVE_MAX_AGE_MS_PADRAO)) {
+        await pool.query(
+          `update messages set status = 'failed', error_code = 'fila_expirada',
+             error_message = 'Mensagem automática ficou tempo demais na fila (número desconectado) e não foi enviada fora de contexto.'
+           where id = $1 and organization_id = $2 and status = 'queued'`,
+          [m.id, m.organization_id],
+        );
+        log.info('watchdog: queued expirada — não reenviada', {
+          message_id: m.id,
+          idade_ms: Number(atual.idade_ms),
+        });
+        continue;
+      }
       if (preGoLiveAtivo(atual.metadata) && !numeroPodeTestar(atual.phone_number ?? '', lerNumerosDeTeste(atual.metadata))) {
         await pool.query(
           `update messages set status = 'failed', error_code = 'pre_go_live',

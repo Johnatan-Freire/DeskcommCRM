@@ -14,9 +14,9 @@
  * NUNCA é considerada histórica — comportamento idêntico ao de antes da
  * migration para quem já atende hoje sem problema nenhum.
  *
- * `lib/agent-engine/edge/crm/drain.ts` tem a MESMA régua em SQL puro (roda
- * sobre `pg.Pool`, fora do Next) — não usa este helper, mas a decisão é
- * idêntica. Todo outro consumidor de `message.received`/mensagem inbound que
+ * `lib/agent-engine/edge/crm/drain.ts` não usa este helper: consulta
+ * `fn_ia_pode_responder_mensagem` (migration 0403), que aplica este mesmo
+ * corte de conexão E o corte de ativação do agente. Todo outro consumidor de `message.received`/mensagem inbound que
  * possa causar um envio real ao contato usa este helper:
  * `workers/ai-response-worker.ts` (guard próprio, anterior a este arquivo),
  * `workers/ai-sentiment-worker.ts`, `lib/automation/engine.ts`,

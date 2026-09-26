@@ -142,6 +142,11 @@ async function criarRouter(
 
 /** Drena o evento do cenário e responde: nasceu job? */
 async function drenaEGeraJob(c: Cenario): Promise<boolean> {
+  // Regra 0403: a IA só responde mensagem que aconteceu DEPOIS de um agente ser
+  // ligado. `montarCenario` cria a mensagem ANTES de `criarAgente`; aqui ela
+  // "chega" depois da montagem, que é o que este arquivo sempre presumiu — o que
+  // ele mede é QUEM o portão considera capaz de executar, não o relógio.
+  await pool.query("update messages set sent_at = clock_timestamp() where id = $1", [c.msg]);
   const { rows } = await pool.query<{ id: string }>(
     `insert into event_log (organization_id, event_type, entity_kind, entity_id, payload, status)
      values ($1::uuid, 'ai_agent.dispatch_requested', 'message', $2::uuid,

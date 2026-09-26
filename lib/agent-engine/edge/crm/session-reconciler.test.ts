@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type pg from "pg";
 import { createLogger } from "../../obs/logger";
 
-import { deveRetomarSessao, redriveQueued } from "./session-reconciler";
+import { deveRetomarSessao, redriveQueued, REDRIVE_MAX_AGE_MS_PADRAO } from "./session-reconciler";
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -81,7 +81,7 @@ interface LinhaPresa {
   group_chat_id: string | null;
 }
 
-function bancoComFila(fila: LinhaPresa[]) {
+function bancoComFila(fila: LinhaPresa[], idadeMs = 60_000) {
   const consultas: string[] = [];
   const query = vi.fn(async (sql: string) => {
     consultas.push(sql);
@@ -92,7 +92,9 @@ function bancoComFila(fila: LinhaPresa[]) {
       return { rows: fila.filter((l) => vocabulario.includes(l.sent_via)).map((l) => ({ ...l })) };
     }
     if (/select\s+s\.metadata/i.test(sql)) {
-      return { rows: fila.length === 0 ? [] : [{ metadata: {}, phone_number: "+5531999998888" }] };
+      return {
+        rows: fila.length === 0 ? [] : [{ metadata: {}, phone_number: "+5531999998888", idade_ms: String(idadeMs) }],
+      };
     }
     return { rows: [] };
   });
@@ -170,3 +172,52 @@ describe("resgate da fila — a mensagem da AUTOMAÇÃO é alcançada (#652)", (
   });
 });
 
+describe("a fila de reenvio tem VALIDADE — backlog antigo não sai na reconexão (migration 0403)", () => {
+  const linha: LinhaPresa = {
+    id: "m-lembrete",
+    organization_id: "org-1",
+    conversation_id: "conversa-1",
+    body: "Oi! Vi que você tinha interesse em um dos nossos cursos…",
+    sent_via: "automation",
+    waha_session_name: "default",
+    wa_identity: null,
+    wa_lid: null,
+    phone_number: "+5531999998888",
+    is_group: false,
+    group_chat_id: null,
+  };
+  const cfg = {
+    wahaBaseUrl: "http://127.0.0.1:9999",
+    wahaApiKey: "test-key",
+    intervalMs: 1,
+    redriveMinAgeMs: 0,
+    redriveBatchSize: 10,
+    redriveSpacingMs: 0,
+  };
+
+  it("⭐ queued há mais que o teto padrão: NÃO é reenviada e vira failed/fila_expirada", async () => {
+    const send = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}", { status: 200 }));
+    const { query, consultas } = bancoComFila([linha], REDRIVE_MAX_AGE_MS_PADRAO + 1);
+    expect(await redriveQueued({ query } as unknown as pg.Pool, cfg, createLogger())).toBe(0);
+    expect(send).not.toHaveBeenCalled();
+    expect(consultas.some((c) => c.includes("fila_expirada") && c.includes("status = 'queued'"))).toBe(true);
+  });
+
+  it("CONTROLE: dentro da validade (queda curta do número) a mensagem SAI", async () => {
+    const send = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response(JSON.stringify({ id: { id: "3EB0ABCDEF" } }), { status: 200 }));
+    const { query } = bancoComFila([linha], 5 * 60_000);
+    expect(await redriveQueued({ query } as unknown as pg.Pool, cfg, createLogger())).toBe(1);
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
+  it("o teto é configurável e vale nos dois sentidos", async () => {
+    const send = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}", { status: 200 }));
+    const { query } = bancoComFila([linha], 2 * 60_000);
+    expect(
+      await redriveQueued({ query } as unknown as pg.Pool, { ...cfg, redriveMaxAgeMs: 60_000 }, createLogger()),
+    ).toBe(0);
+    expect(send).not.toHaveBeenCalled();
+  });
+});

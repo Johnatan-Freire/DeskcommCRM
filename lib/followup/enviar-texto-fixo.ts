@@ -14,6 +14,7 @@ import { createSupabaseAdminClient, type FollowupJobRequest } from "@/lib/follow
 import type { EnrollmentRow } from "@/lib/followup/node-handlers";
 import { completeTurnForEnrollment, type TurnBridgeAdminClient } from "@/lib/followup/turn-bridge";
 import { logger } from "@/lib/logger";
+import { AUTORIZADO, explicarCorte, followupPodeEnviarViaSupabase } from "@/lib/ai/ativacao/corte-de-ativacao";
 
 function ponteSupabase(admin: SupabaseClient): TurnBridgeAdminClient {
   const base = createSupabaseAdminClient(admin);
@@ -100,6 +101,26 @@ export async function enviarTextoFixoPendente(
       const boundary = parseServiceBoundary((job.payload as Record<string, unknown>).service_boundary);
       await assertServiceBoundarySupabase(admin, boundary);
       const conversationId = boundary!.conversation_id;
+      // CORTE NO INSTANTE DO ENVIO (migration 0403) — este é o emissor que
+      // mandou os lembretes do incidente de 2026-09-26 (`sent_via=automation`,
+      // agente pausado há 16h, conversa encerrada pelo humano). Mesma função
+      // SQL do `followup_turn` do engine. Recusa → enrollment `skipped`
+      // (cancelado com o motivo), job `done`; erro → cai no catch, o job volta
+      // a `pending` e NADA é enviado.
+      const corte = await followupPodeEnviarViaSupabase(admin, job.organization_id as string, enrollmentId);
+      if (corte !== AUTORIZADO) {
+        logger.info("[followup] texto fixo não enviado — fora do corte de atendimento automático", {
+          organization_id: job.organization_id,
+          conversation_id: conversationId,
+          motivo: corte,
+        });
+        await completeTurnForEnrollment(ponte, job.organization_id, enrollmentId, nodeId, {
+          kind: "skipped",
+          reason: `Não enviado: ${explicarCorte(corte)}.`,
+        },undefined,job.id,jobClaim);
+        await settle(job.organization_id,job.id,jobClaim.acquired_at,true);
+        continue;
+      }
       // GATE DE ELEGIBILIDADE — este envio inline BYPASSA `executarTurnoDoAgente`
       // (é o atalho "sem cron e sem agent-worker"), então precisa da checagem
       // por conta própria. Mesma regra pura do drain/turno. Canal 'open' → passa.

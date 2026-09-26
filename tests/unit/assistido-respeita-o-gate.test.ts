@@ -76,7 +76,14 @@ function pool() {
   mocks.byId.mockResolvedValue(assistido);
   mocks.bySession.mockResolvedValue(assistido);
   mocks.conversationAgent.mockResolvedValue(assistido);
-  return { query: vi.fn(async () => ({ rows: [{ active_ai_agent_id: null, active_intent: null, body: 'oi' }] })) };
+  return {
+    query: vi.fn(async (sql: string) =>
+      // Corte de ativação (migration 0403): mensagem depois da ativação — o
+      // que este arquivo mede é o gate de DONO, não o corte.
+      sql.includes('fn_ia_pode_responder_mensagem')
+        ? { rows: [{ motivo: 'autorizado' }] }
+        : { rows: [{ active_ai_agent_id: null, active_intent: null, body: 'oi' }] }),
+  };
 }
 
 beforeEach(() => {

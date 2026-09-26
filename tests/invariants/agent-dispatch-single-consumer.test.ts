@@ -91,6 +91,11 @@ beforeAll(async () => {
     [VERSION, ORG, AGENT, SESSION],
   );
   await pool.query(`update ai_agents set published_version_id = $1 where id = $2`, [VERSION, AGENT]);
+  // Regra 0403: a IA só responde mensagem que aconteceu DEPOIS de o agente ser
+  // ligado. A mensagem acima nasceu antes da publicação; aqui ela "chega" depois,
+  // que é o estado que este teste sempre presumiu — ele mede a unicidade do
+  // consumidor, não o relógio.
+  await pool.query("update messages set sent_at = clock_timestamp() where id = $1", [MSG]);
 });
 
 afterAll(async () => {

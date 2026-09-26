@@ -1,5 +1,6 @@
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import pg from "pg";
+import { publicarAgenteNaSessao } from "./agente-no-ar";
 
 import type * as InboundTurn from "@/lib/agent-engine/agent/inbound-turn";
 import type * as Providers from "@/lib/agent-engine/edge/llm/providers";
@@ -247,7 +248,10 @@ beforeEach(async () => {
     `insert into conversations (id, organization_id, contact_id, channel_session_id, status, is_group)
      values ($1,$2,$3,$4,'ai_handling',false)`,
     [CONV, ORG, CONTACT, SESSION],
-  );
+  );  // Regra 0403: a IA só responde mensagem DEPOIS de um agente ser ligado, e o
+  // turno sem agente (o antigo "genérico") não responde mais. Esta fixture
+  // sempre presumiu "há quem atenda este número"; agora ela o declara.
+  await publicarAgenteNaSessao(pool, ORG, SESSION);
 });
 
 describe("pedido explícito de atendente", () => {

@@ -1588,6 +1588,7 @@ export type Database = {
           name: string
           organization_id: string
           priority: number
+          service_enabled_at: string | null
           published_version_id: string | null
           system_prompt: string
           updated_at: string
@@ -1611,6 +1612,7 @@ export type Database = {
           name: string
           organization_id: string
           priority?: number
+          service_enabled_at?: string | null
           published_version_id?: string | null
           system_prompt: string
           updated_at?: string
@@ -1634,6 +1636,7 @@ export type Database = {
           name?: string
           organization_id?: string
           priority?: number
+          service_enabled_at?: string | null
           published_version_id?: string | null
           system_prompt?: string
           updated_at?: string
@@ -9169,6 +9172,15 @@ export type Database = {
         }
       }
       fn_service_inbound: { Args: { p_message: string }; Returns: undefined }
+      fn_ia_pode_responder_mensagem: {
+        Args: { p_org: string; p_message: string; p_agent?: string | null }
+        Returns: string
+      }
+      fn_silencio_pode_reengajar: {
+        Args: { p_org: string; p_conversation: string; p_para_inscrever: boolean }
+        Returns: string
+      }
+      fn_followup_pode_enviar: { Args: { p_org: string; p_enrollment: string }; Returns: string }
       fn_service_lock: {
         Args: { p_contact: string; p_org: string }
         Returns: undefined
