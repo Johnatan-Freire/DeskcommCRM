@@ -5961,6 +5961,11 @@ export const DICIONARIO: Traducoes = {
   "Conferindo se a chave tem crédito…": { es: "Verificando si la clave tiene crédito…" },
   "Testei agora: a chave respondeu e tem crédito.": { es: "Acabo de probar: la clave respondió y tiene crédito." },
   "A chave foi aceita, mas o teste não passou:": { es: "La clave se aceptó, pero la prueba no pasó:" },
+  "A empresa de IA recusou por falta de saldo ou limite de uso. Adicione crédito na conta dela — sem isso ele não responde a nenhum cliente.": { es: "La empresa de IA lo rechazó por falta de saldo o por límite de uso. Agrega crédito en su cuenta: sin eso no responderá a ningún cliente." },
+  "A empresa de IA não aceitou esta chave. Confira se ela foi colada inteira e se é a chave do provedor escolhido.": { es: "La empresa de IA no aceptó esta clave. Revisa que la hayas pegado completa y que sea la clave del proveedor que elegiste." },
+  "A empresa de IA não reconhece o modelo escolhido para ele. Dá para escolher outro em IA › Provedores.": { es: "La empresa de IA no reconoce el modelo elegido para él. Puedes elegir otro en IA › Proveedores." },
+  "Não consegui falar com a empresa de IA agora — rede ou serviço fora do ar. Isto não é a chave: tente de novo em minutos.": { es: "No pude comunicarme con la empresa de IA ahora: red o servicio fuera de línea. Esto no es la clave, vuelve a intentarlo en unos minutos." },
+  "A empresa de IA recusou a chamada de teste, e não sei dizer o motivo pelo que ela respondeu. Confira o saldo e a chave na conta da empresa de IA.": { es: "La empresa de IA rechazó la llamada de prueba y no sé decir el motivo por lo que respondió. Revisa el saldo y la clave en la cuenta de la empresa de IA." },
   "Se for falta de crédito, adicione saldo na conta da empresa de IA — sem isso ele não responde a nenhum cliente.": {
     es: "Si es por falta de crédito, agrega saldo a la cuenta de la empresa de IA. Sin eso, no responderá a ningún cliente.",
   },
