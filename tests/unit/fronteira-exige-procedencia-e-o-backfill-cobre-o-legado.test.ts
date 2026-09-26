@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createSupabaseSilenceSweepDb } from "@/lib/followup/silence-sweep";
 import { createSupabaseAdminClient } from "@/lib/followup/engine";
+import { AGENTE_DO_FLUXO, comFalaDoAgente } from "../support/fala-do-agente";
 
 /**
  * AUSÊNCIA DE CARIMBO É RECUSA, E QUEM CUIDA DO LEGADO É O BACKFILL.
@@ -48,7 +49,7 @@ function supabaseComConversas(data: unknown[]) {
     },
   );
   // Régua do silêncio (migration 0403) autorizada: o que este arquivo mede é outro filtro.
-  return { from: () => chain, rpc: async () => ({ data: "autorizado", error: null }) } as never;
+  return comFalaDoAgente({ from: () => chain, rpc: async () => ({ data: "autorizado", error: null }) });
 }
 
 const metadata = { ai_gate: "open" };
@@ -91,13 +92,13 @@ describe("fronteira exige procedência; o legado é do backfill", () => {
     const db = createSupabaseSilenceSweepDb(
       supabaseComConversas([conversaLegada("c-sem-carimbo", false)]),
     );
-    const ids = await db.loadSilentContactIds("org", "2026-09-02T10:00:00.000Z", []);
+    const ids = await db.loadSilentContactIds("org", "2026-09-02T10:00:00.000Z", [], [AGENTE_DO_FLUXO]);
     expect(ids).toEqual([]);
   });
 
   it("varredura de silêncio continua enxergando a conversa COM carimbo", async () => {
     const db = createSupabaseSilenceSweepDb(supabaseComConversas([conversaLegada("c-novo", true)]));
-    const ids = await db.loadSilentContactIds("org", "2026-09-02T10:00:00.000Z", []);
+    const ids = await db.loadSilentContactIds("org", "2026-09-02T10:00:00.000Z", [], [AGENTE_DO_FLUXO]);
     expect(ids).toEqual(["c-novo"]);
   });
 

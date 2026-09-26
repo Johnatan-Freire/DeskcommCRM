@@ -120,7 +120,7 @@ export interface FollowupGateDb {
 }
 
 /** Puro: agent_ids que armam este pointer, em ordem determinística (menor uuid primeiro). */
-function agentsEnablingPointer(agents: EnabledFollowupAgent[], pointerId: string): string[] {
+export function agentsEnablingPointer(agents: EnabledFollowupAgent[], pointerId: string): string[] {
   return agents
     .filter((a) => a.pointerIds.includes(pointerId))
     .map((a) => a.agentId)

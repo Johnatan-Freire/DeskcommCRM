@@ -306,17 +306,17 @@ test("silêncio consulta proveniência real pelo PostgREST: legado e reabertura 
     const old = await inbound(new Date(Date.now() - 600_000).toISOString());
     const sweep = createSupabaseSilenceSweepDb(db);
     const cutoff = new Date(Date.now() + 1000).toISOString();
-    expect(await sweep.loadSilentContactIds(org, cutoff, [])).toEqual([contact]);
+    expect(await sweep.loadSilentContactIds(org, cutoff, [], [])).toEqual([contact]);
     const legacy = await db.from("messages").update({ service_revision: null, demanda_id: null, demanda_revision: null }).eq("organization_id", org).eq("id", old);
     if (legacy.error) throw legacy.error;
-    expect(await sweep.loadSilentContactIds(org, cutoff, [])).toEqual([]);
+    expect(await sweep.loadSilentContactIds(org, cutoff, [], [])).toEqual([]);
     await rpc("fn_service_status", { p_org: org, p_conversation: conversation, p_status: "closed" });
     await rpc("fn_service_begin", { p_org: org, p_contact: contact, p_session: session });
-    expect(await sweep.loadSilentContactIds(org, cutoff, [])).toEqual([]);
+    expect(await sweep.loadSilentContactIds(org, cutoff, [], [])).toEqual([]);
     await inbound(new Date().toISOString());
-    expect(await sweep.loadSilentContactIds(org, new Date(Date.now() + 1000).toISOString(), [])).toEqual([contact]);
+    expect(await sweep.loadSilentContactIds(org, new Date(Date.now() + 1000).toISOString(), [], [])).toEqual([contact]);
     await rpc("fn_service_status", { p_org: org, p_conversation: conversation, p_status: "closed" });
     await rpc("fn_service_begin", { p_org: org, p_contact: contact, p_session: session });
-    expect(await sweep.loadSilentContactIds(org, new Date(Date.now() + 1000).toISOString(), [])).toEqual([]);
+    expect(await sweep.loadSilentContactIds(org, new Date(Date.now() + 1000).toISOString(), [], [])).toEqual([]);
   } finally { await db.from("organizations").delete().eq("id", org); }
 });

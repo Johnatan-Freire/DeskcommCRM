@@ -76,6 +76,7 @@ describe("createSupabaseSilenceSweepDb — a consulta de PRODUÇÃO", () => {
       "org-1",
       new Date("2026-08-30T12:00:00Z").toISOString(),
       [],
+      [],
     );
     expect(chamadas.map((c) => c.metodo)).toContain("select");
     expect(chamadas.length, "o dublê não registrou chamada nenhuma").toBeGreaterThan(2);
@@ -86,6 +87,7 @@ describe("createSupabaseSilenceSweepDb — a consulta de PRODUÇÃO", () => {
     await createSupabaseSilenceSweepDb(client).loadSilentContactIds(
       "org-1",
       new Date("2026-08-30T12:00:00Z").toISOString(),
+      [],
       [],
     );
     expect(

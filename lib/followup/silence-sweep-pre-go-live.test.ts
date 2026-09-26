@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { createSupabaseSilenceSweepDb } from "./silence-sweep";
+import { AGENTE_DO_FLUXO, comFalaDoAgente } from "../../tests/support/fala-do-agente";
 
 function supabaseComConversas(data: unknown[]) {
   const chain: Record<string, unknown> = new Proxy(
@@ -15,7 +16,7 @@ function supabaseComConversas(data: unknown[]) {
     },
   );
   // Régua do silêncio (migration 0403) autorizada: o que este arquivo mede é outro filtro.
-  return { from: () => chain, rpc: async () => ({ data: "autorizado", error: null }) } as never;
+  return comFalaDoAgente({ from: () => chain, rpc: async () => ({ data: "autorizado", error: null }) });
 }
 
 const metadata = {
@@ -65,7 +66,7 @@ describe("sweep de silêncio no pré-go-live", () => {
     );
 
     await expect(
-      db.loadSilentContactIds("org", "2026-09-02T10:00:00.000Z", []),
+      db.loadSilentContactIds("org", "2026-09-02T10:00:00.000Z", [], [AGENTE_DO_FLUXO]),
     ).resolves.toEqual(["tester"]);
   });
 });
