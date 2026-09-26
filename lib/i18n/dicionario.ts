@@ -1426,6 +1426,16 @@ export const DICIONARIO: Traducoes = {
   "Os fluxos abaixo só entram em ação para um cliente se este agente estiver publicado com follow-up habilitado.": {
     es: "Los flujos de abajo solo entran en acción para un cliente si este agente está publicado con el seguimiento habilitado.",
   },
+  "Permitir que o agente marque novos retornos por conta própria": {
+    es: "Permitir que el agente programe nuevos retornos por su cuenta",
+  },
+  "Desligar impede novos retornos prometidos pelo agente. Os fluxos configurados abaixo e a consulta ou o cancelamento de retornos existentes continuam disponíveis.": {
+    es: "Al desactivarlo, el agente no podrá programar nuevos retornos. Los flujos configurados abajo y la consulta o cancelación de retornos existentes seguirán disponibles.",
+  },
+  "Fluxos automáticos habilitados:": { es: "Flujos automáticos habilitados:" },
+  "Retornos marcados pelo agente habilitados:": {
+    es: "Retornos programados por el agente habilitados:",
+  },
   // ─── Agentes de IA: seletor de modelo, capacidades, credencial, handoff ───
   Modelo: { es: "Modelo" },
   "Selecione um modelo": { es: "Selecciona un modelo" },

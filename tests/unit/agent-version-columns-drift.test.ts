@@ -115,4 +115,22 @@ describe("versionCreateSchema aceita as flags por-agente que a tela edita", () =
     expect(parsed.success && parsed.data.can_mark_won).toBe(false);
     expect(parsed.success && parsed.data.can_mark_lost).toBe(true);
   });
+
+  it("aceita callback_enabled como opção independente dentro de followup", () => {
+    const parsed = versionCreateSchema.safeParse({
+      ...base,
+      followup: {
+        enabled: true,
+        flow_pointer_ids: ["33333333-3333-4333-8333-333333333333"],
+        callback_enabled: false,
+      },
+    });
+
+    expect(parsed.success).toBe(true);
+    expect(parsed.success && parsed.data.followup).toMatchObject({
+      enabled: true,
+      flow_pointer_ids: ["33333333-3333-4333-8333-333333333333"],
+      callback_enabled: false,
+    });
+  });
 });

@@ -88,6 +88,7 @@ import {
 import { applySaveLeadNote, buildNotesIndexBlock, getLeadNoteBody } from './lead-notes';
 import { buildCompromissosBlock } from './compromissos-do-contato';
 import { applyScheduleFollowup, type FollowupWindowKnobs } from './schedule-followup';
+import { podeExporScheduleFollowup } from '@/lib/followup/callback-policy';
 import {
   avisarLeadDaEscalacao,
   avisarLeadLendoOContato,
@@ -3973,12 +3974,12 @@ async function executarTurnoDoAgente(
     }),
   };
 
-  // F3-02: a tool de agendamento (schedule_followup) só entra quando sua janela
-  // está configurada — main.ts sempre a preenche pelos knobs do env; tenant/lead
-  // vêm da ROW do job (closure), nunca do payload do modelo. É MUTANTE (cria
-  // cron_job), por isso fica fora de READ_ONLY_TOOLS.
+  // F3-02: a tool nativa só entra com janela configurada e callback habilitado
+  // na versão publicada. Tenant/lead vêm da ROW do job (closure), nunca do
+  // payload do modelo. É MUTANTE (cria cron_job), por isso fica fora de
+  // READ_ONLY_TOOLS.
   const followupKnobs = deps.knobs.followup;
-  if (followupKnobs !== undefined) {
+  if (podeExporScheduleFollowup(agentConfig?.followup, followupKnobs)) {
     rawTools.schedule_followup = tool({
       ...AGENT_TOOL_DEFS.schedule_followup,
       execute: async (raw) => {

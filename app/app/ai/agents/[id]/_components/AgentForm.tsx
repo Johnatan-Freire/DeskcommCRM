@@ -74,6 +74,7 @@ import type { AgentVersionRow } from "@/hooks/ai/useAgentVersions";
 import type { CredentialRow, Provider } from "@/hooks/ai/useCredentials";
 import { credentialStatus } from "@/hooks/ai/useCredentials";
 import type { FunilDaResposta } from "@/hooks/pipelines/usePipelines";
+import { callbacksHabilitados } from "@/lib/followup/callback-policy";
 
 /**
  * O canal oferecido no seletor é exatamente o que `listSelectableChannels`
@@ -202,6 +203,7 @@ interface FormState {
 interface FollowupValue {
   enabled: boolean;
   flow_pointer_ids: string[];
+  callback_enabled: boolean;
   /** Ausente em versões antigas; null = sem janela própria. */
   send_window?: FollowupWindowValue | null;
 }
@@ -210,6 +212,7 @@ const DEFAULT_FOLLOWUP: FollowupValue = {
   enabled: false,
   flow_pointer_ids: [],
   send_window: null,
+  callback_enabled: true,
 };
 
 const DEFAULT_TRIGGER: TriggerValue = {
@@ -286,7 +289,13 @@ export function buildState(args: {
     cases_enabled: version?.cases_enabled ?? false,
     split_messages: version?.split_messages ?? false,
     split_max_chars: version?.split_max_chars ?? 600,
-    followup: version?.followup ?? DEFAULT_FOLLOWUP,
+    followup: version?.followup
+      ? {
+          ...DEFAULT_FOLLOWUP,
+          ...version.followup,
+          callback_enabled: callbacksHabilitados(version.followup),
+        }
+      : DEFAULT_FOLLOWUP,
     operator_enabled: version?.operator_enabled ?? false,
     // O form usa "" onde o banco usa null — Select controlado não aceita null.
     // A conversão de volta acontece em `toVersionPayload`, num ponto só.
@@ -1301,6 +1310,24 @@ export function AgentForm(props: Props) {
             <p className="text-xs text-muted-foreground">
               {t(
                 "Retomar sozinho quem parou de responder, para o interessado não sumir sem ninguém perceber.",
+              )}
+            </p>
+            <div className="flex items-center gap-2">
+              <Switch
+                id="callback_enabled"
+                checked={form.followup.callback_enabled}
+                onCheckedChange={(v) =>
+                  patch({ followup: { ...form.followup, callback_enabled: v } })
+                }
+                disabled={disabled}
+              />
+              <Label htmlFor="callback_enabled">
+                {t("Permitir que o agente marque novos retornos por conta própria")}
+              </Label>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {t(
+                "Desligar impede novos retornos prometidos pelo agente. Os fluxos configurados abaixo e a consulta ou o cancelamento de retornos existentes continuam disponíveis.",
               )}
             </p>
             <div className="flex items-center gap-2">

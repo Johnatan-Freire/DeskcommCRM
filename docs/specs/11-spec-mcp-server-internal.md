@@ -293,6 +293,13 @@ validateToolIds(version.tool_ids).forEach(t => {
 
 Endpoint `GET /api/v1/mcp/tools` (admin+) retorna o catálogo completo com schemas para a UI Spec 12 §3 popular o checklist.
 
+No runtime interno dos agentes, `ai_agent_versions.followup.callback_enabled=false`
+remove `crm_schedule_followup` depois da seleção por `tool_ids`, para o
+Conversador e para o Operador. O filtro mantém `crm_list_followups`,
+`crm_cancel_followup`, `crm_enroll_followup_flow` e ferramentas de agendamento
+de compromisso. A superfície pública genérica `/api/mcp` não recebe política
+por-agente: ela continua obedecendo ao token e às permissões do seu chamador.
+
 ---
 
 ## 5. Implementação (esqueleto)
