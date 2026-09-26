@@ -30,8 +30,14 @@ quando a pergunta depender disso):
 | Segunda chamada / regra para refazer prova | Passa para a equipe |
 | Data, nome ou peso da avaliação (a nota vem só por módulo) | Responde por módulo; se perguntarem "a prova de ontem", pergunta o módulo ou passa |
 | Valor, vencimento, boleto, acordo | Só o status; negociação é da equipe |
-| **Quem é o dono do telefone** — o cadastro tem dois telefones de contato por aluno e o retorno não diz qual casou nem se é do responsável | Nunca afirmar "você é o responsável" ou "você é o aluno"; falar do aluno pelo nome |
-| O casamento é pelos **últimos 8 dígitos** do telefone | Dois números de DDD diferente com o mesmo final colidem. Se a pessoa estranhar o aluno encontrado, não insistir: passar para a equipe |
+| **Quem é o dono do telefone** — o cadastro tem dois telefones de contato por aluno ("Número de Contato 2" / "Telefone alternativo"); o retorno diz QUAL campo casou, mas nenhum dos dois significa "telefone do responsável" no sistema escolar | Nunca afirmar "você é o responsável" ou "você é o aluno"; falar do aluno pelo nome |
+
+**Casamento pelo número completo.** A API do sistema escolar compara o número inteiro
+normalizado (DDI, DDD, máscara e o nono dígito de celular convergem; cadastro sem DDD nunca
+casa) e responde `match_type: "exact"`. Versões antigas casavam pelos 8 últimos dígitos — dois
+DDDs com o mesmo final colidiam. O CRM **recusa** resposta sem `match_type: "exact"`: a
+ferramenta devolve "não foi possível confirmar" e nenhum dado. Ordem de atualização: o sistema
+escolar primeiro; com o CRM novo e a API antiga, o agente passa tudo para a equipe.
 
 ## Ferramentas (menor privilégio)
 
@@ -151,8 +157,26 @@ mensagem chega
 Peças que faltam: (1) um passo de identidade no resolvedor do turno
 (`lib/agent-engine/agent/resolve-turn-agent.ts`), antes da classificação, com cache curto por
 conversa; (2) o classificador passar a receber essa identidade; (3) regra de destino por
-identidade × intenção configurável por roteador; (4) na API escolar, dizer **qual** telefone
-casou (aluno × responsável) e casar pelo número completo em vez dos 8 últimos dígitos.
+identidade × intenção configurável por roteador; (4) no sistema escolar, um campo com
+semântica REAL de responsável (hoje há `nome_responsavel` e `cpf_responsavel`, mas nenhum
+telefone de responsável).
+
+### Contrato que o resolvedor de identidade consumiria
+
+Derivado da mesma consulta (`GET /api/deskcomm/aluno?telefone=`), sem dado acadêmico — o
+resolvedor só precisa saber SE há vínculo, não O QUÊ:
+
+```ts
+type Identidade =
+  | { tipo: "relacionado_a_aluno"; quantidade: number; campos: ("numero_contato" | "numero_contato2")[] }
+  | { tipo: "desconhecido"; motivo: "nao_encontrado" | "nao_confirmado" | "falha_na_consulta" };
+```
+
+- `relacionado_a_aluno` exige `match_type: "exact"`; qualquer outra resposta é `desconhecido`.
+- Não existe `responsavel` nem `aluno` como tipo: o sistema escolar não diz quem é o dono do
+  número. Um tipo `aluno`/`responsavel` só nasce quando houver campo com essa semântica lá.
+- Os ids internos dos alunos ficam no sistema escolar; o CRM não os guarda.
+- Nada disso é gravado no CRM hoje (sem coluna, sem migration) — é o contrato do próximo passo.
 
 ## Teste antes de publicar (botão Testar, número de teste)
 

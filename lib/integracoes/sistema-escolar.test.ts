@@ -364,6 +364,7 @@ describe("selecionarAluno", () => {
     const resultado = selecionarAluno({
       encontrado: true,
       ambiguo: false,
+      match_type: "exact",
       alunos: [aluno("Ana Souza", 42)],
     });
 
@@ -388,6 +389,7 @@ describe("selecionarAluno", () => {
     const resultado = selecionarAluno({
       encontrado: true,
       ambiguo: true,
+      match_type: "exact",
       alunos: [aluno("Ana Souza", 1), aluno("Bruno Souza", 2)],
     });
 
@@ -401,6 +403,7 @@ describe("selecionarAluno", () => {
       {
         encontrado: true,
         ambiguo: true,
+        match_type: "exact",
         alunos: [aluno("Ána  de Souza", 1), aluno("Bruno Souza", 2)],
       },
       "ana de souza",
@@ -415,11 +418,44 @@ describe("selecionarAluno", () => {
       {
         encontrado: true,
         ambiguo: true,
+        match_type: "exact",
         alunos: [aluno("Ana Souza", 1), aluno("Bruno Souza", 2)],
       },
       "Ana Silva",
     );
 
     expect(resultado).toEqual({ status: "nome_nao_encontrado" });
+  });
+
+  it("⭐ API antiga (sem match_type=exact, casava por sufixo): nenhum dado sai, nem a contagem", () => {
+    // O cenário real do sufixo: quem escreve do (11) 9 9999-1234 recebia o aluno do
+    // (61) 9 9999-1234. O CRM não tem como ver o DDD do cadastro — só a garantia da API.
+    const resultado = selecionarAluno({
+      encontrado: true,
+      ambiguo: false,
+      alunos: [aluno("Aluno De Outro Ddd", 7)],
+    });
+
+    expect(resultado).toEqual({ status: "correspondencia_nao_confirmada" });
+    expect(JSON.stringify(resultado)).not.toContain("Aluno De Outro Ddd");
+  });
+
+  it("match_type diferente de 'exact' também não passa", () => {
+    expect(
+      selecionarAluno({ encontrado: true, match_type: "suffix", alunos: [aluno("Ana", 1)] }).status,
+    ).toBe("correspondencia_nao_confirmada");
+  });
+
+  it("matched_contact_field não chega ao modelo (não vira 'você é o responsável')", () => {
+    const resultado = selecionarAluno({
+      encontrado: true,
+      ambiguo: false,
+      match_type: "exact",
+      alunos: [{ ...aluno("Ana Souza", 1), matched_contact_field: "numero_contato2" }],
+    });
+
+    expect(resultado.status).toBe("encontrado");
+    expect(JSON.stringify(resultado)).not.toContain("matched_contact_field");
+    expect(JSON.stringify(resultado)).not.toContain("numero_contato2");
   });
 });

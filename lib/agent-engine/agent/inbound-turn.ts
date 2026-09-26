@@ -2995,6 +2995,16 @@ async function executarTurnoDoAgente(
               message: 'nenhum aluno foi encontrado com o telefone desta conversa; não invente dados.',
             };
           }
+          if (selecao.status === 'correspondencia_nao_confirmada') {
+            runLog.warn('sistema escolar respondeu sem match_type=exact — nenhum dado de aluno repassado', {});
+            return {
+              ok: true,
+              encontrado: false,
+              message:
+                'não foi possível confirmar que este número pertence a um aluno; não informe nenhum dado ' +
+                'acadêmico nem financeiro, não invente, e ofereça passar para uma pessoa da equipe.',
+            };
+          }
           if (selecao.status === 'ambiguo') {
             return {
               ok: true,

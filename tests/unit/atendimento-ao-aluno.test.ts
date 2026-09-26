@@ -14,6 +14,7 @@ import { toolsDoSistemaEscolarNoTurno } from "@/lib/agent-engine/agent/sistema-e
 import { buscarAlunoPorTelefone, selecionarAluno } from "@/lib/integracoes/sistema-escolar";
 import { SISTEMA_ESCOLAR_TOOL_IDS } from "@/lib/integracoes/sistema-escolar-tools";
 import {
+  API_ANTIGA_POR_SUFIXO,
   API_DOIS_ALUNOS,
   API_NAO_ENCONTRADO,
   API_UM_ALUNO,
@@ -61,6 +62,17 @@ describe("identificação pelo telefone", () => {
 
   it("T03b — nome parecido não seleciona ninguém (sem aproximação)", async () => {
     expect((await consultar(API_DOIS_ALUNOS, "Ana Lima")).status).toBe("nome_nao_encontrado");
+  });
+
+  it("⭐ regressão DDD: API antiga devolve aluno de outro DDD pelo sufixo → nada sai", async () => {
+    const r = await consultar(API_ANTIGA_POR_SUFIXO);
+    expect(r).toEqual({ status: "correspondencia_nao_confirmada" });
+    expect(JSON.stringify(r)).not.toContain("Aluno De Outro Ddd");
+  });
+
+  it("o campo de contato que casou não chega ao modelo", async () => {
+    const r = await consultar(API_UM_ALUNO);
+    expect(JSON.stringify(r)).not.toContain("matched_contact_field");
   });
 
   it("T04 — telefone sem cadastro: não encontrado", async () => {

@@ -35,13 +35,33 @@ const matricula = (over: Record<string, unknown> = {}) => ({
 export const API_UM_ALUNO = {
   encontrado: true,
   ambiguo: false,
-  alunos: [{ id: 101, nome: "Joana Ficticia Souza", situacao_financeira: "Adimplente", matriculas: [matricula()] }],
+  match_type: "exact",
+  alunos: [
+    {
+      id: 101,
+      nome: "Joana Ficticia Souza",
+      situacao_financeira: "Adimplente",
+      matriculas: [matricula()],
+      matched_contact_field: "numero_contato",
+    },
+  ],
+};
+
+/**
+ * A API ANTIGA casava pelos 8 últimos dígitos e não mandava `match_type`: quem escreve do
+ * (11) 9 9999-1234 recebia este aluno cadastrado no (61) 9 9999-1234.
+ */
+export const API_ANTIGA_POR_SUFIXO = {
+  encontrado: true,
+  ambiguo: false,
+  alunos: [{ id: 301, nome: "Aluno De Outro Ddd", situacao_financeira: "Pendente", matriculas: [matricula()] }],
 };
 
 /** Responsável com dois filhos no mesmo número. */
 export const API_DOIS_ALUNOS = {
   encontrado: true,
   ambiguo: true,
+  match_type: "exact",
   alunos: [
     { id: 201, nome: "Pedro Ficticio Lima", situacao_financeira: "Pendente", matriculas: [matricula({ turma: "PROG-T1" })] },
     {
@@ -53,7 +73,7 @@ export const API_DOIS_ALUNOS = {
   ],
 };
 
-export const API_NAO_ENCONTRADO = { encontrado: false, alunos: [] };
+export const API_NAO_ENCONTRADO = { encontrado: false, match_type: "exact", alunos: [] };
 
 /**
  * Palavras-chave de passagem DO AGENTE (campo "palavras que chamam uma pessoa" da versão).

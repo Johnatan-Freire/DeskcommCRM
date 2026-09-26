@@ -107,19 +107,34 @@ const alunoSchema = z.object({
   nome: z.string().min(1),
   situacao_financeira: z.string(),
   matriculas: z.array(matriculaSchema),
+  /**
+   * QUAL campo de contato do cadastro casou (`numero_contato` | `numero_contato2`). Só o nome
+   * do campo — nenhum dos dois significa "telefone do responsável" no sistema escolar. Fica
+   * disponível para um futuro resolvedor de identidade e NÃO vai ao modelo (ver
+   * `semIdentificadorInterno`).
+   */
+  matched_contact_field: z.string().optional(),
 });
 
 const respostaAlunoPorTelefoneSchema = z.object({
   encontrado: z.boolean(),
   ambiguo: z.boolean().optional(),
+  /**
+   * "exact" = o sistema escolar casou pelo NÚMERO COMPLETO normalizado. Versões antigas da
+   * API casavam pelos 8 últimos dígitos (DDDs diferentes colidiam) e não mandam o campo:
+   * `selecionarAluno` trata a ausência como correspondência NÃO confirmada.
+   */
+  match_type: z.string().optional(),
   alunos: z.array(alunoSchema),
 });
 
-export type AlunoSistemaEscolar = Omit<z.infer<typeof alunoSchema>, "id">;
+export type AlunoSistemaEscolar = Omit<z.infer<typeof alunoSchema>, "id" | "matched_contact_field">;
 export type RespostaAlunoPorTelefone = z.infer<typeof respostaAlunoPorTelefoneSchema>;
 
 export type ResultadoSelecaoAluno =
   | { status: "nao_encontrado" }
+  /** A API achou alguém, mas não afirmou casamento pelo número completo — nada sai. */
+  | { status: "correspondencia_nao_confirmada" }
   | { status: "ambiguo"; quantidade: number }
   | { status: "nome_nao_encontrado" }
   | { status: "encontrado"; aluno: AlunoSistemaEscolar };
@@ -127,7 +142,7 @@ export type ResultadoSelecaoAluno =
 function semIdentificadorInterno(
   aluno: RespostaAlunoPorTelefone["alunos"][number],
 ): AlunoSistemaEscolar {
-  const { id: _id, ...dadosPublicos } = aluno;
+  const { id: _id, matched_contact_field: _campo, ...dadosPublicos } = aluno;
   return dadosPublicos;
 }
 
@@ -152,6 +167,12 @@ export function selecionarAluno(
 ): ResultadoSelecaoAluno {
   if (!resposta.encontrado || resposta.alunos.length === 0) {
     return { status: "nao_encontrado" };
+  }
+
+  // Falha FECHADA contra a API antiga (casamento por sufixo): sem a garantia de número
+  // completo, os dados podem ser de um aluno de outro DDD. Nenhum dado sai, nem a contagem.
+  if (resposta.match_type !== "exact") {
+    return { status: "correspondencia_nao_confirmada" };
   }
 
   if (resposta.alunos.length === 1) {
