@@ -63,7 +63,13 @@ jobs:
               "create extension if not exists vector with schema public; create extension if not exists citext with schema public; create extension if not exists pg_trgm with schema public;" \
               >/dev/null 2>&1 || true
 
-            if reaplicar_baseline supabase/baseline.sql /tmp/deploy-baseline.log; then
+            # Caminho ABSOLUTO: `reaplicar_baseline` monta o arquivo como volume
+            # (`docker run -v "$arquivo:/b.sql"`), e o Docker trata caminho
+            # relativo como NOME de volume — "includes invalid characters for a
+            # local volume name". Medido no primeiro deploy real deste passo
+            # (2026-09-26): falhou fechado, sem aplicar nada e sem subir
+            # contêiner. update.sh e install.sh sempre passaram "$PROJECT_DIR/…".
+            if reaplicar_baseline "$PROJECT_DIR/supabase/baseline.sql" /tmp/deploy-baseline.log; then
               echo "✓ baseline reaplicado sem erro real de schema (passadas: $BASELINE_PASSADAS)"
             else
               echo "::error::baseline.sql reaplicado com ERRO REAL de schema — deploy interrompido ANTES de subir os containers novos:"

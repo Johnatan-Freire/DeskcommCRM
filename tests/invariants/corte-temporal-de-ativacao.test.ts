@@ -169,10 +169,10 @@ describe("fn_ia_pode_responder_mensagem — a régua da mensagem", () => {
     const ativ = await ativacao();
     // O instante EXATO, em microssegundos — `Date` do JS truncaria para ms e
     // cairia antes da ativação.
-    const [{ exato }] = await q<{ exato: string }>("select service_enabled_at::text exato from ai_agents where id=$1", [AGENT]);
+    const exato = (await q<{ exato: string }>("select service_enabled_at::text exato from ai_agents where id=$1", [AGENT]))[0]!.exato;
     const ct = await contato();
     const cv = await conversa(ct);
-    expect(await pode(await msg(cv, ct, { sentAt: exato! }))).toBe("autorizado");
+    expect(await pode(await msg(cv, ct, { sentAt: exato }))).toBe("autorizado");
     expect(await pode(await msg(cv, ct, { sentAt: segundos(ativ, 1) }), AGENT)).toBe("autorizado");
   });
 
@@ -451,7 +451,7 @@ describe("fn_silencio_pode_reengajar — o incidente do 'Lead sem resposta'", ()
     expect(await silencio(cv), "encerrada, sem mensagem nova").toBe("conversa_encerrada");
     const nova = await msg(cv, ct, { sentAt: segundos(new Date(), 2), body: "voltei, ainda tem vaga?" });
     expect(await pode(nova, AGENT), "a mensagem nova pode ser respondida").toBe("autorizado");
-    const [{ status }] = await q<{ status: string }>("select status from conversations where id=$1", [cv]);
+    const status = (await q<{ status: string }>("select status from conversations where id=$1", [cv]))[0]!.status;
     expect(status, "a mensagem nova reabre a conversa (semântica do produto)").not.toBe("closed");
     await msg(cv, ct, { direction: "outbound", sentVia: "ai", sentAt: segundos(new Date(), 3), body: "Tem sim!" });
     expect(await silencio(cv)).toBe("autorizado");

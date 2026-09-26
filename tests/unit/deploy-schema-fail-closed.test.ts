@@ -66,7 +66,17 @@ describe("deploy.yml — erro real de schema derruba o deploy (fail-closed)", ()
     const bloco = extrairPassoDeSchema();
     expect(bloco).toContain("source hostgator-setup-kit/_common.sh");
     expect(bloco).toContain("enter_project");
-    expect(bloco).toContain("reaplicar_baseline supabase/baseline.sql");
+    expect(bloco).toContain('reaplicar_baseline "$PROJECT_DIR/supabase/baseline.sql"');
+  });
+
+  it("o baseline vai por caminho ABSOLUTO — relativo o Docker lê como nome de volume e o deploy morre", () => {
+    // Medido no 1º deploy real (2026-09-26): `reaplicar_baseline supabase/baseline.sql`
+    // → docker: "supabase/baseline.sql" includes invalid characters for a local
+    // volume name. A versão anterior DESTE teste exigia exatamente essa linha.
+    const bloco = extrairPassoDeSchema();
+    const chamada = bloco.split("\n").find((l) => /if reaplicar_baseline /.test(l)) ?? "";
+    const arg = chamada.replace(/.*if reaplicar_baseline\s+/, "").split(/\s+/)[0] ?? "";
+    expect(arg, `argumento do baseline: ${arg}`).toMatch(/^"?(\$PROJECT_DIR\/|\/)/);
   });
 
   it("em erro real, sai com exit 1 ANTES do pull e do up -d dos containers", () => {
