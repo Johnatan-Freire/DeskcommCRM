@@ -9,7 +9,8 @@ despausar e ao trocar entre modo assistido e automático. Mensagem que aconteceu
 antes desse instante (pelo horário real do WhatsApp, não pelo horário em que
 chegou ao CRM) nunca dispara resposta automática. Isso vale para mensagem
 recebida durante uma pausa, histórico sincronizado, fila atrasada e reenvio de
-evento. Ao despausar, o agente atende só o que chegar dali em diante. Conversa
+evento. Ao despausar, o agente atende só o que chegar dali em diante. O aviso automático de "um atendente vai assumir", disparado quando
+o cliente demonstra insatisfação, segue a mesma regra. Conversa
 antiga continua podendo ser atendida quando o cliente manda mensagem nova, e o
 agente recebe o histórico dela para dar continuidade.
 

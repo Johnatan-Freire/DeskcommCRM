@@ -47,6 +47,12 @@ const SESSION_ID = "77777777-7777-4777-8777-777777777777";
 interface StubTables {
   messages: Record<string, unknown> | null;
   channel_sessions: Record<string, unknown> | null;
+  /**
+   * Resposta de `fn_ia_pode_responder_mensagem` (migration 0403). Ausente = a
+   * função SIMULADA a partir das tabelas: só o corte de conexão, com um agente
+   * no ar ativado há muito tempo — o cenário que este arquivo sempre mediu.
+   */
+  corte?: string | Error;
 }
 
 function makeAdminStub(tables: StubTables, queried: string[]) {
@@ -64,7 +70,16 @@ function makeAdminStub(tables: StubTables, queried: string[]) {
     queried.push(table);
     return chain;
   };
-  return { from };
+  const rpc = async (name: string) => {
+    queried.push(`rpc:${name}`);
+    if (tables.corte instanceof Error) return { data: null, error: { message: tables.corte.message } };
+    if (tables.corte !== undefined) return { data: tables.corte, error: null };
+    const conectou = tables.channel_sessions?.first_connected_at as string | null | undefined;
+    const enviada = tables.messages?.sent_at as string | undefined;
+    const antes = conectou != null && enviada !== undefined && new Date(enviada) < new Date(conectou);
+    return { data: antes ? "anterior_a_conexao" : "autorizado", error: null };
+  };
+  return { from, rpc };
 }
 
 function msgRow(sentAt: string) {
@@ -130,5 +145,32 @@ describe("corte de conexão (migration 0398) — ai-sentiment-worker", () => {
     const result = await processSentiment(eventRow);
 
     expect(result.reason).not.toBe("message_before_connection");
+  });
+});
+
+describe("corte de ATIVAÇÃO (migration 0403) — o aviso ao lead também respeita", () => {
+  it.each(["anterior_a_ativacao", "nenhum_agente_no_ar", "agente_fora_do_ar", "ativacao_desconhecida"])(
+    "motivo '%s': skip ANTES do LLM e do agente — nenhum aviso sai",
+    async (corte) => {
+      const queried: string[] = [];
+      vi.mocked(createAdminClient).mockReturnValue(
+        makeAdminStub({ messages: msgRow(new Date().toISOString()), channel_sessions: null, corte }, queried) as never,
+      );
+      const result = await processSentiment(eventRow);
+      expect(result).toEqual({ skipped: true, reason: `fora_do_corte_de_ativacao:${corte}` });
+      expect(queried).not.toContain("ai_agents");
+    },
+  );
+
+  it("erro ao consultar o corte: skip (fail-closed), nunca classifica", async () => {
+    const queried: string[] = [];
+    vi.mocked(createAdminClient).mockReturnValue(
+      makeAdminStub(
+        { messages: msgRow(new Date().toISOString()), channel_sessions: null, corte: new Error("db down") },
+        queried,
+      ) as never,
+    );
+    expect(await processSentiment(eventRow)).toEqual({ skipped: true, reason: "corte_de_ativacao_indeterminado" });
+    expect(queried).not.toContain("ai_agents");
   });
 });

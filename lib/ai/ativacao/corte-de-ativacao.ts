@@ -90,6 +90,20 @@ export function iaPodeResponderMensagem(
   ]);
 }
 
+/** Mesma pergunta de `iaPodeResponderMensagem`, pelo client Supabase (workers do app). */
+export function iaPodeResponderMensagemViaSupabase(
+  admin: SupabaseClient,
+  organizationId: string,
+  messageId: string,
+  agentId: string | null,
+): Promise<MotivoDoCorteDeMensagem> {
+  return viaRpc(admin, "fn_ia_pode_responder_mensagem", {
+    p_org: organizationId,
+    p_message: messageId,
+    p_agent: agentId,
+  });
+}
+
 /** O silêncio desta conversa pode virar um reengajamento automático? */
 export function silencioPodeReengajarViaSupabase(
   admin: SupabaseClient,

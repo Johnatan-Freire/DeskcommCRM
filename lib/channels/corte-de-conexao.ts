@@ -16,10 +16,11 @@
  *
  * `lib/agent-engine/edge/crm/drain.ts` não usa este helper: consulta
  * `fn_ia_pode_responder_mensagem` (migration 0403), que aplica este mesmo
- * corte de conexão E o corte de ativação do agente. Todo outro consumidor de `message.received`/mensagem inbound que
+ * corte de conexão E o corte de ativação do agente — e o mesmo vale para
+ * `workers/ai-sentiment-worker.ts`, cujo aviso ao lead é IA falando. Todo outro consumidor de `message.received`/mensagem inbound que
  * possa causar um envio real ao contato usa este helper:
  * `workers/ai-response-worker.ts` (guard próprio, anterior a este arquivo),
- * `workers/ai-sentiment-worker.ts`, `lib/automation/engine.ts`,
+ * `lib/automation/engine.ts`,
  * `lib/followup/reactivity.ts`, `lib/followup/aplicar-inbound.ts`.
  */
 import type { SupabaseClient } from "@supabase/supabase-js";

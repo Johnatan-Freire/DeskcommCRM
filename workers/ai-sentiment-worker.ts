@@ -24,7 +24,7 @@ import { DEFAULT_CLASSIFIER_MODEL, isAiGatewayConfigured } from "@/lib/ai/gatewa
 import { resolverModeloDoPonto } from "@/lib/ai/gateway-binding";
 import { logInvocation } from "@/lib/ai/log-invocation";
 import { SENTIMENT_SYSTEM_PROMPT } from "@/lib/ai/prompts/sentiment";
-import { mensagemAnteriorAConexao } from "@/lib/channels/corte-de-conexao";
+import { AUTORIZADO, iaPodeResponderMensagemViaSupabase } from "@/lib/ai/ativacao/corte-de-ativacao";
 import type { EventRow } from "@/lib/event-log/dispatcher";
 import { createAdminClient } from "@/lib/supabase/admin";
 
@@ -129,8 +129,23 @@ export async function processSentiment(event: EventRow): Promise<SentimentResult
     // publicado. Sem este corte, uma reclamação de meses atrás classificada
     // como sentimento negativo mandaria "um atendente vai assumir a
     // conversa" para um contato que não escreveu nada agora.
-    if (await mensagemAnteriorAConexao(admin, event.organization_id, messageId)) {
+    //
+    // CORTE DE ATIVAÇÃO (migration 0403): o mesmo aviso ao lead também não
+    // pode sair para mensagem de ANTES de a IA ser ligada — nem com o agente
+    // pausado, despublicado ou inexistente. É IA falando com o lead; a régua é
+    // a MESMA do drain e do turno (`fn_ia_pode_responder_mensagem`, que já
+    // inclui o corte de conexão acima). Fail-closed: erro de leitura → pula.
+    let corte: string;
+    try {
+      corte = await iaPodeResponderMensagemViaSupabase(admin, event.organization_id, messageId, null);
+    } catch {
+      return { skipped: true, reason: "corte_de_ativacao_indeterminado" };
+    }
+    if (corte === "anterior_a_conexao") {
       return { skipped: true, reason: "message_before_connection" };
+    }
+    if (corte !== AUTORIZADO) {
+      return { skipped: true, reason: `fora_do_corte_de_ativacao:${corte}` };
     }
 
     // ── Guard: elegibilidade da IA ────────────────────────────────────────
