@@ -408,6 +408,12 @@ describe("catraca: ninguém mais repete o namespace", () => {
       // árvores do repo, com o gate delas próprio.
       "evidence",
       ".claude",
+      // Worktrees aninhados de OUTRAS branches (`git worktree add .worktrees/<b>`) — a
+      // mesma razão do `.claude/worktrees/` acima, e o mesmo corte que `vitest.config.ts`
+      // já faz na descoberta de testes. Sem ele, uma branch viva de outra sessão deixava
+      // esta catraca vermelha com arquivos que não são desta árvore (medido: 7 arquivos
+      // de `.worktrees/convite-proximo-passo`, nenhum no diff).
+      ".worktrees",
     ].map((d) => `--exclude-dir=${d}`);
     // `.bak`/`.orig`/`.rej`/`~` são sobra de editor e de `sed -i.bak`. Sem isto,
     // uma sabotagem local deixa o gate vermelho pelo motivo errado.
