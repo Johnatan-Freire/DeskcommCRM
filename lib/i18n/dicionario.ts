@@ -7706,6 +7706,21 @@ export const DICIONARIO: Traducoes = {
   "Sem atividade no período (ganhos/perdidos, conversas ou respostas).": { es: "Sin actividad en el período (ganados/perdidos, conversaciones o respuestas)." },
   "1ª resposta (média)": { es: "1ª respuesta (promedio)" },
   "Atrito, funil e performance por atendente nos últimos 30 dias.": { es: "Fricción, embudo y rendimiento por asesor en los últimos 30 días." },
+  "Nenhuma perda na janela.": { es: "Ninguna pérdida en la ventana." },
+  "Negócios": { es: "Negocios" },
+  "Erro ao carregar o relatório de perdas.": { es: "Error al cargar el informe de pérdidas." },
+  "Perdas": { es: "Pérdidas" },
+  "Por motivo, categoria e etapa de saída — quantidade e valor por moeda.": { es: "Por motivo, categoría y etapa de salida — cantidad y valor por moneda." },
+  "Cortado no limite de leitura.": { es: "Cortado en el límite de lectura." },
+  "Valor por moeda": { es: "Valor por moneda" },
+  "Moedas nunca são somadas entre si: cada balde é o total da própria moeda.": { es: "Las monedas nunca se suman entre sí: cada grupo es el total de su propia moneda." },
+  "Sem categoria": { es: "Sin categoría" },
+  "Por motivo": { es: "Por motivo" },
+  "Por categoria": { es: "Por categoría" },
+  "Por etapa de saída": { es: "Por etapa de salida" },
+  "Sem motivo registrado": { es: "Sin motivo registrado" },
+  "Etapa desconhecida": { es: "Etapa desconocida" },
+  "sem moeda": { es: "sin moneda" },
   "Atrito, seu funil e sua performance nos últimos 30 dias.": { es: "Fricción, tu embudo y tu rendimiento en los últimos 30 días." },
   "Nenhuma demanda em risco": { es: "Ningún caso en riesgo" },
   "Toda demanda aberta teve atividade recente ou já tem um retorno agendado.": { es: "Todos los casos abiertos tuvieron actividad reciente o ya tienen un seguimiento programado." },
@@ -11907,6 +11922,34 @@ export const DICIONARIO: Traducoes = {
   "Comandos pelo celular ligados — já valem no próximo atendimento.":
     { es: "Comandos desde el celular activados — ya valen en la próxima atención." },
   "Comandos pelo celular desligados.": { es: "Comandos desde el celular desactivados." },
+  // ─── PREVISÃO PONDERADA DO FUNIL (issue #1535) ───
+  "Previsão": { es: "Previsión" },
+  "Ponderado": { es: "Ponderado" },
+  "ponderado": { es: "ponderado" },
+  "Bruto": { es: "Bruto" },
+  "bruto": { es: "bruto" },
+  "Chance de fechamento (0 a 100)": { es: "Probabilidad de cierre (0 a 100)" },
+  "A chance de fechamento vai de 0 a 100.": { es: "La probabilidad de cierre va de 0 a 100." },
+  "Etapa de fechamento ou de perda: a chance vale 100 e 0 na regra, sem calibração.": {
+    es: "Etapa de cierre o de pérdida: la probabilidad vale 100 y 0 en la regla, sin calibración.",
+  },
+  "Chance de fechamento definida em cada etapa do funil.": {
+    es: "Probabilidad de cierre definida en cada etapa del embudo.",
+  },
+  "Chance vinda da inteligência artificial quando existe, e da etapa quando não.": {
+    es: "Probabilidad que viene de la inteligencia artificial cuando existe, y de la etapa cuando no.",
+  },
+  "Nenhum negócio aberto com valor neste funil.": {
+    es: "Ningún negocio abierto con valor en este embudo.",
+  },
+  "Sem data prevista — entram, mas sem mês no cronograma": {
+    es: "Sin fecha prevista — entran, pero sin mes en el cronograma.",
+  },
+  "Sem chance definida na etapa — falta calibrar": {
+    es: "Sin probabilidad definida en la etapa — falta calibrar.",
+  },
+  "Erro ao carregar a previsão.": { es: "Error al cargar la previsión." },
+  "Falha ao calcular a previsão do funil.": { es: "No se pudo calcular la previsión del embudo." },
 };
 
 /**

@@ -52,7 +52,7 @@ export interface DepsDeEtapa {
 
 /** As colunas que a tela e as regras usam. `position` entra: a reordenação calcula em cima dela. */
 const COLUNAS =
-  "id, name, slug, position, is_won, is_lost, is_archived, agent_stage_hint, last_change_actor_kind, last_change_at, service_policy, exit_locked";
+  "id, name, slug, position, is_won, is_lost, is_archived, win_probability, agent_stage_hint, last_change_actor_kind, last_change_at, service_policy, exit_locked";
 
 /** A etapa como sai para quem lê — inclui a autoria da última mudança de configuração. */
 export interface EtapaVisivel {
@@ -66,6 +66,14 @@ export interface EtapaVisivel {
   service_policy?: string;
   /** O card que entra não sai (0404). */
   exit_locked?: boolean;
+  /**
+   * Probabilidade de GANHO desta etapa, 0–100 (migration 0426). `null` = etapa
+   * sem calibração, e a previsão a reporta à parte em vez de somar zero.
+   *
+   * `is_won` e `is_lost` valem 100 e 0 NA REGRA (`lib/leads/previsao.ts`),
+   * não aqui: gravar seria um segundo lugar para a mesma verdade divergir.
+   */
+  win_probability: number | null;
   /** `user` | `ai` | `system` — `null` nas etapas anteriores a esta coluna. */
   last_change_actor_kind: string | null;
   last_change_at: string | null;
@@ -126,6 +134,7 @@ export function corpo(etapas: EtapaLida[]): { etapas: EtapaVisivel[] } {
         is_lost: e.is_lost,
         service_policy: e.service_policy ?? "comercial",
         exit_locked: e.exit_locked ?? false,
+        win_probability: e.win_probability ?? null,
         last_change_actor_kind: e.last_change_actor_kind ?? null,
         last_change_at: e.last_change_at ?? null,
       })),
@@ -284,6 +293,13 @@ export interface PedidoDeEdicao {
   is_won?: boolean;
   is_lost?: boolean;
   /**
+   * Probabilidade de ganho da etapa, 0–100 (migration 0426). `null` limpa a
+   * calibração — e a previsão volta a reportar a etapa no balde "sem
+   * probabilidade". Ganho e perda NÃO aceitam número: valem 100 e 0 na regra,
+   * nunca gravado.
+   */
+  win_probability?: number | null;
+  /**
    * O vizinho da ESQUERDA (`null` = primeira coluna), não um número de posição:
    * quem arrasta a coluna sabe onde ela caiu, não qual fração de `position` isso
    * vira. Mandar o número duplicaria a conta que `posicaoEntre` já faz — e as
@@ -340,6 +356,19 @@ export async function atualizarEtapa(
     }
   }
 
+  if (pedido.win_probability !== undefined && pedido.win_probability !== null) {
+    const p = pedido.win_probability;
+    if (!Number.isInteger(p) || p < 0 || p > 100) {
+      throw new ApiError(
+        422,
+        "unprocessable_entity",
+        undefined,
+        deps.requestId,
+        "A probabilidade de ganho de uma etapa vai de 0 a 100.",
+      );
+    }
+  }
+
   const temMarcacao = pedido.is_won !== undefined || pedido.is_lost !== undefined;
   if (temMarcacao) {
     const veredito = validarMarcacao(etapas, stageId, pedido);
@@ -369,10 +398,13 @@ export async function atualizarEtapa(
     position?: number;
     service_policy?: PoliticaDeEtapa;
     exit_locked?: boolean;
+    win_probability?: number | null;
   } = {};
   if (pedido.name !== undefined) patchDoAlvo.name = pedido.name.trim();
   if (pedido.service_policy !== undefined) patchDoAlvo.service_policy = pedido.service_policy;
   if (pedido.exit_locked !== undefined) patchDoAlvo.exit_locked = pedido.exit_locked;
+  // `undefined` não viaja; `null` limpa a calibração de propósito.
+  if (pedido.win_probability !== undefined) patchDoAlvo.win_probability = pedido.win_probability;
 
   if (pedido.depois_de !== undefined) {
     // Só as ativas compõem a régua: arquivada não ocupa lugar no quadro.

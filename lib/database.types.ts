@@ -4646,6 +4646,7 @@ export type Database = {
           external_id: string | null
           id: string
           last_activity_at: string | null
+          lost_from_stage_id: string | null
           lost_reason: string | null
           won_reason: string | null
           organization_id: string
@@ -4687,6 +4688,7 @@ export type Database = {
           pipeline_id: string
           position_in_stage?: number
           retomado_de_lead_id?: string | null
+          lost_from_stage_id?: string | null
           source?: string
           source_metadata?: Json
           stage_changed_at?: string | null
@@ -4719,6 +4721,7 @@ export type Database = {
           pipeline_id?: string
           position_in_stage?: number
           retomado_de_lead_id?: string | null
+          lost_from_stage_id?: string | null
           source?: string
           source_metadata?: Json
           stage_changed_at?: string | null
@@ -4761,6 +4764,13 @@ export type Database = {
           {
             foreignKeyName: "crm_leads_stage_id_fkey"
             columns: ["stage_id"]
+            isOneToOne: false
+            referencedRelation: "crm_stages"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "fk_crm_leads_lost_from_stage"
+            columns: ["lost_from_stage_id"]
             isOneToOne: false
             referencedRelation: "crm_stages"
             referencedColumns: ["id"]
@@ -4845,6 +4855,7 @@ export type Database = {
           requires_human: boolean
           slug: string
           updated_at: string
+          win_probability: number | null
         }
         Insert: {
           service_policy?: string
@@ -4867,6 +4878,7 @@ export type Database = {
           requires_human?: boolean
           slug: string
           updated_at?: string
+          win_probability?: number | null
         }
         Update: {
           service_policy?: string
@@ -4889,6 +4901,7 @@ export type Database = {
           requires_human?: boolean
           slug?: string
           updated_at?: string
+          win_probability?: number | null
         }
         Relationships: [
           {
