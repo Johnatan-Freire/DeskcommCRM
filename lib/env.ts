@@ -222,6 +222,11 @@ const schema = z.object({
   TRANSCRIPTION_API_KEY: z.string().optional().default(""),
   TRANSCRIPTION_BASE_URL: z.string().optional().default(""),
   TRANSCRIPTION_MODEL: z.string().optional().default(""),
+  // Idiomas esperados no áudio, ISO-639-1 separados por vírgula ("es" ou
+  // "pt,es"). Vazio = o serviço detecta sozinho. Vale com a chave acima E com a
+  // da OpenAI da organização — assim como `TRANSCRIPTION_MODEL`. Leitura
+  // tolerante em `idiomasDaTranscricao` (grafia errada não derruba o worker).
+  TRANSCRIPTION_LANGUAGES: z.string().optional().default(""),
   // Destinos internos que o DONO DA INSTALAÇÃO autoriza (decisão 22-d, #1004):
   // IPv4 e faixas CIDR IPv4 que a saída pode alcançar mesmo sendo rede interna,
   // e só para destinos que a própria INSTALAÇÃO configura (nunca o endereço que
