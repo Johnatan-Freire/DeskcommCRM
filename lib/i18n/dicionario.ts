@@ -2711,6 +2711,7 @@ export const DICIONARIO: Traducoes = {
   "Linha do tempo do aprendizado": { es: "Línea de tiempo del aprendizaje" },
   "Marcar resolvido": { es: "Marcar resuelto" },
   "Marcar todos resolvidos": { es: "Marcar todos como resueltos" },
+  "Os mais graves primeiro; entre iguais, os mais recentes.": { es: "Los más graves primero; entre iguales, los más recientes." },
   "Não foi possível resolver todos os avisos. Confira a lista e tente novamente.": {
     es: "No se pudieron resolver todos los avisos. Revisa la lista e inténtalo de nuevo.",
   },
