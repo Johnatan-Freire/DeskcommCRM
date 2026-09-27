@@ -361,7 +361,7 @@ it("anti-backlog: ordena a última inbound por coalesce(sent_at, created_at), n�
 });
 
 /**
- * Corte de conexão (migration 0398): WAHA/NOWEB sincroniza histórico do
+ * Corte de conexão (migration 0398): o canal sincroniza histórico do
  * WhatsApp ao parear uma sessão nova, e o mesmo webhook que entrega mensagem
  * NOVA entrega a ANTIGA também. `channel_sessions.first_connected_at` é o
  * corte; mensagem com `sent_at` (horário REAL do WhatsApp) anterior a ele
@@ -403,7 +403,7 @@ function poolComCorte(
 
 const CONECTOU_EM = '2026-09-21T10:00:00.000Z';
 
-it('mensagem anterior à conexão (histórico sincronizado pelo WAHA): turno NÃO é enfileirado', async () => {
+it('mensagem anterior à conexão (histórico sincronizado pelo canal): turno NÃO é enfileirado', async () => {
   const calls: string[] = [];
   await drainTick(
     poolComCorte(
