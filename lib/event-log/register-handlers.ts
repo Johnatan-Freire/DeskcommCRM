@@ -19,6 +19,7 @@ import { campanhaRespostaHandler } from "@/lib/campanhas/resposta.handler";
 import { followupGatilhoEtapaHandler } from "@/lib/followup/gatilho-etapa.handler";
 import { followupGatilhoLeadHandler } from "@/lib/followup/gatilho-lead.handler";
 import { followupGatilhoCasoHandler } from "@/lib/followup/gatilho-caso.handler";
+import { casoNaCentralHandler } from "@/lib/escalacao/caso-na-central.handler";
 import { mediaPersistHandler } from "@/workers/media-persist-worker.handler";
 import { mediaDeriveHandler } from "@/workers/media-derive-worker.handler";
 import { webPushInboundHandler } from "@/lib/notifications/push.handler";
@@ -55,6 +56,10 @@ export function ensureHandlersRegistered(): void {
   registerHandler(avisoDeEtapaHandler);
   registerHandler(followupGatilhoLeadHandler);
   registerHandler(followupGatilhoCasoHandler);
+  // O caso aberto na Central, na hora — escrita curta no banco (um item), ao
+  // lado do outro consumidor de `ai.case_opened` que só escreve no banco, e
+  // longe do aviso ao suporte, que sai por rede de terceiro.
+  registerHandler(casoNaCentralHandler);
   registerHandler(followupGatilhoPresencaHandler);
   registerHandler(mediaPersistHandler);
   registerHandler(mediaDeriveHandler);

@@ -395,6 +395,14 @@
       "sublabel": "consome ai.case_opened/closed — nunca devolve error, nunca dorme"
     },
     {
+      "id": "casoNaCentral",
+      "lane": "motor",
+      "col": 5,
+      "type": "lib",
+      "label": "lib/escalacao/caso-na-central.handler.ts",
+      "sublabel": "o caso que espera uma pessoa entra no sino na abertura; sai quando fecha"
+    },
+    {
       "id": "avisoSuporteTexto",
       "lane": "regra",
       "col": 4,
@@ -1151,6 +1159,24 @@
       "from": "presenca_coluna",
       "to": "availability",
       "label": "selo presente/ausente na Equipe"
+    },
+    {
+      "id": "e121",
+      "from": "casos",
+      "to": "casoNaCentral",
+      "label": "ai.case_opened / ai.case_closed pelo event_log (o mesmo trigger da 0148)"
+    },
+    {
+      "id": "e122",
+      "from": "casoNaCentral",
+      "to": "central",
+      "label": "abre kind='other' → agent_case com texto genérico; resolve quando o caso fecha"
+    },
+    {
+      "id": "e123",
+      "from": "central",
+      "to": "chamados",
+      "label": "o botão do aviso abre /app/ai/cases?caso=<id> — a pessoa responde o caso"
     }
   ],
   "cards": [
