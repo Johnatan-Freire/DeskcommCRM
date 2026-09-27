@@ -92,7 +92,13 @@ if [ "$MIG" -gt 0 ]; then
     fi
     COMPL_REFS="$(pop_refs_de_outrem "$COMPL_BASE" 2>/dev/null || true)"
     [ -n "${COMPL_REFS// /}" ] || COMPL_REFS="HEAD"
-    COMPL_POP="$(pop_migrations $COMPL_REFS 2>/dev/null || true)"
+    # A cabeça do PR entra SEMPRE, e sem ela a duplicata DENTRO do próprio PR
+    # sumia da conta — nenhum dos dois arquivos acusava o outro. É o `$SHA` (a
+    # cabeça que o gh devolveu), e não o HEAD: a triagem roda este script do
+    # PRÓPRIO clone, sem checkout do PR (TRIAGEM.md §4), e lá o HEAD é a branch
+    # de quem tria. O HEAD só entra quando o gh não devolveu cabeça. O `grep -vE`
+    # que tira o próprio arquivo continua abaixo, e o irmão não é ele.
+    COMPL_POP="$(pop_migrations $COMPL_REFS "${SHA:-HEAD}" 2>/dev/null || true)"
   else
     COMPL_BASE="origin/main"; COMPL_POP=""
   fi

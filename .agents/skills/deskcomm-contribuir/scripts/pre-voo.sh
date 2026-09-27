@@ -128,7 +128,11 @@ else
   [ -n "${pop_refs// /}" ] || pop_refs="HEAD"
   pop_migs=""
   if declare -F pop_migrations >/dev/null 2>&1; then
-    pop_migs="$(pop_migrations $pop_refs 2>/dev/null || true)"
+    # O HEAD entra SEMPRE: `pop_refs_de_outrem` tira a ref cujo SHA é o do HEAD,
+    # e sem devolvê-lo aqui a migration que a PRÓPRIA branch já commitou sumia da
+    # conta — o próximo NNNN apontava para o número que a branch já usava. O
+    # próprio arquivo não é acusado: o `grep -vE` abaixo o tira.
+    pop_migs="$(pop_migrations $pop_refs HEAD 2>/dev/null || true)"
   else
     # Sem a biblioteca, a lista é a de sempre: "<ref> <nome>", montada na mão,
     # para o `grep` de baixo achar a mesma coisa que achava antes.
