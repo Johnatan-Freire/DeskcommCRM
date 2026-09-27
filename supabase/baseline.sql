@@ -38901,13 +38901,16 @@ comment on column public.crm_leads.won_reason is
 
 -- ---- a retenção de mídia passa a existir (migration 0432) ----
 -- ---- a fila de remoção de mídia deixa de ser eterna (migration 0434) ----
+-- ---- a contagem do expurgo volta para o retorno (migration 0435) ----
 -- Ver o cabeçalho das DUAS migrations: a 0432 enfileira arquivo vencido e
 -- órfão na mesma fila da LGPD (o cron storage-redaction remove pelo Storage
 -- API); a 0434 (#1739) reabre `deleted`/`skipped` quando o mesmo caminho
--- volta a existir e expurga linha `deleted` com mais de 90 dias. O corpo
--- abaixo é a 0434 EDITADA NO LUGAR — ele tem de casar com o da migration,
--- senão quem instala pelo kit self-host fica com outra função de quem
--- aplica a cadeia (apendice-do-baseline-nao-diverge-da-cadeia).
+-- volta a existir e expurga linha `deleted` com mais de 90 dias; a 0435
+-- (#1765) devolve a contagem desse expurgo, que antes não aparecia nem no
+-- retorno nem na trilha. O corpo abaixo é a 0435 EDITADA NO LUGAR — ele tem
+-- de casar com o da última migration, senão quem instala pelo kit self-host
+-- fica com outra função de quem aplica a cadeia
+-- (apendice-do-baseline-nao-diverge-da-cadeia).
 create or replace function public.fn_enfileirar_midia_vencida(p_limite integer default 500)
 returns jsonb
 language plpgsql
@@ -38918,6 +38921,10 @@ declare
   v_lim integer := greatest(1, least(coalesce(p_limite, 500), 5000));
   v_vencidas integer := 0;
   v_orfas integer := 0;
+  -- O que o expurgo apagou NESTA chamada (#1765). Começa em 0 para que a
+  -- rodada sem nada a expurgar devolva 0 — e não null, que o cron somaria
+  -- como se fosse apagado.
+  v_expurgadas integer := 0;
   -- Janela do expurgo, em UM lugar só: é a constante que se muda amanhã.
   v_janela_deleted interval := interval '90 days';
 begin
@@ -38930,10 +38937,14 @@ begin
   --    ÚNICO registro por objeto de que a mídia do titular saiu do bucket — o
   --    worker só troca o `status` e nada audita a remoção física. Ela sai
   --    sozinha se o pedido for apagado (FK `on delete set null`).
+  --    O `GET DIAGNOSTICS` conta o que o DELETE apagou NESTA chamada (#1765):
+  --    sem ele a rodada que só expurgou é indistinguível, na trilha, da rodada
+  --    que não tinha o que fazer.
   delete from public.storage_redaction_queue
    where status = 'deleted'
      and request_id is null
      and coalesce(processed_at, enqueued_at) < now() - v_janela_deleted;
+  get diagnostics v_expurgadas = row_count;
 
   -- 1. VENCIDAS: arquivo de mensagem mais velho que a retenção da organização.
   --    A mensagem fica (texto, status, horário); só o arquivo sai, e a tela
@@ -39029,7 +39040,7 @@ begin
   )
   select count(*) into v_orfas from fila;
 
-  return jsonb_build_object('vencidas', v_vencidas, 'orfas', v_orfas);
+  return jsonb_build_object('vencidas', v_vencidas, 'orfas', v_orfas, 'expurgadas', v_expurgadas);
 end;
 $$;
 

@@ -147,7 +147,12 @@ describe("fn_enfileirar_midia_vencida — reenfileiramento (0434)", () => {
     // Nenhum dos dois órfãos entra (o filtro conta só linha EM CURSO como
     // «já na fila») e nenhum é reescrito; a única entrada é a vencida do
     // fixture, que nunca teve linha nenhuma.
-    expect(r).toEqual({ vencidas: 1, orfas: 0 });
+    // `expurgadas` entra no objeto esperado pela 0435 (#1765): `toEqual` do
+    // Vitest é exato EM CHAVE, e este congelado fiscaliza o retorno INTEIRO.
+    // Aqui é 0 porque o fixture desta rodada não tem linha `deleted` de
+    // retenção mais velha que 90 dias — a `pending` e a `failed` em curso não
+    // entram no expurgo, e é o que a própria linha 176 volta a medir depois.
+    expect(r).toEqual({ vencidas: 1, orfas: 0, expurgadas: 0 });
     expect(estado(AVATAR_PENDENTE)).toBe("pending|2|NULO|storage_remove_failed");
     expect(estado(AVATAR_FALHO)).toMatch(/^failed\|3\|[^N]/);
     expect(estado(AVATAR_FALHO).endsWith("|storage_remove_failed")).toBe(true);
@@ -173,7 +178,13 @@ describe("fn_enfileirar_midia_vencida — reenfileiramento (0434)", () => {
 
     const segunda = rodar();
 
-    expect(segunda).toEqual({ vencidas: 0, orfas: 0 });
+    // `expurgadas` entra no objeto esperado pela 0435 (#1765): `toEqual` do
+    // Vitest é exato EM CHAVE, e este congelado fiscaliza o retorno INTEIRO.
+    // Aqui é 0 pela lei que este arquivo mede: a linha desta rodada tem 40
+    // dias, longe da janela de 90 dias do expurgo, e quem a reabriu é o passo 1
+    // (a `do update` da 0434) — nada saiu da fila. A contagem diferente de zero
+    // é `poda-de-midia-contagem-do-expurgo.test.ts` que mede.
+    expect(segunda).toEqual({ vencidas: 0, orfas: 0, expurgadas: 0 });
     expect(naFila(MENSAGEM)).toBe(1);
     expect(estado(MENSAGEM)).toBe("pending|0|NULO|NULO");
   });
