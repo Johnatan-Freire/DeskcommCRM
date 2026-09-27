@@ -195,6 +195,11 @@ describe("pacote público (prompt genérico)", () => {
       "Passe de fato",
       "Você não vende cursos",
       "não peça o nome de novo",
+      "calendário",
+      "segunda chamada",
+      "use isso em vez de perguntar de novo",
+      "siga o que ela disse e não a contradiga",
+      "passe para uma pessoa",
     ]) {
       expect(prompt, regra).toContain(regra);
     }
