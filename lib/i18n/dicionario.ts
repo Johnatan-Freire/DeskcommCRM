@@ -37,6 +37,11 @@ import type { Idioma } from "./idiomas";
 type Traducoes = Record<string, Partial<Record<Exclude<Idioma, "pt-BR">, string>>>;
 
 export const DICIONARIO: Traducoes = {
+  // ─── BUSCA DENTRO DA CONVERSA (extraída do PR #1793) ───
+  "Resultados nas mensagens carregadas": { es: "Resultados en los mensajes cargados" },
+  "Buscar nesta conversa": { es: "Buscar en esta conversación" },
+  "Buscar nas mensagens carregadas": { es: "Buscar en los mensajes cargados" },
+  "Fechar busca": { es: "Cerrar búsqueda" },
   // ─── CAMPOS OBRIGATÓRIOS (issue #1536) ───
   "Campos obrigatórios": { es: "Campos obligatorios" },
   // Editor de `obrigatorio_em` no funil (CR do mantenedor no PR #1688).

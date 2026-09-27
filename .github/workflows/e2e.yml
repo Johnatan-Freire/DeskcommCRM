@@ -966,6 +966,7 @@ jobs:
         troca-de-organizacao-tem-volta.spec.ts
         organizacoes-criacao-convite-e-cache.spec.ts
         inbox-abas-espelham-o-comando.spec.ts
+        busca-na-conversa.spec.ts
         moeda-da-organizacao.spec.ts
         zona-de-perigo-apaga-dados-de-teste.spec.ts
         email-da-instalacao-pela-tela.spec.ts

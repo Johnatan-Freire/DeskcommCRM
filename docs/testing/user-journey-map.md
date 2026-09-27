@@ -2732,8 +2732,7 @@ mensagens e notas por timestamp e o auto-scroll traz o fim para a viewport — e
 passagem CALA a IA, ela é quase sempre o último evento quando a pessoa chega.
 
 **Achado desta onda, e não é do produto:** `docs/architecture/escalacao-ciclo-humano.architecture.json`
-estava na `main` da branch **com marcadores de conflito de merge commitados** (`<<<<<<< HEAD`
-nas linhas 422 e 910, do merge `f7523adc5`). O arquivo não era JSON válido e
+estava na `main` da branch **com marcadores de conflito de merge commitados** (`nas linhas 422 e 910, do merge `f7523adc5`). O arquivo não era JSON válido e
 `tests/unit/mapas-de-arquitetura.test.ts` estava **vermelho em 5 casos** desde então.
 Resolvido pela UNIÃO dos dois lados, com as arestas do lado `feat/casos-vivos` renumeradas
 (`e75`–`e83` → `e81`–`e89`) porque os ids colidiam. 121/121 depois.
@@ -2880,3 +2879,55 @@ que dirige o browser resolviam `E2E_PORT` para valores **diferentes** — servid
 `page.goto` em outra, e `ERR_CONNECTION_REFUSED` com um servidor saudável no ar. O CI nunca
 pisou nisso porque o gerador não escreve `E2E_PORT`; quem monta bancada em porta própria,
 sim. Consertado pela ordem: publicar primeiro, decidir a porta depois.
+<<<<<<< HEAD
+
+
+## Conversões de anúncios — reprocessamento
+
+[P1] `tests/e2e/conversoes-reprocessamento.spec.ts`: administrador abre Conversões sem credenciais opcionais, vê o que falta, identifica origem de uma venda pendente e agenda reprocessamento pela tela. A spec confere o evento exclusivo e captura screenshot; integra o CI. O teste não prova aceite/atribuição por contas reais de anúncios.
+
+### Conversões Google: captura e qualificação
+
+- [P1] `tests/e2e/conversoes-reprocessamento.spec.ts`: salvar captura Google pela tela, recarregar configuração, abrir endereço com wbraid e verificar a referência criada. Destino WhatsApp interceptado; não envia mensagem nem comprova atribuição externa.
+- Componentes: `tests/unit/conversoes-formularios.test.tsx` cobre escolha de etapa/ação, bloqueio da mesma ação de compra e formulário de captura.
+- Banco: `tests/invariants/conversoes-qualificacao-isolada.test.ts` cobre identificadores, isolamento da etapa, snapshot e reprocessamento por evento.
+- Piloto real ainda necessário: anúncio → mensagem → etapa → recibo e diagnóstico da plataforma.
+
+- Script do site: `tests/unit/script-do-site.test.ts` executa o JS distribuído, cobre navegação, filtros, storage bloqueado, links dinâmicos e exclusão. `tests/e2e/conversoes-reprocessamento.spec.ts` instala o snippet copiado da tela em uma página de teste, navega sem query e segue até a captura real, com WhatsApp interceptado.
+
+## J33 — Um roteiro de atendimento coleta dados e a ficha mostra `[P1]` (2026-09-24)
+
+Port do #1130 (@vgamkt), PR 3 de 4. Spec: `tests/e2e/fluxo-de-atendimento.spec.ts` (job e2e, parte 5).
+
+| Caso | Esperado |
+|---|---|
+| J33.1 | O dono do servidor liga «Fluxos de atendimento» em /admin/sistema e a chave fica gravada na instalação |
+| J33.2 | O gerente cria o roteiro em IA › Fluxos de atendimento; a paleta tem SÓ Início, Pergunta, Skill e Fim (medido no DOM) |
+| J33.3 | Palavra-gatilho no Início, uma Pergunta de CPF e uma de lista; publicar grava o gatilho na versão ativa |
+| J33.4 | Três mensagens pelo webhook do WAHA; a ficha mostra o roteiro «Concluído» com CPF e modelo (caixa medida por `boundingBox` e estilo computado) |
+
+**NÃO coberto por esta spec:** o turno do agente roda com o worker e o modelo de verdade — no CI não há nenhum dos dois, e a spec chama as mesmas funções do motor (`prepararRoteiroDoTurno`, `garantirPerguntaDoRoteiro`) com o validador devolvendo `indefinido`. A pergunta enviada ao cliente pelo WhatsApp e a leitura pelo validador de modelo ficam para a prova do PR 4.
+
+### Continuação de conversões: links nomeados (27/09/2026)
+
+- [P1] Configurações → Conversões → Links rastreáveis: criar, recarregar, editar/desativar, copiar link/script e verificar instalação.
+- Unidade: `tests/unit/links-rastreaveis.test.ts`, `tests/unit/links-rastreaveis-action.test.ts`, `tests/unit/script-do-site.test.ts` cobrem captura, fallback, tenant, MFA e compatibilidade.
+- Banco: `tests/invariants/links-rastreaveis-isolados.test.ts` cobre ACL e FK composta; execução local pendente por ausência de Docker.
+- Prova visual em ambiente fresco e envio real ao Google/Meta ainda pendentes; unitários não substituem estes aceites.
+
+## J34 — Achar uma mensagem dentro da conversa aberta `[P1]` (2026-09-27)
+
+Busca nas mensagens já carregadas (#1795, extraída do #1793 de @gustavorodcruz96).
+Spec: `tests/e2e/busca-na-conversa.spec.ts` (job e2e, parte 3; seed próprio: um
+canal e duas conversas, a B também contém o termo para o "não vaza" não passar por
+falta do que marcar). Evidência: `evidence/busca-na-conversa/` (gerada no job;
+o CI só publica artefato em falha). Medido no run 36309605444, parte 3, head
+`5ece7265f`: `✓ busca-na-conversa.spec.ts (8.8s)`, parte `90 passed`.
+
+| # | Caso | Expectativa | Resultado |
+|---|------|-------------|-----------|
+| J34.1 | A lupa não faz a barra de ações quebrar | `aria-expanded="false"`; fileiras da barra com a lupa = sem ela (1280px, `getBoundingClientRect`, filhos sem caixa fora da conta) | PASS — a lupa não acrescenta fileira: 2 com ela e 2 sem ela (contrafactual `display:none`); a barra já quebrava em 2 nesse estado (Arquivar desce) |
+| J34.2 | Clicar abre o campo com o foco | `searchbox` "Buscar nas mensagens carregadas" focado | PASS |
+| J34.3 | Termo em 2 de 4 mensagens (uma em maiúsculas) | contador "Resultados nas mensagens carregadas: 2"; as 2 bolhas com o anel no `box-shadow` COMPUTADO (`0 0 0 4px`, cor ≠ fundo), uma enviada e uma recebida; as outras 2 sem anel | PASS — anel `rgb(28, 26, 22) 0 0 0 4px` sobre recebida `rgb(245, 243, 238)` e enviada `rgb(80, 109, 72)`; sem anel nas outras |
+| J34.4 | Esc fecha | campo, contador e marcas somem; o foco volta à lupa | PASS |
+| J34.5 | Trocar de conversa pela lista, sem recarregar | a conversa B (que tem o termo) abre sem campo, sem contador e sem marca; abrir a busca nela começa vazia | PASS |
