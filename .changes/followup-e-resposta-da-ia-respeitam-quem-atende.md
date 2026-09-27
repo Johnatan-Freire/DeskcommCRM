@@ -30,3 +30,10 @@ deixa de inscrever contatos: não há agente dono da conversa para ele cobrar.
 Se você usa um fluxo de silêncio assim, só com texto fixo e sem agente, abra
 **IA › Agentes**, marque o fluxo no agente que atende essas conversas e
 publique a versão.
+
+Quem usa a integração com sistema escolar: o CRM passa a aceitar o aluno
+encontrado só quando o sistema escolar confirma que o telefone casou pelo
+**número completo** (versões antigas casavam pelos 8 últimos dígitos, e dois
+DDDs diferentes com o mesmo final colidiam). Atualize o sistema escolar
+**antes** do CRM. Com o CRM novo e o sistema escolar antigo, o agente não
+informa dado de aluno nenhum e passa a conversa para uma pessoa.
