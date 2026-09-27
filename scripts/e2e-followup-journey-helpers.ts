@@ -42,6 +42,7 @@ import {
   type TurnResult,
 } from "@/lib/followup/turn-bridge";
 import { carregarEnvLocal } from "../scripts/lib/env-de-teste";
+import { semearSilencioCobravel } from "../scripts/lib/e2e-silencio-cobravel";
 
 const env = carregarEnvLocal();
 
@@ -96,6 +97,12 @@ async function main(): Promise<void> {
       case "seed-silent-contact": {
         const thresholdMinutes = Number(args[0]);
         const tag = args[1] ?? "journey";
+        // [agentId] — o agente publicado que habilita o fluxo. COM ele, o silêncio é
+        // cobrável sob a régua atual (a IA dele fala por último — ver
+        // `scripts/lib/e2e-silencio-cobravel.ts`). SEM ele, só contato + conversa +
+        // inbound carimbado: é o que `gatilho-de-caso.spec.ts` precisa (caso aberto,
+        // não silêncio), e ali o agente ainda nem existe.
+        const agentId = args[2];
         if (!Number.isFinite(thresholdMinutes)) throw new Error("thresholdMinutes inválido");
         const creds = loadCreds();
         const fixtures = creds.followup_agent_fixtures;
@@ -117,25 +124,26 @@ async function main(): Promise<void> {
         );
         const conversationId = convRows[0]!.id;
 
-        // A MENSAGEM PRECISA EXISTIR, e carimbada — mesma correção feita em
-        // `e2e-elegibilidade-helpers.ts`, e pelo mesmo motivo.
-        //
-        // Esta fixture nasceu antes da fronteira do atendimento e criava o
-        // silêncio como um CAMPO (`last_inbound_at`), sem linha em `messages`.
-        // A varredura passou a exigir PROCEDÊNCIA: ela lê a mensagem inbound
-        // mais nova e o carimbo dela, porque é isso que separa "calado neste
-        // atendimento" de "calado desde outro". Sem a mensagem, a conversa é
-        // invisível para o gatilho e o contato nunca é enrolado.
-        //
-        // O carimbo não se escreve aqui: `fn_service_inbound` dispara no INSERT
-        // e o grava. Escrevê-lo à mão provaria a forma da linha, não o caminho.
-        await pool.query(
-          `insert into messages
-             (organization_id, conversation_id, channel_session_id, contact_id,
-              type, direction, status, sent_via, body, sent_at)
-           values ($1, $2, $3, $4, 'text', 'inbound', 'received', 'ai', 'Oi, tudo bem?', $5)`,
-          [creds.org_id, conversationId, fixtures.channel_session_id, contactId, lastInboundAt],
-        );
+        if (agentId) {
+          await semearSilencioCobravel(pool, {
+            dbUrl: DB_URL,
+            orgId: creds.org_id,
+            channelSessionId: fixtures.channel_session_id,
+            conversationId,
+            contactId,
+            agentId,
+            inboundAt: lastInboundAt,
+          });
+        } else {
+          // O carimbo do atendimento não se escreve aqui: `fn_service_inbound` dispara no INSERT.
+          await pool.query(
+            `insert into messages
+               (organization_id, conversation_id, channel_session_id, contact_id,
+                type, direction, status, sent_via, body, sent_at)
+             values ($1, $2, $3, $4, 'text', 'inbound', 'received', 'external_device', 'Oi, tudo bem?', $5)`,
+            [creds.org_id, conversationId, fixtures.channel_session_id, contactId, lastInboundAt],
+          );
+        }
 
         out({
           contactId,

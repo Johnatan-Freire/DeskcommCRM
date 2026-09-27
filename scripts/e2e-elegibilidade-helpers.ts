@@ -38,6 +38,7 @@ import pg from "pg";
 import { drainTick } from "@/lib/agent-engine/edge/crm/drain";
 import { createLogger } from "@/lib/agent-engine/obs/logger";
 import { carregarEnvLocal } from "../scripts/lib/env-de-teste";
+import { semearSilencioCobravel } from "../scripts/lib/e2e-silencio-cobravel";
 
 const env = carregarEnvLocal();
 
@@ -211,13 +212,25 @@ async function main(): Promise<void> {
         break;
       }
 
-      // ── seed-silent-contact <autorizado:0|1> <thresholdMinutes> ───────────
-      // Igual a seed-conversa mas com `last_inbound_at` mais VELHO que o
-      // threshold do gatilho de silêncio — o estado que a varredura de
-      // follow-up procura. (J20.12.)
+      // ── seed-silent-contact <autorizado:0|1> <thresholdMinutes> <agentId> [autorDaFala] ──
+      // O estado que a varredura de silêncio cobra, sob a régua ATUAL: o cliente
+      // escreveu há mais que o threshold, a IA RESPONDEU, e ele calou. (J20.12.)
+      //
+      // Esta fixture criava só o inbound. Duas regras posteriores a tornaram
+      // incobrável por construção, e o teste ficou esperando o comportamento velho:
+      //   · migration 0403 — o cliente falou por último = a empresa deve resposta
+      //     (`contato_aguardando_resposta`), e a mensagem tem de ser posterior à
+      //     ativação do agente e à conexão do número;
+      //   · dono da pendência (`lib/followup/origem-da-pendencia.ts`) — a última
+      //     fala da IA tem de ser de um agente que HABILITA o fluxo.
+      // `autorDaFala` (default: o próprio `agentId`) existe para o caso negativo:
+      // a fala de OUTRO agente não pode ser cobrada por este fluxo.
       case "seed-silent-contact": {
         const autorizado = args[0] === "1";
         const thresholdMinutes = Number(args[1] ?? "5");
+        const agentId = args[2];
+        const autorDaFala = args[3] ?? agentId;
+        if (!agentId) throw new Error("seed-silent-contact exige <agentId> (o agente que habilita o fluxo)");
         if (!Number.isFinite(thresholdMinutes)) throw new Error("thresholdMinutes inválido");
         const creds = loadCreds();
         const fix = creds.elegibilidade;
@@ -234,6 +247,7 @@ async function main(): Promise<void> {
         );
         const contactId = cRows[0]!.id;
         const velho = new Date(Date.now() - (thresholdMinutes + 5) * 60_000).toISOString();
+
         const { rows: convRows } = await pool.query<{ id: string }>(
           `insert into conversations
              (organization_id, contact_id, channel_session_id, status,
@@ -242,24 +256,16 @@ async function main(): Promise<void> {
            returning id`,
           [creds.org_id, contactId, fix.channel_session_id, velho],
         );
-        // A MENSAGEM PRECISA EXISTIR, e carimbada.
-        //
-        // Esta fixture nasceu antes da fronteira do atendimento e criava só a
-        // conversa com `last_inbound_at` — o silêncio como um CAMPO. A varredura
-        // passou a exigir PROCEDÊNCIA: ela lê a mensagem inbound mais nova e o
-        // carimbo dela, porque é isso que distingue "calado neste atendimento"
-        // de "calado desde outro". Sem a linha em `messages`, a conversa é
-        // invisível para o gatilho e o contato autorizado nunca era enrolado.
-        //
-        // O carimbo não é escrito aqui: `fn_service_inbound` dispara no INSERT
-        // e o grava. Escrevê-lo à mão provaria a forma da linha, não o caminho.
-        await pool.query(
-          `insert into messages
-             (organization_id, conversation_id, channel_session_id, contact_id,
-              type, direction, status, sent_via, body, sent_at)
-           values ($1, $2, $3, $4, 'text', 'inbound', 'received', 'ai', 'Oi, tudo bem?', $5)`,
-          [creds.org_id, convRows[0]!.id, fix.channel_session_id, contactId, velho],
-        );
+        await semearSilencioCobravel(pool, {
+          dbUrl: DB_URL,
+          orgId: creds.org_id,
+          channelSessionId: fix.channel_session_id,
+          conversationId: convRows[0]!.id,
+          contactId,
+          agentId,
+          ...(autorDaFala !== undefined ? { autorDaFala } : {}),
+          inboundAt: velho,
+        });
         out({ contactId, conversationId: convRows[0]!.id, phone });
         break;
       }
