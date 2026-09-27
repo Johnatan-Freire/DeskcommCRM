@@ -92,8 +92,13 @@ bash .agents/skills/deskcomm-contribuir/scripts/armar-hooks.sh
 ```
 
 Três guardas, e só isso: `pre-commit` reprova migration nova sem apêndice no `baseline.sql` e sem
-linha no `MANIFEST.md` no mesmo commit, e número (`NNNN`) ou timestamp já usado na `origin/main`
-ou em branch local; `pre-push` reprova push na `main`; e os dois avisam (sem bloquear) quando o
+linha no `MANIFEST.md` no mesmo commit, e número (`NNNN`) ou timestamp já usado na **população da
+pergunta** — a main do PRODUTO (o remoto que aponta para `melgarafael/DeskcommCRM`, com qualquer
+nome; num fork, a sua `origin/main` é a main do fork e não vale) mais `refs/heads` e `refs/remotes`.
+O que essa população não cobre são os PRs abertos, e a mensagem do hook diz isso e aponta
+`pnpm checar:colisao-de-migration`, que mede também eles. O `NNNN` sai da posição do nome canônico
+(`^[0-9]{14}_([0-9]{4})_`), e a regra está em `migration-populacao.sh`, na pasta `scripts/` da raiz do repositório (issue #1273);
+`pre-push` reprova push na `main`; e os dois avisam (sem bloquear) quando o
 commit está assinado como `root@…` ou sem e-mail — trabalho assinado assim não aparece no perfil
 do GitHub de quem fez. O mantenedor roda hooks próprios (`loop/hooks`); o script recusa
 sobrescrevê-los.

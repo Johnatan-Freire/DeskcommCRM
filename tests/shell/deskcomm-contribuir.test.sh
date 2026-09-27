@@ -11,6 +11,14 @@
 #   2. check-migration-triple.sh BLOQUEIA migration nova sem baseline/MANIFEST,
 #      BLOQUEIA NNNN e timestamp já usados na origin/main, e DEIXA PASSAR a
 #      tripla completa com número livre. Bypass DESKCOMM_MIGRATION_EDIT=1.
+#   2-bis. e, com a biblioteca da população AUSENTE (#1273), o NNNN já usado
+#      CONTINUA bloqueado e a queda é declarada: o guard não pode afrouxar
+#      porque a regra que ele consulta não estava à mão.
+#   2-quater. o merge da main do PRODUTO passa mesmo com o NNNN dela noutra
+#      branch do principal; um NNNN novo da branch continua bloqueado.
+#   2-quinquies. o NNNN e o timestamp já COMMITADOS na própria branch contam:
+#      a segunda 0201 e o carimbo repetido são bloqueados, e a dica não aponta
+#      para o número que a branch já usa.
 #   3. pre-push BLOQUEIA refs/heads/main e deixa passar uma feature branch.
 #   4. armar-hooks.sh grava core.hooksPath, recusa sobrescrever hooks alheios,
 #      e --desarmar limpa.
@@ -22,7 +30,8 @@
 #      num clone sem o script e fora de qualquer clone, com e sem a instalação global.
 set -uo pipefail
 
-SKILL="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.agents/skills/deskcomm-contribuir" && pwd)"
+RAIZ="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+SKILL="$RAIZ/.agents/skills/deskcomm-contribuir"
 SCRIPTS="$SKILL/scripts"
 falhas=0; casos=0
 ok()   { casos=$((casos+1)); printf '  ✓ %s\n' "$1"; }
@@ -60,6 +69,11 @@ git -C "$principal" init -q -b main
 cfg "$principal" user.email "mantenedor@exemplo.com"; cfg "$principal" user.name "Mantenedor"
 mkdir -p "$principal/supabase/migrations" "$principal/.agents/skills/deskcomm-contribuir/scripts/hooks"
 cp -R "$SCRIPTS"/. "$principal/.agents/skills/deskcomm-contribuir/scripts/"
+# A biblioteca da POPULAÇÃO (#1273) mora em scripts/, fora da skill — e sem ela
+# os hooks caem no caminho degradado e medem menos. O caso 2 mede o caminho
+# COM a biblioteca; o 2-bis apaga o arquivo de propósito e mede o sem.
+mkdir -p "$principal/scripts"
+cp "$RAIZ/scripts/migration-populacao.sh" "$principal/scripts/"
 printf 'select 1;\n' > "$principal/supabase/migrations/20260101120000_0200_existente.sql"
 printf -- '-- baseline\n' > "$principal/supabase/baseline.sql"
 printf '| `20260101120000` | `0200_existente` |\n' > "$principal/supabase/migrations/MANIFEST.md"
@@ -112,6 +126,147 @@ assert_contains "$saida" "timestamp 20260101120000" "acusa o timestamp (os dois 
 saida="$(DESKCOMM_MIGRATION_EDIT=1 git commit -q -m "bypass" 2>&1)"; code=$?
 assert_exit "$code" 0 "DESKCOMM_MIGRATION_EDIT=1 é o bypass explícito"
 git reset -q --hard HEAD~1 2>/dev/null
+
+# ── 2-bis. A AUSÊNCIA da biblioteca NÃO afrouxa o guard (#1273) ─────────────────
+# O caso que a issue descreve: a regra da população vive num lugar só
+# (scripts/migration-populacao.sh), e um clone antigo, ou uma cópia da skill de
+# uma versão anterior, NÃO tem esse arquivo. Se a queda da biblioteca esvaziasse
+# a população, o `grep` não acharia colisão nenhuma e o pre-commit LIBERARIA o
+# commit — um guard que encolhe o universo em silêncio é exatamente o defeito
+# que a #1273 corrige. Aqui a biblioteca é apagada DE VERDADE do clone e o NNNN
+# já usado na origin/main tem de continuar bloqueado, com o aviso da degradação.
+echo "2-bis. check-migration-triple.sh sem a biblioteca (a guarda NÃO afrouxa)"
+sem_lib="$TMP/c2-sem-lib"
+rm -rf "$sem_lib"; git clone -q "$principal" "$sem_lib"
+cfg "$sem_lib" user.email "alguem@fork.dev"; cfg "$sem_lib" user.name "Pessoa"
+cfg "$sem_lib" core.hooksPath ".agents/skills/deskcomm-contribuir/scripts/hooks"
+chmod +x "$sem_lib"/.agents/skills/deskcomm-contribuir/scripts/*.sh \
+          "$sem_lib"/.agents/skills/deskcomm-contribuir/scripts/hooks/*
+cd "$sem_lib" || exit 1; git switch -q -c fix/sem-lib
+rm -f scripts/migration-populacao.sh   # a queda real da biblioteca
+[ -r scripts/migration-populacao.sh ] && falha "2-bis" "a biblioteca não saiu do clone: o caso não mede a queda"
+printf 'select 3;\n' > supabase/migrations/20260101120000_0200_colide.sql
+printf -- '-- x\n' >> supabase/baseline.sql
+printf '| x | `0200_colide` |\n' >> supabase/migrations/MANIFEST.md
+git add -A
+saida="$(git commit -q -m "colisao sem biblioteca" 2>&1)"; code=$?
+assert_exit "$code" 1 "sem a biblioteca, o NNNN já usado AINDA é bloqueado (o guard não afrouxa)"
+assert_contains "$saida" "NNNN=0200" "sem a biblioteca, o NNNN continua sendo acusado"
+assert_contains "$saida" "migration-populacao.sh AUSENTE" "a queda da biblioteca é DECLARADA, não silenciosa"
+assert_contains "$saida" "checar:colisao-de-migration" "o aviso aponta quem mede a população inteira"
+assert_not_contains "$saida" "command not found" "sem a biblioteca, o bloqueio não tropeça em função ausente"
+# O NNNN em colisão que NÃO é o 1º arquivo da ref: o caminho sem biblioteca
+# prefixava só a 1ª linha de cada ref, e o `grep "<ref> <nome>"` perdia o resto.
+git reset -q --hard HEAD 2>/dev/null
+git switch -q -c colega
+printf 'select 5;\n' > supabase/migrations/20260301120000_0300_do_colega.sql
+printf 'select 6;\n' > supabase/migrations/20260301130000_0301_do_colega.sql
+git add -A; DESKCOMM_MIGRATION_EDIT=1 git commit -q -m "colega"
+git switch -q fix/sem-lib
+rm -f scripts/migration-populacao.sh
+printf 'select 7;\n' > supabase/migrations/20260909120000_0301_colide.sql
+printf -- '-- y\n' >> supabase/baseline.sql
+printf '| y | `0301_colide` |\n' >> supabase/migrations/MANIFEST.md
+git add -A
+saida="$(git commit -q -m "colisao com arquivo que nao e o primeiro da ref" 2>&1)"; code=$?
+assert_exit "$code" 1 "sem a biblioteca, colisão com o 3º arquivo de outra branch AINDA é bloqueada"
+assert_contains "$saida" "NNNN=0301" "e o NNNN acusado é o do 3º arquivo"
+git reset -q --hard HEAD 2>/dev/null
+
+# ── 2-ter. Clone que só tem o FORK (item 1 da #1273) ─────────────────────────
+# A `origin` aponta para um fork no GitHub (o insteadOf a resolve para o
+# principal local, sem rede) e nenhum remoto é melgarafael/DeskcommCRM: a base
+# vira a origin/main DO FORK, que pode estar atrás do principal. O hook não
+# bloqueia por isso, mas DIZ; e o pré-voo não dá ✓ de "livre" sobre essa régua.
+echo "2-ter. clone só com o fork: NÃO MEDIDO declarado"
+fork="$TMP/c2-fork"; clonar "$fork" "alguem@fork.dev"
+cfg "$fork" remote.origin.url "https://github.com/alguem/DeskcommCRM.git"
+cfg "$fork" "url.$principal.insteadOf" "https://github.com/alguem/DeskcommCRM.git"
+cd "$fork" || exit 1; git switch -q -c fix/no-fork
+printf 'select 8;\n' > supabase/migrations/20260909130000_0201_no_fork.sql
+printf -- '-- z\n' >> supabase/baseline.sql
+printf '| z | `0201_no_fork` |\n' >> supabase/migrations/MANIFEST.md
+git add -A
+saida="$(git commit -q -m "migration num fork" 2>&1)"; code=$?
+assert_exit "$code" 0 "número livre no fork não bloqueia (não há colisão medida)"
+assert_contains "$saida" "NÃO MEDIDOS contra a main do PRODUTO" "o hook declara que não mediu a main do produto"
+assert_contains "$saida" "git remote add upstream" "e diz como corrigir"
+saida="$(bash .agents/skills/deskcomm-contribuir/scripts/pre-voo.sh 2>&1)"
+assert_not_contains "$saida" "✓ NNNN" "o pré-voo não dá ✓ de NNNN livre sobre a main do fork"
+assert_not_contains "$saida" "✓ próximo NNNN" "nem ✓ de próximo NNNN"
+assert_contains "$saida" "NÃO MEDIDO contra a main do PRODUTO" "o pré-voo declara a régua"
+
+# ── 2-quater. Trazer a main do PRODUTO não é "migration nova" ─────────────────
+# Com a população alargada para refs/remotes/*, uma branch do principal com OUTRO
+# arquivo de mesmo NNNN (o 0412 de `resgate/1651-…` contra o 0412 da main, medido
+# em 27/09/2026) fazia o merge da upstream/main ser BLOQUEADO, mandando renumerar
+# migration que já está na main. O que a main do produto já tem sai da conta.
+echo "2-quater. merge da main do produto não é bloqueado por branch velha do principal"
+produto="$TMP/produto"; rm -rf "$produto"; git clone -q "$principal" "$produto"
+cfg "$produto" user.email "mantenedor@exemplo.com"; cfg "$produto" user.name "Mantenedor"
+git -C "$produto" switch -q -c velha
+printf 'select 9;\n' > "$produto/supabase/migrations/20260102000000_0412_versao_antiga.sql"
+git -C "$produto" add -A; git -C "$produto" commit -q -m "velha"
+git -C "$produto" switch -q main
+printf 'select 10;\n' > "$produto/supabase/migrations/20260103000000_0412_versao_da_main.sql"
+printf -- '-- apêndice 0412\n' >> "$produto/supabase/baseline.sql"
+printf '| `20260103000000` | `0412_versao_da_main` |\n' >> "$produto/supabase/migrations/MANIFEST.md"
+git -C "$produto" add -A; git -C "$produto" commit -q -m "0412 na main"
+merge="$TMP/c2-merge"; clonar "$merge" "alguem@fork.dev"
+cfg "$merge" remote.upstream.url "https://github.com/melgarafael/DeskcommCRM.git"
+cfg "$merge" remote.upstream.fetch "+refs/heads/*:refs/remotes/upstream/*"
+cfg "$merge" "url.$produto.insteadOf" "https://github.com/melgarafael/DeskcommCRM.git"
+cd "$merge" || exit 1; git fetch -q upstream; git switch -q -c fix/traz-a-main
+git rev-parse -q --verify refs/remotes/upstream/velha >/dev/null || falha "2-quater" "a branch velha do principal não chegou: o caso não mede a colisão"
+git merge -q --no-ff --no-commit upstream/main >/dev/null 2>&1
+saida="$(git commit -q -m "traz a main do produto" 2>&1)"; code=$?
+assert_exit "$code" 0 "o merge da main do produto passa, mesmo com 0412 noutra branch do principal"
+assert_not_contains "$saida" "BLOQUEADO" "e não manda renumerar migration que já está na main"
+# A guarda real segue inteira: um 0412 NOVO desta branch ainda colide.
+printf 'select 11;\n' > supabase/migrations/20260909140000_0412_minha.sql
+printf -- '-- w\n' >> supabase/baseline.sql; printf '| w | `0412_minha` |\n' >> supabase/migrations/MANIFEST.md
+git add -A
+saida="$(git commit -q -m "0412 meu" 2>&1)"; code=$?
+assert_exit "$code" 1 "um 0412 NOVO desta branch continua bloqueado"
+assert_contains "$saida" "upstream/main" "e o dono nomeado é a main do produto"
+git reset -q --hard HEAD 2>/dev/null
+
+# ── 2-quinquies. O que a PRÓPRIA branch já commitou está na população ────────
+# `pop_refs_de_outrem` tira da conta a ref cujo SHA é o do HEAD (a #1155: não
+# acusar o autor de colidir consigo), e o hook não devolvia o HEAD — então a
+# 0201 que a branch JÁ commitou sumia da população: a segunda 0201 (e o mesmo
+# carimbo) passava calada, e a dica mandava renumerar para a 0201 da branch.
+echo "2-quinquies. a migration já commitada na própria branch conta"
+propria="$TMP/c2-propria"; clonar "$propria" "alguem@fork.dev"
+cd "$propria" || exit 1; git switch -q -c fix/duas
+tripla() { # $1 = nome em supabase/migrations/
+  printf 'select 1;\n' > "supabase/migrations/$1"
+  printf -- '-- apêndice %s\n' "$1" >> supabase/baseline.sql
+  printf '| `%s` |\n' "$1" >> supabase/migrations/MANIFEST.md
+  git add -A
+}
+tripla 20260910000000_0201_primeira.sql
+saida="$(git commit -q -m "0201 primeira" 2>&1)"; code=$?
+assert_exit "$code" 0 "a primeira 0201 da branch passa (número livre)"
+tripla 20260910010000_0201_segunda.sql
+saida="$(git commit -q -m "0201 segunda" 2>&1)"; code=$?
+assert_exit "$code" 1 "0201_primeira commitada + 0201_segunda encenada: BLOQUEIA"
+assert_contains "$saida" "já existe em: HEAD(20260910000000_0201_primeira.sql)" "e o dono nomeado é a própria branch"
+git reset -q --hard HEAD 2>/dev/null
+tripla 20260910000000_0202_mesmo_carimbo.sql
+saida="$(git commit -q -m "carimbo repetido" 2>&1)"; code=$?
+assert_exit "$code" 1 "carimbo da migration já commitada, repetido: BLOQUEIA"
+assert_contains "$saida" "timestamp 20260910000000 de '20260910000000_0202_mesmo_carimbo.sql' já existe em: HEAD" "e acusa o timestamp contra a própria branch"
+git reset -q --hard HEAD 2>/dev/null
+tripla 20260910020000_0200_da_main.sql
+saida="$(git commit -q -m "0200 da main de novo" 2>&1)"; code=$?
+assert_exit "$code" 1 "0200 da main encenada de novo segue bloqueada (controle positivo)"
+assert_contains "$saida" "próximo livre 0202" "a dica não manda para a 0201 que a branch já usa"
+git reset -q --hard HEAD 2>/dev/null
+tripla 20260910030000_0202_livre.sql
+saida="$(git commit -q -m "0202 livre" 2>&1)"; code=$?
+assert_exit "$code" 0 "e um número de fato livre passa (o HEAD não acusa o próprio arquivo)"
+cd "$merge" || exit 1
 
 echo "3. pre-push"
 saida="$(printf 'refs/heads/fix/algo %s refs/heads/main %s\n' "$(git rev-parse HEAD)" "$(git rev-parse HEAD)" | bash .agents/skills/deskcomm-contribuir/scripts/hooks/pre-push origin x 2>&1)"; code=$?
