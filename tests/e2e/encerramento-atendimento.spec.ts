@@ -291,6 +291,21 @@ test("fechar canal preserva demanda, desfecho explícito e nova entrada volta à
 });
 
 
+/**
+ * PROCEDÊNCIA DO SILÊNCIO PELO POSTGREST — sob a régua ATUAL.
+ *
+ * Este caso nasceu em 07/09 (#613), quando a varredura contava só o último inbound: ele
+ * criava APENAS mensagens do cliente e esperava inscrição. A migration 0403 (26/09) passou a
+ * exigir que o atendimento AUTOMÁTICO esteja esperando o cliente (`fn_silencio_pode_reengajar`:
+ * cliente falou por último = `contato_aguardando_resposta`), e a varredura passou a exigir que
+ * a fala seja do agente que habilita o fluxo (`origem-da-pendencia.ts`). As asserções positivas
+ * antigas ficaram impossíveis; as negativas, verdes sem dentes.
+ *
+ * A intenção do caso continua a mesma — mensagem legada e reabertura não viram autorização —
+ * e agora cada negativa tem uma positiva ao lado que a torna significativa. O agente é
+ * PUBLICADO SÓ NESTE BANCO DE TESTE ISOLADO (Supabase local do e2e), com linha direta: é o
+ * mínimo que `fn_ia_pode_responder_mensagem` exige ("agente no ar no número").
+ */
 test("silêncio consulta proveniência real pelo PostgREST: legado e reabertura não viram nova autorização", async () => {
   const org = await insert("organizations", { slug: `silence-${randomUUID()}`, display_name: "Silêncio local", legal_name: "Silêncio local" });
   try {
@@ -298,25 +313,62 @@ test("silêncio consulta proveniência real pelo PostgREST: legado e reabertura 
     const session = await insert("channel_sessions", { organization_id: org, waha_session_name: randomUUID(), status: "WORKING", webhook_secret_encrypted: "\\x00" });
     const conversation = await insert("conversations", { organization_id: org, contact_id: contact, channel_session_id: session, status: "open" });
     const rpc = async (name: string, args: Record<string, unknown>) => { const result = await db.rpc(name, args); if (result.error) throw result.error; return result.data; };
-    const inbound = async (at: string) => {
-      const id = await insert("messages", { organization_id: org, contact_id: contact, conversation_id: conversation, channel_session_id: session, type: "text", direction: "inbound", status: "received", sent_via: "ai", sent_at: at, body: "Mensagem" });
+
+    // Agente no ar NO NÚMERO desta conversa. Publicar carimba `service_enabled_at` (trigger da
+    // 0403): tudo que o cliente disser daqui em diante é posterior à ativação.
+    const agente = await insert("ai_agents", { organization_id: org, name: "Agente do fluxo", system_prompt: "prompt", kind: "mcp_agent" });
+    const versao = await insert("ai_agent_versions", {
+      organization_id: org, agent_id: agente, version_number: 1, system_prompt: "prompt", provider: "openai",
+      model: "gpt-4o-mini", channel_session_id: session, status: "published", published_at: new Date().toISOString(),
+    });
+    const publicou = await db.from("ai_agents").update({ published_version_id: versao }).eq("organization_id", org).eq("id", agente);
+    if (publicou.error) throw publicou.error;
+    const outroAgente = randomUUID();
+
+    let relogio = Date.now() + 2_000;
+    const proximo = () => new Date((relogio += 1_000)).toISOString();
+    const inbound = async () => {
+      const at = proximo();
+      const id = await insert("messages", { organization_id: org, contact_id: contact, conversation_id: conversation, channel_session_id: session, type: "text", direction: "inbound", status: "received", sent_via: "external_device", sent_at: at, body: "Mensagem" });
       await rpc("fn_mark_conversation_message", { p_conv: conversation, p_direction: "inbound", p_preview: "Mensagem", p_at: at });
       return id;
     };
-    const old = await inbound(new Date(Date.now() - 600_000).toISOString());
+    const respostaDaIa = async (autor: string) => {
+      const at = proximo();
+      await insert("messages", { organization_id: org, contact_id: contact, conversation_id: conversation, channel_session_id: session, type: "text", direction: "outbound", status: "sent", sent_via: "ai", sent_at: at, body: "Resposta", metadata: { ai_actor_id: autor } });
+      await rpc("fn_mark_conversation_message", { p_conv: conversation, p_direction: "outbound", p_preview: "Resposta", p_at: at });
+    };
     const sweep = createSupabaseSilenceSweepDb(db);
-    const cutoff = new Date(Date.now() + 1000).toISOString();
-    expect(await sweep.loadSilentContactIds(org, cutoff, [], [])).toEqual([contact]);
+    const silenciosos = () => sweep.loadSilentContactIds(org, new Date(relogio + 60_000).toISOString(), [], [agente]);
+
+    const old = await inbound();
+    // Régua 0403: o CLIENTE falou por último — a empresa está devendo resposta, não é silêncio.
+    expect(await silenciosos()).toEqual([]);
+    // Resposta de OUTRO agente: a pendência não é do agente que habilita o fluxo.
+    await respostaDaIa(outroAgente);
+    expect(await silenciosos()).toEqual([]);
+    // Resposta do agente do fluxo: agora é silêncio cobrável — a POSITIVA que dá dentes às negativas.
+    await respostaDaIa(agente);
+    expect(await silenciosos()).toEqual([contact]);
+
+    // Procedência: o mesmo inbound sem carimbo de atendimento (legado) não vale.
     const legacy = await db.from("messages").update({ service_revision: null, demanda_id: null, demanda_revision: null }).eq("organization_id", org).eq("id", old);
     if (legacy.error) throw legacy.error;
-    expect(await sweep.loadSilentContactIds(org, cutoff, [], [])).toEqual([]);
+    expect(await silenciosos()).toEqual([]);
+
+    // Reabertura sem mensagem nova não herda a autorização do episódio encerrado.
     await rpc("fn_service_status", { p_org: org, p_conversation: conversation, p_status: "closed" });
     await rpc("fn_service_begin", { p_org: org, p_contact: contact, p_session: session });
-    expect(await sweep.loadSilentContactIds(org, cutoff, [], [])).toEqual([]);
-    await inbound(new Date().toISOString());
-    expect(await sweep.loadSilentContactIds(org, new Date(Date.now() + 1000).toISOString(), [], [])).toEqual([contact]);
+    expect(await silenciosos()).toEqual([]);
+
+    // Episódio novo com inbound carimbado + resposta do agente do fluxo: volta a valer.
+    await inbound();
+    expect(await silenciosos()).toEqual([]);
+    await respostaDaIa(agente);
+    expect(await silenciosos()).toEqual([contact]);
+
     await rpc("fn_service_status", { p_org: org, p_conversation: conversation, p_status: "closed" });
     await rpc("fn_service_begin", { p_org: org, p_contact: contact, p_session: session });
-    expect(await sweep.loadSilentContactIds(org, new Date(Date.now() + 1000).toISOString(), [], [])).toEqual([]);
+    expect(await silenciosos()).toEqual([]);
   } finally { await db.from("organizations").delete().eq("id", org); }
 });
