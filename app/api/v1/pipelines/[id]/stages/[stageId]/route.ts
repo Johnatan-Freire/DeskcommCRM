@@ -56,6 +56,8 @@ const bodySchema = z
      * para a mensagem sair em português, antes de tocar no banco.
      */
     win_probability: z.number().int().min(0).max(100).nullable().optional(),
+    /** Negócio que entra nesta etapa abre um aviso na Central (migration 0440). */
+    avisar_na_central: z.boolean().optional(),
   })
   .strict()
   .refine((b) => Object.keys(b).length > 0, { message: "Nada para alterar." });

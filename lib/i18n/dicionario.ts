@@ -8571,6 +8571,17 @@ export const DICIONARIO: Traducoes = {
     es: "Las respuestas a los clientes están esperando. Recarga el saldo en la cuenta del proveedor: salen solas cuando vuelva el saldo, durante hasta 6 horas. Después de eso, la conversación que no se respondió aparece aquí en la Central.",
   },
   "Revisar credencial": { es: "Revisar credencial" },
+  // ─── lib/leads/aviso-de-etapa.ts + editor de etapas (migration 0440) ───
+  "Negócio entrou em": { es: "Negocio entró en" },
+  "Abra o negócio para dar o próximo passo. Este aviso foi pedido na configuração da etapa.": {
+    es: "Abre el negocio para dar el siguiente paso. Este aviso se pidió en la configuración de la etapa.",
+  },
+  "Avisar a equipe na Central quando um negócio entrar aqui": {
+    es: "Avisar al equipo en la Central cuando un negocio entre aquí",
+  },
+  "Avisar a equipe na Central quando um negócio entrar em": {
+    es: "Avisar al equipo en la Central cuando un negocio entre en",
+  },
   // `informativo` e `crítico` saem iguais nos dois idiomas — sem linha, por isso.
   "atenção": { es: "atención" },
   // ─── lib/ai/agent-inbox-copy.ts (copyDaPromessaSemDono) ───

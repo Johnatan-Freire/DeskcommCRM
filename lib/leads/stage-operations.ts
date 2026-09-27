@@ -52,7 +52,7 @@ export interface DepsDeEtapa {
 
 /** As colunas que a tela e as regras usam. `position` entra: a reordenação calcula em cima dela. */
 const COLUNAS =
-  "id, name, slug, position, is_won, is_lost, is_archived, win_probability, agent_stage_hint, last_change_actor_kind, last_change_at, service_policy, exit_locked";
+  "id, name, slug, position, is_won, is_lost, is_archived, win_probability, agent_stage_hint, avisar_na_central, last_change_actor_kind, last_change_at, service_policy, exit_locked";
 
 /** A etapa como sai para quem lê — inclui a autoria da última mudança de configuração. */
 export interface EtapaVisivel {
@@ -74,12 +74,15 @@ export interface EtapaVisivel {
    * não aqui: gravar seria um segundo lugar para a mesma verdade divergir.
    */
   win_probability: number | null;
+  /** Negócio que entra aqui abre um aviso na Central (migration 0440). */
+  avisar_na_central: boolean;
   /** `user` | `ai` | `system` — `null` nas etapas anteriores a esta coluna. */
   last_change_actor_kind: string | null;
   last_change_at: string | null;
 }
 
 type EtapaLida = EtapaEditavel & {
+  avisar_na_central?: boolean | null;
   last_change_actor_kind: string | null;
   last_change_at: string | null;
 };
@@ -135,6 +138,7 @@ export function corpo(etapas: EtapaLida[]): { etapas: EtapaVisivel[] } {
         service_policy: e.service_policy ?? "comercial",
         exit_locked: e.exit_locked ?? false,
         win_probability: e.win_probability ?? null,
+        avisar_na_central: e.avisar_na_central === true,
         last_change_actor_kind: e.last_change_actor_kind ?? null,
         last_change_at: e.last_change_at ?? null,
       })),
@@ -314,6 +318,8 @@ export interface PedidoDeEdicao {
   service_policy?: PoliticaDeEtapa;
   /** Trava de saída (0404). Mesma exigência de papel de `service_policy`. */
   exit_locked?: boolean;
+  /** Liga ou desliga o aviso na Central para quem entra nesta etapa (0440). */
+  avisar_na_central?: boolean;
 }
 
 export async function atualizarEtapa(
@@ -399,12 +405,14 @@ export async function atualizarEtapa(
     service_policy?: PoliticaDeEtapa;
     exit_locked?: boolean;
     win_probability?: number | null;
+    avisar_na_central?: boolean;
   } = {};
   if (pedido.name !== undefined) patchDoAlvo.name = pedido.name.trim();
   if (pedido.service_policy !== undefined) patchDoAlvo.service_policy = pedido.service_policy;
   if (pedido.exit_locked !== undefined) patchDoAlvo.exit_locked = pedido.exit_locked;
   // `undefined` não viaja; `null` limpa a calibração de propósito.
   if (pedido.win_probability !== undefined) patchDoAlvo.win_probability = pedido.win_probability;
+  if (pedido.avisar_na_central !== undefined) patchDoAlvo.avisar_na_central = pedido.avisar_na_central;
 
   if (pedido.depois_de !== undefined) {
     // Só as ativas compõem a régua: arquivada não ocupa lugar no quadro.

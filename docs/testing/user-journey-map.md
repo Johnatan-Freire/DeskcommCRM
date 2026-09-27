@@ -2908,6 +2908,22 @@ Port do #1130 (@vgamkt), PR 3 de 4. Spec: `tests/e2e/fluxo-de-atendimento.spec.t
 
 **NÃO coberto por esta spec:** o turno do agente roda com o worker e o modelo de verdade — no CI não há nenhum dos dois, e a spec chama as mesmas funções do motor (`prepararRoteiroDoTurno`, `garantirPerguntaDoRoteiro`) com o validador devolvendo `indefinido`. A pergunta enviada ao cliente pelo WhatsApp e a leitura pelo validador de modelo ficam para a prova do PR 4.
 
+## Avisos que pedem gente — a etapa que avisa na Central `[P1]` (2026-09-27)
+
+Migration 0440. Spec: `tests/e2e/etapa-avisa-na-central.spec.ts` (job e2e, parte 2). Organização, administrador, funil e negócio criados pela service role no Supabase local; o movimento do card pela rota do quadro com a sessão do usuário; o dreno do `event_log` chamado pela rota do cron.
+
+| Caso | Esperado |
+|---|---|
+| AV.1 | Em Configurações › Funis, cada etapa mostra «Avisar a equipe na Central quando um negócio entrar aqui», desligada |
+| AV.2 | Ligar a chave numa etapa grava só ela: recarregar a tela mostra a mesma coisa, e a etapa vizinha segue desligada |
+| AV.3 | O negócio que entra na etapa marcada abre na Central «Negócio entrou em «<etapa>»», sem o nome do cliente |
+| AV.4 | O negócio que entra numa etapa SEM a marca não abre aviso |
+| AV.5 | «Abrir negócio» leva ao negócio dentro do funil (`/app/pipelines/<funil>?lead=<id>`) |
+
+**NÃO coberto por esta spec:** o movimento pelo assistente de IA (o mesmo evento `lead.stage_changed`, emitido por `agent-stage-sync.ts`) e o arrasto do card com o mouse — os dois têm spec própria e chegam ao mesmo handler.
+
+Evidência: `evidence/etapa-avisa-na-central/01-chave-ligada-na-etapa.png` (a chave ligada na etapa), `evidence/etapa-avisa-na-central/02-aviso-na-central.png` (o aviso na Central, sem o nome do cliente) e `evidence/etapa-avisa-na-central/03-abrir-negocio.png` (o negócio aberto pelo botão).
+
 ### Continuação de conversões: links nomeados (27/09/2026)
 
 - [P1] Configurações → Conversões → Links rastreáveis: criar, recarregar, editar/desativar, copiar link/script e verificar instalação.
