@@ -75,7 +75,7 @@ export type SkipReason =
   | "nao_elegivel_para_ia"
   /**
    * `messages.sent_at` (horário REAL do WhatsApp) é anterior a
-   * `channel_sessions.first_connected_at` — mensagem sincronizada pelo WAHA no
+   * `channel_sessions.first_connected_at` — mensagem sincronizada pelo canal no
    * pareamento, não turno de atendimento. Migration 0398; mesma trava do lado
    * do engine em `lib/agent-engine/edge/crm/drain.ts`.
    */

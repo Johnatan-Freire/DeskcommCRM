@@ -170,7 +170,7 @@ export async function runAutomationForEvent(
     return { consumer_key: AUTOMATION_CONSUMER_KEY, status: "skipped", detail: "entity_kind_mismatch" };
   }
 
-  // Corte de conexão (migration 0398): WAHA/NOWEB sincroniza histórico do
+  // Corte de conexão (migration 0398): o canal sincroniza histórico do
   // WhatsApp ao parear um número novo, e o mesmo `message.received` que uma
   // mensagem nova emite também nasce de uma mensagem sincronizada de dias ou
   // semanas atrás. Uma regra do usuário com gatilho `message.received` (ex.:
