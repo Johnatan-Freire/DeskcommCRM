@@ -759,6 +759,7 @@ jobs:
         menu-por-empresa-e-a-porta-de-volta.spec.ts
         agenda-google-meet.spec.ts
         painel-de-configuracao-da-instalacao.spec.ts
+        icone-da-aba.spec.ts
       # `moeda-da-organizacao` entrou na PARTE_2 em 2026-09-04, ao lado de
       # `navegacao` — mesmo domínio (Configurações) e a mesma ausência de
       # dependência: sem WAHA, Resend, Nuvemshop ou Redis. Toca a organização

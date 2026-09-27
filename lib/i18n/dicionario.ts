@@ -287,6 +287,25 @@ export const DICIONARIO: Traducoes = {
   "Logo para o tema escuro (opcional)": { es: "Logo para el tema oscuro (opcional)" },
   "Remover logo escuro": { es: "Eliminar logo oscuro" },
   "Use uma versão legível sobre fundo escuro. Ela aparece sem moldura branca. Sem ela, o logo padrão mantém a proteção de contraste. PNG ou JPG, até 512 KB.": { es: "Usa una versión legible sobre fondo oscuro. Se muestra sin marco blanco. Sin ella, el logo predeterminado conserva la protección de contraste. PNG o JPG, hasta 512 KB." },
+  // /admin/marca — ícone da aba (favicon), migration 0443.
+  "Ícone da aba (favicon)": { es: "Ícono de la pestaña (favicon)" },
+  "Ícone da aba": { es: "Ícono de la pestaña" },
+  "Remover ícone": { es: "Eliminar ícono" },
+  "Ícone da aba atualizado.": { es: "Ícono de la pestaña actualizado." },
+  "Ícone da aba removido.": { es: "Ícono de la pestaña eliminado." },
+  "Não consegui trocar o ícone da aba agora.": { es: "No pude cambiar el ícono de la pestaña ahora." },
+  "Sua sessão expirou. Entre de novo para trocar o ícone da aba.": {
+    es: "Tu sesión expiró. Vuelve a entrar para cambiar el ícono de la pestaña.",
+  },
+  "Você não tem permissão para trocar o ícone da aba.": {
+    es: "No tienes permiso para cambiar el ícono de la pestaña.",
+  },
+  "Imagem quadrada, de preferência 64×64 ou maior. PNG ou JPG, até": {
+    es: "Imagen cuadrada, preferiblemente de 64×64 o mayor. PNG o JPG, hasta",
+  },
+  "KB. Sem ícone próprio, a aba mostra a inicial do nome sobre a cor da marca.": {
+    es: "KB. Sin ícono propio, la pestaña muestra la inicial del nombre sobre el color de la marca.",
+  },
   // /admin/email — o servidor SMTP da instalação (PR #714, @betoarts, recorte).
   "Servidor de e-mail conectado e autenticado.": { es: "Servidor de correo conectado y autenticado." },
   "Preencha e salve o servidor e o remetente antes de testar.": {

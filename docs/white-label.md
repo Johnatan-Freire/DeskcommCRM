@@ -16,6 +16,8 @@ A cor é **derivada**, não aplicada crua: de um hex saem onze tons nos dois tem
 
 **O logo também.** Na mesma tela você **sobe o arquivo** — PNG ou JPG, até 512 KB. Ele vai para o storage da sua própria instalação e passa a valer na hora, sem reiniciar nada e sem você hospedar imagem em lugar nenhum. Altura fixa e largura livre, para não distorcer arte de proporção qualquer; sem logo, o nome aparece como texto.
 
+**E o ícone da aba (favicon).** Logo abaixo do logo, o campo **Ícone da aba (favicon)** recebe uma imagem quadrada — PNG ou JPG, até 512 KB, de preferência 64×64 ou maior. Ela passa a aparecer na aba do navegador de todas as telas da instalação, inclusive o login. Sem ícone próprio, a aba mostra a inicial do nome sobre a cor da marca; remover o ícone volta a esse desenho. O ícone é da instalação, não de cada organização: a aba é uma só. O ícone de app instalado (manifesto do navegador) continua sendo o desenhado.
+
 O arquivo é aceito **pelos bytes, não pela extensão**. Renomear um `.svg` para `.png` não engana: o sistema lê o conteúdo, recusa e diz por quê. Isso não é preciosismo — SVG é XML e pode carregar script, que executaria se alguém abrisse a imagem direto pelo endereço dela, num bucket que é público por necessidade.
 
 Quem preferir hospedar por conta própria continua podendo, pelo `.env`:
