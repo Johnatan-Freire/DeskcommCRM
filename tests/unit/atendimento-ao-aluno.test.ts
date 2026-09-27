@@ -180,6 +180,13 @@ describe("pacote público (prompt genérico)", () => {
     }
   });
 
+  it("comunicação neutra: exemplo pelo nome do aluno, nunca presumindo parentesco", () => {
+    expect(prompt).toContain("A nota registrada para João no módulo Windows é 8,5.");
+    // O único "Seu filho" permitido é o que o prompt manda EVITAR.
+    expect(prompt).toContain('e não "Seu filho tirou 8,5"');
+    expect(ref).not.toMatch(/numero_contato2[^.\n]*=\s*respons/i);
+  });
+
   it("lista as palavras de passagem do agente, as mesmas da fixture", () => {
     for (const p of PALAVRAS_DE_PASSAGEM_DO_ALUNO) expect(ref, p).toContain(p);
   });
@@ -189,7 +196,8 @@ describe("pacote público (prompt genérico)", () => {
       "Se o sistema não informou, você não sabe",
       "Encontrei mais de um aluno relacionado a este número",
       "Não liste nomes",
-      "Não afirme nenhum dos dois",
+      "Não afirme nenhum desses papéis",
+      "Encontrei um cadastro de aluno relacionado a este número",
       "não tenho confirmação de alterações",
       "Não informe valores",
       "Passe de fato",
