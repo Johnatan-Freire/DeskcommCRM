@@ -10932,6 +10932,10 @@ export const DICIONARIO: Traducoes = {
     { es: "El servicio de WhatsApp de esta instalación no está configurado." },
   "O número de aviso não foi aceito pelo WhatsApp.":
     { es: "WhatsApp no aceptó el número de aviso." },
+  "O número escolhido para os avisos virou o número de uma conexão ativa da sua conta — o aviso não foi enviado.":
+    {
+      es: "El número elegido para los avisos pasó a ser el de una conexión activa de tu cuenta: el aviso no se envió.",
+    },
   "O número que envia os avisos atingiu o limite diário do período de aquecimento.":
     { es: "El número que envía los avisos alcanzó el límite diario del período de calentamiento." },
   "Esta instalação ainda não tem um endereço público — o aviso não teria link para abrir.":

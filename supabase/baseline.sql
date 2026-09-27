@@ -30658,7 +30658,12 @@ alter table public.entregas_de_aviso_de_caso
     'titular_anonimizado',
     'expirou',
     'falha_no_envio',
-    'indeterminado'));
+    'indeterminado',
+    -- (migration 0439) O número de destino voltou a ser de uma conexão ATIVA
+    -- desta organização — o laço robô-com-robô que a 0292 recusa ao DEFINIR o
+    -- aviso. Este bloco é o único da constraint, e já carrega o vocabulário
+    -- vigente: quem amplia o conjunto edita AQUI.
+    'destino_da_propria_organizacao'));
 
 -- A CHAVE DA IDEMPOTÊNCIA. O dreno do `event_log` reentrega o mesmo evento em
 -- retry e três processos diferentes drenam a mesma fila: sem esta unique, a
