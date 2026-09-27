@@ -30788,9 +30788,14 @@ begin
   -- O NÚMERO DE AVISO NÃO PODE SER UM NÚMERO DA PRÓPRIA ORGANIZAÇÃO. É o laço
   -- robô-com-robô: a conexão de avisos manda para o número oficial, o agente
   -- dele responde, e as duas pontas se alimentam sem fim.
+  -- A conexão ARQUIVADA fica FORA da conta. Ela não envia nem recebe, então o
+  -- laço não acontece por ela — e contá-la bloqueia o número PARA SEMPRE, porque
+  -- a conexão que já teve agente publicado não pode ser apagada (as versões a
+  -- seguram) e o número nunca mais poderia receber aviso.
   if exists (
        select 1 from public.channel_sessions s
         where s.organization_id = p_org
+          and s.archived_at is null
           and s.phone_number is not null
           and regexp_replace(s.phone_number, '\D', '', 'g') = any (v_variantes)) then
     raise exception 'aviso_de_caso_numero_da_propria_org' using errcode = '22023';
