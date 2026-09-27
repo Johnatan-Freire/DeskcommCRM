@@ -116,3 +116,30 @@ describe("runSilenceSweep entrega os agentes que HABILITAM o pointer", () => {
     expect(recebido).toHaveBeenCalledWith("org", expect.any(String), [], [AGENTE_DO_FLUXO]);
   });
 });
+
+describe("regra ESTRITA — os quatro casos que definem a regra", () => {
+  const AGENTE_A = AGENTE_DO_FLUXO;
+  const AGENTE_COMERCIAL = AGENTE_DO_FLUXO;
+  const inscritos = (autor: string | null, agentesDoFluxo: string[]) =>
+    createSupabaseSilenceSweepDb(admin(autor)).loadSilentContactIds("org", CORTE, [], agentesDoFluxo);
+
+  it("A — o agente A falou por último e o agente A habilitou o fluxo → inscreve", async () => {
+    expect(await inscritos(AGENTE_A, [AGENTE_A])).toEqual(["resp"]);
+  });
+
+  it("B — o agente do ALUNO falou por último; só o COMERCIAL habilitou o fluxo → não inscreve", async () => {
+    expect(await inscritos(AGENTE_DO_ALUNO, [AGENTE_COMERCIAL])).toEqual([]);
+  });
+
+  it("C — um agente falou, mas NENHUM agente habilitou o fluxo → não inscreve", async () => {
+    expect(await inscritos(AGENTE_A, [])).toEqual([]);
+  });
+
+  it("D — 'Sua nota é 8,5.' do agente do aluno, 24h de silêncio → nenhum follow-up comercial", async () => {
+    // O silêncio está vencido (o último inbound é de 01/09, o corte é 02/09 — bem mais
+    // de 24h) e a régua SQL AUTORIZA (o fake devolve "autorizado"): só o dono da
+    // pendência segura. É exatamente o caso que a régua SQL sozinha deixava passar.
+    expect(await inscritos(AGENTE_DO_ALUNO, [AGENTE_COMERCIAL])).toEqual([]);
+    expect(decidirOrigemDaPendencia(AGENTE_DO_ALUNO, [AGENTE_COMERCIAL])).toBe("agente_de_outro_fluxo");
+  });
+});
