@@ -8582,6 +8582,32 @@ export const DICIONARIO: Traducoes = {
   "Avisar a equipe na Central quando um negócio entrar em": {
     es: "Avisar al equipo en la Central cuando un negocio entre en",
   },
+  // ─── sons dos avisos (migration 0441; app/app/settings/notifications/_sons.tsx) ───
+  "Sons dos avisos": { es: "Sonidos de los avisos" },
+  "Tocam com o site aberto quando o aviso chega na Central. MP3, OGG ou WAV de até 1 MB.": {
+    es: "Suenan con el sitio abierto cuando el aviso llega a la Central. MP3, OGG o WAV de hasta 1 MB.",
+  },
+  "Etapa que avisa": { es: "Etapa que avisa" },
+  "Quando um negócio entra numa etapa marcada para avisar na Central (por exemplo, o pedido confirmado).": {
+    es: "Cuando un negocio entra en una etapa marcada para avisar en la Central (por ejemplo, el pedido confirmado).",
+  },
+  "Precisa de uma pessoa": { es: "Necesita una persona" },
+  "Quando o assistente passa a conversa para alguém da equipe, ou fica sem saldo no provedor de IA.": {
+    es: "Cuando el asistente pasa la conversación a alguien del equipo, o se queda sin saldo en el proveedor de IA.",
+  },
+  "Som personalizado": { es: "Sonido personalizado" },
+  "Som do sistema": { es: "Sonido del sistema" },
+  "Ouvir": { es: "Escuchar" },
+  "Trocar som": { es: "Cambiar sonido" },
+  "Usar o do sistema": { es: "Usar el del sistema" },
+  "Som salvo": { es: "Sonido guardado" },
+  "Voltou ao som do sistema": { es: "Volvió al sonido del sistema" },
+  "Erro ao subir o som.": { es: "Error al subir el sonido." },
+  "Erro ao salvar o som.": { es: "Error al guardar el sonido." },
+  "Escolha o aviso e o arquivo de som.": { es: "Elige el aviso y el archivo de sonido." },
+  "O som pode ter no máximo 1 MB.": { es: "El sonido puede tener como máximo 1 MB." },
+  "O som precisa ser MP3, OGG ou WAV.": { es: "El sonido tiene que ser MP3, OGG o WAV." },
+  "Aviso desconhecido.": { es: "Aviso desconocido." },
   // `informativo` e `crítico` saem iguais nos dois idiomas — sem linha, por isso.
   "atenção": { es: "atención" },
   // ─── lib/ai/agent-inbox-copy.ts (copyDaPromessaSemDono) ───

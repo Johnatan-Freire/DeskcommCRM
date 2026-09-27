@@ -2897,6 +2897,23 @@ Migration 0440. Spec: `tests/e2e/etapa-avisa-na-central.spec.ts` (job e2e, parte
 
 Evidência: `evidence/etapa-avisa-na-central/01-chave-ligada-na-etapa.png` (a chave ligada na etapa), `evidence/etapa-avisa-na-central/02-aviso-na-central.png` (o aviso na Central, sem o nome do cliente) e `evidence/etapa-avisa-na-central/03-abrir-negocio.png` (o negócio aberto pelo botão).
 
+### Os sons dos avisos `[P1]` (2026-09-27)
+
+Migration 0441. Spec: `tests/e2e/sons-dos-avisos.spec.ts` (job e2e, parte 1). O som é medido trocando, antes de a página carregar, `HTMLMediaElement.prototype.play` e `AudioContext.prototype.createOscillator` por versões que anotam a chamada — a decisão de tocar, qual som e quando são do produto.
+
+| Caso | Esperado |
+|---|---|
+| AV.6 | A gestora vê «Sons dos avisos» em Configurações › Notificações, com «Etapa que avisa» e «Precisa de uma pessoa» no som do sistema |
+| AV.7 | Um arquivo de texto com nome `.mp3` é recusado («O som precisa ser MP3, OGG ou WAV.») e nada muda no banco |
+| AV.8 | Um WAV entra: a tela diz «Som personalizado», o caminho fica em `settings.sons_de_aviso` sob a pasta da organização e o arquivo está no bucket `org-sounds` |
+| AV.9 | «Usar o do sistema» tira a chave e apaga o arquivo |
+| AV.10 | A visualizadora vê o som que vale e o botão «Ouvir», mas não vê «Trocar som» nem «Usar o do sistema» |
+| AV.11 | Com o site aberto, o aviso antigo não toca; a passagem NOVA toca o arquivo da organização (URL assinada); a etapa que avisa NOVA, sem arquivo, toca o bipe do produto |
+
+**NÃO coberto por esta spec:** o som saindo de um alto-falante de verdade, e o navegador que recusa áudio antes de a pessoa interagir (o hook cai no bipe e, se nem isso, o aviso segue visível).
+
+Evidência: `evidence/sons-dos-avisos/01-som-personalizado.png` (a gestora com o som escolhido para «Precisa de uma pessoa») e `evidence/sons-dos-avisos/02-visualizadora.png` (a visualizadora, sem o botão de trocar).
+
 ### Continuação de conversões: links nomeados (27/09/2026)
 
 - [P1] Configurações → Conversões → Links rastreáveis: criar, recarregar, editar/desativar, copiar link/script e verificar instalação.

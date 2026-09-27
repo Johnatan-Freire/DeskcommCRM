@@ -91,6 +91,20 @@
       "col": 0,
       "type": "service",
       "label": "leads.aviso-de-etapa: lead.stage_changed → aviso other/lead"
+    },
+    {
+      "id": "campainha",
+      "lane": "humano",
+      "col": 5,
+      "type": "ui",
+      "label": "Campainha do topo: aviso NOVO que pede gente toca o som (useSonsDaCentral, leitura de 30 s)"
+    },
+    {
+      "id": "sons",
+      "lane": "app",
+      "col": 5,
+      "type": "service",
+      "label": "/api/v1/settings/sons + bucket privado org-sounds (0441); regra única somDoAviso"
     }
   ],
   "edges": [
@@ -148,6 +162,21 @@
       "from": "aviso_de_etapa",
       "to": "produtores",
       "label": "um aviso por negócio e etapa, só o nome da etapa no texto"
+    },
+    {
+      "from": "central",
+      "to": "campainha",
+      "label": "abertos, relidos a cada 30 s"
+    },
+    {
+      "from": "sons",
+      "to": "campainha",
+      "label": "URL assinada de 1 h (sem arquivo: bipe do produto)"
+    },
+    {
+      "from": "campainha",
+      "to": "contexto",
+      "label": "quem ouviu abre a Central"
     }
   ]
 }
