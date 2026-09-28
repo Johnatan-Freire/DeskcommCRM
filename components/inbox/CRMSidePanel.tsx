@@ -810,7 +810,7 @@ export function CRMSidePanel({ conversation }: Props) {
       <section data-testid="inbox-memoria">
         <h3 className="text-xs font-semibold">{t("Memória do contato")}</h3>
         <p className="mt-1 text-xs text-muted-foreground">{t("Fatos duráveis registrados nas notas. Pendências pertencem à demanda vigente.")}</p>
-        {!sectionsLoading && fatos.map((f) => <details key={f.id} className="mt-2 text-xs"><summary>{f.headline}</summary><p className="mt-1 whitespace-pre-wrap">{f.body}</p></details>)}
+        {!sectionsLoading && fatos.map((f) => <details key={f.id} className="mt-2 text-xs"><summary className="wrap-anywhere">{f.headline}</summary><p className="mt-1 whitespace-pre-wrap wrap-anywhere">{f.body}</p></details>)}
         {!sectionsLoading && fatos.length === 0 && <p className="mt-2 text-xs text-muted-foreground">{t("Nenhum fato durável registrado.")}</p>}
         {!sectionsLoading && historico.length > 0 && <div className="mt-3 text-xs"><h4>{t("Histórico encerrado — sem tarefas pendentes")}</h4>{historico.map((h) => <p key={h.id}>{t(DESFECHO_LEGIVEL[h.desfecho] ?? h.desfecho)}{h.fechada_em ? ` · ${shortDate(h.fechada_em, localeDaData)}` : ""}</p>)}</div>}
       </section>
