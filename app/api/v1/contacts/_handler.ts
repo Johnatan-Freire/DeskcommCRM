@@ -29,6 +29,7 @@ import type {
 } from "@/lib/schemas";
 import { contactListQuerySchema } from "@/lib/schemas";
 import { arrayDeUmValorParaOr } from "@/lib/inbox/marcador-da-conversa";
+import { buscaValeConsulta, normalizarTermoDeBusca } from "@/lib/inbox/termo-de-busca";
 
 type SB = SupabaseClient;
 
@@ -94,6 +95,30 @@ export async function listContactsHandler(
   raw: ContactListQueryParams,
 ): Promise<ListContactsResult> {
   const q: ContactListQuery = contactListQuerySchema.parse(raw);
+
+  // ─── O PISO DA BUSCA (#1835) ───────────────────────────────────────────────
+  //
+  // `?search=a` montava `name.ilike.%a%` e devolvia a LISTA INTEIRA — e lista
+  // inteira sob busca não é resposta, é ruído que PARECE resposta. É a MESMA
+  // medição que criou `PISO_DA_BUSCA` no inbox, aqui pela porta que hoje não a
+  // tinha (a de conversas recusa no schema Zod; a de contatos deixava passar).
+  //
+  // A régua é consultada DENTRO do handler, e não no schema, de propósito: a
+  // tela de contatos manda o termo como foi digitado (`useContactList` não tem
+  // guarda de piso), então um `422` acenderia `showApiError` a cada letra
+  // digitada; e o MCP (`crm_search_contacts`) chama este handler direto e
+  // receberia um `ZodError` no meio da ferramenta. O efeito pedido é o mesmo
+  // dos dois lados: abaixo do piso a busca NÃO VAI AO BANCO, e quem digita vê
+  // a lista vazia até completar os dois caracteres.
+  //
+  // O piso mede o MESMO termo que vai ao filtro: sem os parênteses (ver o
+  // bloco do `.or()` abaixo). Medir o cru deixava `"()"` consultar `%%` e
+  // `"(a"` consultar `%a%` — a lista inteira de volta pela porta do parêntese.
+  const termoDeTexto = q.search ? q.search.replace(/[()]/g, " ") : undefined;
+  if (termoDeTexto !== undefined && !buscaValeConsulta(termoDeTexto)) {
+    return { contacts: [], cursor: null, has_more: false };
+  }
+
   const sortCol = q.order_by;
   const asc = q.order_dir === "asc";
 
@@ -123,11 +148,23 @@ export async function listContactsHandler(
     .order("id", { ascending: asc })
     .limit(q.limit + 1);
 
-  if (q.search) {
-    // ⚠️ `%` e `_` são curingas do LIKE, e `,`/`(`/`)` são delimitadores do DSL
-    // do `.or()` — um nome com vírgula ("Silva, Maria") injetaria uma condição
-    // extra na string do filtro. Mesmo escape de conversations/_handler.ts.
-    const s = q.search.trim().replace(/[%_]/g, (m) => `\\${m}`).replace(/[,()]/g, " ");
+  if (q.search && termoDeTexto !== undefined) {
+    // ─── Duas normalizações, em ordem, com responsabilidades diferentes ─────
+    // É a MESMA composição da busca de conversas
+    // (`conversations/_handler.ts:297`, `termoSeguroParaOr(normalizarTermoDeBusca(...))`):
+    //
+    //   normalizarTermoDeBusca → como a PESSOA digitou: espaço duplo, vírgula e
+    //                            ponto e vírgula colapsam num curinga só, então
+    //                            "Paulo  Lima" e "Paulo Jr" achem o "Paulo Lima Jr"
+    //                            e "Silva, Maria" não exige mais adjacência
+    //   saneamento de `%`/`_`  → gramática do LIKE: curinga digitado é literal
+    //
+    // Os PARÊNTESES saem ANTES da régua: são delimitador do DSL do `.or()` do
+    // PostgREST (um "(" sem fechar derrubaria o filtro inteiro com HTTP 400) e
+    // a normalização não os conhece — tirá-los depois deixaria `Paulo* Jr` com
+    // espaço solto, que não casa nada. Mesmo escape de sempre, mesmo defeito de
+    // sempre: um nome com vírgula injetaria condição extra no `.or()`.
+    const s = normalizarTermoDeBusca(termoDeTexto).replace(/[%_]/g, (m) => `\\${m}`);
     const digits = q.search.replace(/\D/g, "");
     const orParts = [
       `name.ilike.%${s}%`,
