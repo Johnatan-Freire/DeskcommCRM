@@ -7496,9 +7496,11 @@ export const DICIONARIO: Traducoes = {
   "Confirmar nova senha": { es: "Confirmar nueva contraseña" },
   "Mostrar nova senha": { es: "Mostrar nueva contraseña" },
   "Ocultar nova senha": { es: "Ocultar nueva contraseña" },
+  "Mostrar senha": { es: "Mostrar contraseña" },
+  "Ocultar senha": { es: "Ocultar contraseña" },
   "Mostrar confirmação da senha": { es: "Mostrar confirmación de la contraseña" },
   "Ocultar confirmação da senha": { es: "Ocultar confirmación de la contraseña" },
-  // Indicador de força (components/auth/ResetPasswordForm.tsx): rótulo e
+  // Indicador de força (recuperação e cadastro): rótulo e
   // requisitos vêm de listas, t(label) dinâmico, invisível ao scanner de t().
   "Força da senha": { es: "Seguridad de la contraseña" },
   "Muito fraca": { es: "Muy débil" },
