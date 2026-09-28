@@ -28,6 +28,23 @@ test.describe("o ícone e o título carregam a marca da instalação", () => {
     expect(manifest.short_name).toBe(nome);
   });
 
+  test("o manifest oferece ícones reais de aplicativo antes do login", async ({ page }) => {
+    await page.goto("/login");
+    const manifest = await (await page.request.get("/manifest.webmanifest")).json();
+    expect(manifest.icons.map((icone: { sizes: string }) => icone.sizes)).toEqual([
+      "192x192",
+      "512x512",
+    ]);
+    for (const [indice, lado] of [192, 512].entries()) {
+      const resposta = await page.request.get(manifest.icons[indice].src, { maxRedirects: 0 });
+      expect(resposta.status()).toBe(200);
+      expect(resposta.headers()["content-type"]).toMatch(/^image\/png/);
+      const png = await resposta.body();
+      expect(png.readUInt32BE(16)).toBe(lado);
+      expect(png.readUInt32BE(20)).toBe(lado);
+    }
+  });
+
   test("GET /icon responde imagem para quem não entrou", async ({ request }) => {
     const res = await request.get("/icon", { maxRedirects: 0 });
 

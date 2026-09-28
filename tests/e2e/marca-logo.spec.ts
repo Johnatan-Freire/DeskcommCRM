@@ -1079,6 +1079,54 @@ test.describe("o logo subido pela tela chega à tela", () => {
     // NOTA DO TETO no caso (1).
   });
 
+  test("o ícone enviado pela tela identifica também o aplicativo instalado", async ({ page }) => {
+    await entrarNaCamada(page, "instalacao");
+    await page.goto("/admin/marca");
+    await expect(page.locator("[data-campo-de-logo='instalacao'][data-hidratado]")).toBeVisible({
+      timeout: 15_000,
+    });
+    const campo = page.locator("[data-campo-do-icone-da-aba]");
+    await expect(
+      campo.getByText("Ícone do aplicativo e do navegador", { exact: true }),
+    ).toBeVisible();
+    try {
+      await campo
+        .locator("input[type=file]")
+        .setInputFiles({
+          name: "icone-do-app.png",
+          mimeType: "image/png",
+          buffer: PNG_DA_PLATAFORMA,
+        });
+      await expect(page.getByText("Ícone da aba atualizado.", { exact: true })).toBeVisible({
+        timeout: 15_000,
+      });
+      await expect(campo.locator("[data-previa-do-icone='arquivo'] img")).toBeVisible();
+      const manifest = await (await page.request.get("/manifest.webmanifest")).json();
+      for (const [indice, lado] of [192, 512].entries()) {
+        expect(manifest.icons[indice].src).toContain("?v=platform%2F");
+        const resposta = await page.request.get(manifest.icons[indice].src);
+        expect(resposta.status()).toBe(200);
+        const png = await resposta.body();
+        expect(png.readUInt32BE(16)).toBe(lado);
+        expect(png.readUInt32BE(20)).toBe(lado);
+        const imagem = lerPng(png);
+        const centro = 4 * (Math.floor(lado / 2) * lado + Math.floor(lado / 2));
+        expect([...imagem.rgba.subarray(centro, centro + 3)]).toEqual([0x1d, 0x4e, 0xd8]);
+      }
+      await page.screenshot({ path: path.join(EVIDENCIA, "icone-app-pela-tela.png") });
+    } finally {
+      const remover = campo.getByRole("button", { name: "Remover ícone", exact: true });
+      if (await remover.count()) {
+        await remover.click();
+        await expect(page.getByText("Ícone da aba removido.", { exact: true })).toBeVisible({
+          timeout: 15_000,
+        });
+      }
+    }
+    const manifest = await (await page.request.get("/manifest.webmanifest")).json();
+    expect(manifest.icons[0].src).toBe("/app-icon/192");
+  });
+
   /**
    * A RESTAURAÇÃO — e ela é um `afterAll`, ao contrário do que este arquivo
    * afirmou.
