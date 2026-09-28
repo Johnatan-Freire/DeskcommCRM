@@ -1613,6 +1613,24 @@ grampeado no `clientHeight`, então "excesso 0" e "sobra 200px" dão o MESMO nú
 Quem quiser saber quanta folga restou tem de medir o `bottom` do último filho
 contra a caixa de conteúdo da `<nav>` — foi assim que os 19px saíram.
 
+## Os contadores do menu: Casos e a Fila (2026-09-27)
+
+Origem: numa loja que vende pelo WhatsApp, a IA abriu um caso e passou duas
+conversas para a equipe numa manhã, e o dono só soube abrindo cada tela e
+procurando. «Casos» sobe para o menu da IA com o número de casos em
+`awaiting_human`, e «Inbox» ganha o número da aba Fila. Para o menu seguir
+cabendo em 1280×900 — a folga medida acima é de 19px, menos de uma linha —,
+«Roteadores» sai do menu no mesmo passo e fica no hub «Ver tudo em IA».
+
+| caso | prioridade | estado |
+|---|---|---|
+| O número de Casos é o da lista de Casos (itens «Aguardando você»), sobe com um caso novo e desce quando ele fecha | `[P1]` | **PASS** (2026-09-27), `tests/e2e/contadores-do-menu.spec.ts` — semeia o próprio caso. Medido: 1 → 2 com o caso, de volta a 1 ao fechar. Evidência: `evidence/contadores-no-menu/01-casos-com-contador.png`, `evidence/contadores-no-menu/02-casos-depois-de-fechar.png` e `evidence/contadores-no-menu/medidas-casos.json` |
+| O número de Inbox é o da aba Fila e desce quando a conversa sai dela | `[P1]` | **PASS** (2026-09-27), mesma spec: 3 na aba e no menu, 2 depois. Evidência: `evidence/contadores-no-menu/03-inbox-com-contador-da-fila.png`, `evidence/contadores-no-menu/04-inbox-depois-de-sair-da-fila.png` e `evidence/contadores-no-menu/medidas-fila.json` |
+| Zero não desenha nada | `[P1]` | `tests/unit/contador-de-casos.test.tsx` e `tests/unit/contador-da-fila.test.tsx`; na spec, quando a organização fica sem pendência |
+| O selo mora dentro do item e não quebra a linha | `[P1]` | **PASS**, medido por `getBoundingClientRect` na spec: selo contido no item, altura do item **28px** = a do vizinho sem selo |
+| O menu continua cabendo em 900px com Casos no lugar de Roteadores | `[P1]` | **PASS**, `tests/e2e/navegacao.spec.ts` (o caso da dobra); a folga medida pela spec nova segue **19px**, sem rolar |
+| Roteadores continua tendo porta (DoD 14) | `[P1]` | `tests/unit/navegacao-completude.test.ts` e o hub «Ver tudo em IA» |
+
 ## O inbox em tempo real — o defeito que veio de fora (2026-08-24)
 
 **Sintoma relatado pelo dono:** *"Recebemos mensagem e só reflete no inbox (na

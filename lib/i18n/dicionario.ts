@@ -2461,6 +2461,11 @@ export const DICIONARIO: Traducoes = {
   "Enviando...": { es: "Enviando..." },
   // ─── lib/ai/case-copy.ts (status, ações e timeline dos casos humanos) ───
   "Aguardando você": { es: "Esperando tu respuesta" },
+  // Os contadores do menu (`components/shell/ContadorDeCasos.tsx` e `ContadorDaFila.tsx`).
+  "1 caso esperando você": { es: "1 caso esperándote" },
+  "casos esperando você": { es: "casos esperándote" },
+  "1 conversa esperando uma pessoa": { es: "1 conversación esperando a una persona" },
+  "conversas esperando uma pessoa": { es: "conversaciones esperando a una persona" },
   "Virou atendimento humano": { es: "Pasó a atención humana" },
   "Aguardando o cliente responder — a IA avisa você quando tiver a informação.": {
     es: "Esperando la respuesta del cliente. La IA te avisará cuando tenga la información.",
