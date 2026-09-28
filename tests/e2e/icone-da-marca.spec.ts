@@ -17,6 +17,17 @@ import { test, expect } from "./helpers/test";
  * spec não consome do teto de 60 logins/IP/300s que a suíte compartilha.
  */
 test.describe("o ícone e o título carregam a marca da instalação", () => {
+  test("o manifest usa o mesmo nome de instalação que a metadata do login", async ({ page }) => {
+    await page.goto("/login");
+    const nome = await page.locator('meta[name="application-name"]').getAttribute("content");
+    expect(nome).toBeTruthy();
+    const resposta = await page.request.get("/manifest.webmanifest");
+    expect(resposta.status()).toBe(200);
+    const manifest = await resposta.json();
+    expect(manifest.name).toBe(nome);
+    expect(manifest.short_name).toBe(nome);
+  });
+
   test("GET /icon responde imagem para quem não entrou", async ({ request }) => {
     const res = await request.get("/icon", { maxRedirects: 0 });
 
@@ -39,10 +50,7 @@ test.describe("o ícone e o título carregam a marca da instalação", () => {
     page,
   }) => {
     await page.goto("/login");
-    const href = await page
-      .locator('link[rel~="icon"]')
-      .first()
-      .getAttribute("href");
+    const href = await page.locator('link[rel~="icon"]').first().getAttribute("href");
     expect(href, "nenhum <link rel=icon> no <head>").toBeTruthy();
     // `/icon` com ou sem query de cache-busting do Next.
     expect(new URL(href ?? "", "http://x").pathname).toBe("/icon");
