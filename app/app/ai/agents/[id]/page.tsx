@@ -177,7 +177,7 @@ export default async function AgentEditorPage({ params }: { params: Promise<{ id
     const c = coberturaDoFunil(etapasPorFunil.get(f.id) ?? []);
     cobertura[f.id] = { traduzidos: c.traduzidos, total: c.total, mudo: c.mudo };
   }
-  const credentials = (credentialsRes.data ?? []) as unknown as CredentialRow[];
+  const credentials = (credentialsRes.data ?? []) as CredentialRow[];
   const routerMemberRow = routerMemberRes.data as {
     router_id: string;
     ai_routers: { name: string } | null;
