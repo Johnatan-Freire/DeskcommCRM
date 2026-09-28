@@ -1,6 +1,6 @@
 /**
  * Ação `call_webhook` — POST outbound com envelope
- * {event, occurred_at, delivery_id, data}, assinatura HMAC-sha256 opcional
+ * {event, occurred_at, happened_at, delivery_id, data}, assinatura HMAC-sha256 opcional
  * (config.secret) e retry 3x (1s/5s) em falha de rede ou status não-2xx.
  * Anti-SSRF via assertSafeOutboundUrl antes de qualquer fetch (pulável só via
  * opts.skipUrlCheck, usado nos testes).
@@ -170,10 +170,15 @@ export function tentativasRegistradas(runs: ReadonlyArray<{ actions_result?: unk
 }
 
 /**
- * `occurred_at` é a hora do FATO (`event_log.created_at`), não a do envio: sem
- * isso cada retentativa mudava o corpo e o receptor não tinha como saber quando
- * a coisa aconteceu. Normalizado em ISO-8601 UTC com milissegundos — o formato
- * que o campo sempre teve (o Postgres manda microssegundos e `+00:00`).
+ * `happened_at` é a hora do FATO (`event_log.created_at`): o receptor passa a
+ * saber quando a coisa aconteceu, e o valor é o mesmo no Reenviar. Normalizado
+ * em ISO-8601 UTC com milissegundos, o formato do `occurred_at` (o Postgres
+ * manda microssegundos e `+00:00`).
+ *
+ * O `occurred_at` NÃO mudou: segue sendo a hora em que esta execução montou a
+ * entrega, como sempre foi. É contrato público — receptor que recusa
+ * requisição velha por ele passaria a recusar o Reenviar e a automação adiada
+ * se ele virasse a hora do fato (ajuste sobre o #1830).
  *
  * `created_at` é opcional no `EventRow` (fixtures); o motor e o Reenviar sempre
  * o trazem. Faltando ou inválido, volta para a hora do envio, o comportamento
@@ -265,7 +270,8 @@ export async function executeCallWebhook(
   const entrega = idDaEntrega(ctx.event.id, ctx.ruleId, ctx.actionIndex ?? 0, ctx.ruleActions ?? []);
   const body = JSON.stringify({
     event: ctx.event.event_type,
-    occurred_at: horaDoFato(ctx.event.created_at),
+    occurred_at: new Date().toISOString(),
+    happened_at: horaDoFato(ctx.event.created_at),
     delivery_id: entrega,
     data: {
       ...ctx.event.payload,

@@ -103,14 +103,17 @@ function bancoFalso(tabelas: Record<string, Linha[]>): SupabaseClient {
 
 type Recebida = Record<string, string | string[] | undefined>;
 const recebidas: Recebida[] = [];
+const corpos: Array<{ occurred_at: string; happened_at: string }> = [];
 let url = "";
 let fecharReceptor: () => Promise<void> = async () => undefined;
 
 beforeAll(async () => {
   const server = createServer((req, res) => {
-    req.resume();
+    const pedacos: Buffer[] = [];
+    req.on("data", (c: Buffer) => pedacos.push(c));
     req.on("end", () => {
       recebidas.push(req.headers);
+      corpos.push(JSON.parse(Buffer.concat(pedacos).toString("utf8")));
       res.writeHead(200);
       res.end("ok");
     });
@@ -129,6 +132,7 @@ afterAll(async () => {
 beforeEach(() => {
   vi.clearAllMocks();
   recebidas.length = 0;
+  corpos.length = 0;
   deps.support.mockResolvedValue(null);
   deps.role.mockResolvedValue({ ok: true, user: { id: EU, idioma: "pt-BR" }, org: { orgId: ORG } });
 });
@@ -196,12 +200,20 @@ describe("webhook de saída: o Reenviar é a mesma entrega (#1529)", () => {
     const resultadoOriginal = (original.actions_result as Array<{ detail?: Linha }>)[1];
     expect(resultadoOriginal?.detail).toMatchObject({ delivery_id: entrega, attempt: 1 });
 
-    // 2. O Reenviar do run original.
+    // 2. O Reenviar do run original — meses depois do fato (created_at em 2026-01-01).
+    const antesDoReenvio = Date.now();
     const primeiro = await reenviar(original.id as string);
+    const depoisDoReenvio = Date.now();
     expect(primeiro.status).toBe(201);
     expect(recebidas).toHaveLength(2);
     expect(recebidas[1]?.["x-webhook-delivery"]).toBe(entrega);
     expect(recebidas[1]?.["x-webhook-attempt"]).toBe("2");
+    // `occurred_at` segue sendo a hora do ENVIO (contrato público); a do fato
+    // vai em `happened_at` e é a mesma no disparo e no Reenviar.
+    expect(corpos.map((c) => c.happened_at)).toEqual(["2026-01-01T00:00:00.000Z", "2026-01-01T00:00:00.000Z"]);
+    const reenviadoEm = Date.parse(corpos[1]?.occurred_at ?? "");
+    expect(reenviadoEm).toBeGreaterThanOrEqual(antesDoReenvio);
+    expect(reenviadoEm).toBeLessThanOrEqual(depoisDoReenvio);
     const reenviado = tabelas.automation_rule_runs?.[1];
     expect((reenviado?.actions_result as Array<{ detail?: Linha }>)[0]?.detail).toMatchObject({
       delivery_id: entrega,

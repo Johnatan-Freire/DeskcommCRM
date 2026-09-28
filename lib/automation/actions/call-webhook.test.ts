@@ -379,9 +379,9 @@ const VETOR = {
   ],
   entrega: "209f529f-3a34-5ccb-9486-5e20cd48fb45",
   corpo:
-    '{"event":"lead.created","occurred_at":"2026-01-01T00:00:00.000Z","delivery_id":"209f529f-3a34-5ccb-9486-5e20cd48fb45","data":{"lead":{"id":"lead-1"}}}',
-  v1: "619127abca12d74bf823c17866b3c6c6a6f2f25c1da06a3e72bc8a28c5c55b37",
-  legada: "c1549192249a39856d29a655e835efb52787b22f7c4be8777fd8abf81cb539d6",
+    '{"event":"lead.created","occurred_at":"2026-01-01T00:00:00.000Z","happened_at":"2025-12-31T21:00:00.000Z","delivery_id":"209f529f-3a34-5ccb-9486-5e20cd48fb45","data":{"lead":{"id":"lead-1"}}}',
+  v1: "bccb00c040649c7e2618d9cd4a3bc79ade96d5dd939c0fb11f26064c538e57a5",
+  legada: "6aa08c69080a291fadcdd6913d78e79dbd2705a95b3cf87c8a0018491a1a8dab",
 } as const;
 
 type Recebida = { headers: Record<string, string | string[] | undefined>; body: string };
@@ -531,8 +531,11 @@ describe("webhook de saída — entrega identificada e assinatura com carimbo (#
     expect(cabecalho(recebida, "x-webhook-attempt")).toBe("4");
   });
 
-  it("occurred_at é a hora do FATO (event.created_at), não a do envio", async () => {
+  // Ajuste sobre o #1830: `occurred_at` é contrato público e segue sendo a
+  // hora do ENVIO; a hora do fato sai num campo novo, `happened_at`.
+  it("envio adiado: occurred_at é a hora do envio, happened_at é event.created_at", async () => {
     const r = await receptor([200, 200]);
+    const antes = Date.now();
     await executeCallWebhook(
       baseCtx({ created_at: "2026-01-01T00:00:00.000Z" }),
       { url: r.url },
@@ -544,14 +547,20 @@ describe("webhook de saída — entrega identificada e assinatura com carimbo (#
       { url: r.url },
       { skipUrlCheck: true },
     );
+    const depois = Date.now();
     await r.close();
 
-    const [primeira, segunda] = r.recebidas.map((x) => JSON.parse(x.body) as { occurred_at: string });
-    expect(primeira?.occurred_at).toBe("2026-01-01T00:00:00.000Z");
-    expect(segunda?.occurred_at).toBe("2026-03-04T05:06:07.123Z");
+    const corpos = r.recebidas.map((x) => JSON.parse(x.body) as { occurred_at: string; happened_at: string });
+    expect(corpos.map((c) => c.happened_at)).toEqual(["2026-01-01T00:00:00.000Z", "2026-03-04T05:06:07.123Z"]);
+    for (const corpo of corpos) {
+      expect(corpo.occurred_at).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+      const enviadoEm = Date.parse(corpo.occurred_at);
+      expect(enviadoEm).toBeGreaterThanOrEqual(antes);
+      expect(enviadoEm).toBeLessThanOrEqual(depois);
+    }
   });
 
-  it("sem created_at (ou inválido), occurred_at volta para a hora do envio", async () => {
+  it("sem created_at (ou inválido), happened_at cai para a hora do envio", async () => {
     const r = await receptor([200, 200]);
     const antes = Date.now();
     await executeCallWebhook(baseCtx(), { url: r.url }, { skipUrlCheck: true });
@@ -560,7 +569,7 @@ describe("webhook de saída — entrega identificada e assinatura com carimbo (#
     await r.close();
 
     for (const recebida of r.recebidas) {
-      const quando = Date.parse((JSON.parse(recebida.body) as { occurred_at: string }).occurred_at);
+      const quando = Date.parse((JSON.parse(recebida.body) as { happened_at: string }).happened_at);
       expect(quando).toBeGreaterThanOrEqual(antes);
       expect(quando).toBeLessThanOrEqual(depois);
     }

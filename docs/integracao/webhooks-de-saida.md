@@ -22,6 +22,7 @@ Um `POST` com `Content-Type: application/json` e este corpo:
 {
   "event": "lead.created",
   "occurred_at": "2026-01-01T00:00:00.000Z",
+  "happened_at": "2025-12-31T21:00:00.000Z",
   "delivery_id": "209f529f-3a34-5ccb-9486-5e20cd48fb45",
   "data": { "lead": { "id": "lead-1" } }
 }
@@ -30,7 +31,8 @@ Um `POST` com `Content-Type: application/json` e este corpo:
 | Campo | O que é |
 |---|---|
 | `event` | O tipo do evento que disparou a automação (o mesmo do cabeçalho `X-Deskcomm-Event`). |
-| `occurred_at` | A hora em que o **fato** aconteceu, em ISO-8601 UTC com milissegundos. Não é a hora do envio: é a mesma em todas as tentativas e no Reenviar, e pode ter horas ou dias (uma automação adiada pela janela de envio do WhatsApp, um Reenviar clicado dias depois). **Até a versão que trouxe o `X-Webhook-Delivery`, este campo era a hora do envio** — ver a seção 8. Para medir a idade da requisição, use o `t` de dentro do `X-Webhook-Signature` (seção 3), que é o valor assinado — nunca o `occurred_at` nem o `X-Webhook-Timestamp`. |
+| `occurred_at` | A hora em que o CRM montou esta entrega (o disparo da automação ou o clique em Reenviar), em ISO-8601 UTC com milissegundos. É o que o campo sempre foi. As retentativas automáticas de um mesmo disparo, segundos depois, repetem o corpo e portanto este valor. Para medir a idade da requisição, prefira o `t` de dentro do `X-Webhook-Signature` (seção 3): ele é a hora do envio de **cada tentativa** e também é coberto pela assinatura. |
+| `happened_at` | A hora em que o **fato** aconteceu (o lead foi criado, a etapa mudou…), em ISO-8601 UTC com milissegundos. É a mesma em todas as tentativas e no Reenviar, e pode ter horas ou dias de idade (uma automação adiada pela janela de envio do WhatsApp, um Reenviar clicado dias depois). Use-o para ordenar os fatos no seu sistema; nunca para recusar requisição velha. |
 | `delivery_id` | O id da entrega — o mesmo valor do cabeçalho `X-Webhook-Delivery`. |
 | `data` | Os dados do evento, com a projeção pública do lead, do contato e do compromisso quando existem. |
 
@@ -208,9 +210,9 @@ se um valor daqui deixar de bater com o que o CRM assina, o teste reprova.
 | Segredo | `segredo-de-exemplo-nao-use-em-producao` |
 | `t` do `X-Webhook-Signature` (o mesmo valor sai no `X-Webhook-Timestamp`) | `1767225600` |
 | `X-Webhook-Delivery` | `209f529f-3a34-5ccb-9486-5e20cd48fb45` |
-| Corpo cru (uma linha, sem espaços) | `{"event":"lead.created","occurred_at":"2026-01-01T00:00:00.000Z","delivery_id":"209f529f-3a34-5ccb-9486-5e20cd48fb45","data":{"lead":{"id":"lead-1"}}}` |
-| `X-Webhook-Signature` esperado | `t=1767225600,v1=619127abca12d74bf823c17866b3c6c6a6f2f25c1da06a3e72bc8a28c5c55b37` |
-| `X-Deskcomm-Signature` (legado) esperado | `c1549192249a39856d29a655e835efb52787b22f7c4be8777fd8abf81cb539d6` |
+| Corpo cru (uma linha, sem espaços) | `{"event":"lead.created","occurred_at":"2026-01-01T00:00:00.000Z","happened_at":"2025-12-31T21:00:00.000Z","delivery_id":"209f529f-3a34-5ccb-9486-5e20cd48fb45","data":{"lead":{"id":"lead-1"}}}` |
+| `X-Webhook-Signature` esperado | `t=1767225600,v1=bccb00c040649c7e2618d9cd4a3bc79ade96d5dd939c0fb11f26064c538e57a5` |
+| `X-Deskcomm-Signature` (legado) esperado | `6aa08c69080a291fadcdd6913d78e79dbd2705a95b3cf87c8a0018491a1a8dab` |
 
 Com `agora = 1767225610` a verificação passa; com `agora = 1767225901`
 (301 s depois) ela recusa.
@@ -218,21 +220,19 @@ Com `agora = 1767225610` a verificação passa; com `agora = 1767225901`
 ## 8. Migrando do cabeçalho legado
 
 Quem hoje confere o `X-Deskcomm-Signature` não precisa mudar a conferência
-agora: ele continua saindo igual. **Uma coisa mudou no corpo, e ela pede
-atenção:** o `occurred_at` era a hora do **envio** e passou a ser a hora do
-**fato**. Se o seu sistema usa o `occurred_at` como hora de chegada, ou para
-recusar requisição velha (*"recuso se agora − occurred_at > 5 min"*), ele vai
-passar a recusar entregas legítimas: a retentativa de uma automação adiada pela
-janela de envio do WhatsApp e o Reenviar clicado horas depois saem com o
-`occurred_at` de quando o fato aconteceu. Troque essa conta pelo `t` de dentro
-do `X-Webhook-Signature`, que é a hora do envio de cada tentativa **e** é
-coberto pela assinatura. O `X-Webhook-Timestamp` leva o mesmo número, mas não é
+agora: ele continua saindo igual. O corpo ganhou dois campos, `delivery_id` e
+`happened_at` (a hora do fato), e nenhum campo que já existia mudou de
+significado: o `occurred_at` segue sendo a hora em que o CRM montou a entrega.
+Se o seu sistema mede a idade da requisição pelo `occurred_at`, ele continua
+funcionando como antes, mas a medida certa é o `t` de dentro do
+`X-Webhook-Signature`, que é a hora do envio de cada tentativa **e** é coberto
+pela assinatura. O `X-Webhook-Timestamp` leva o mesmo número, mas não é
 assinado: medir a idade por ele deixa passar uma requisição velha repetida com
 esse cabeçalho trocado (seção 2).
 
 Para migrar:
 
-1. Se você mede a idade da requisição pelo `occurred_at`, passe a medir pelo
+1. Se você mede a idade da requisição pelo `occurred_at`, prefira medir pelo
    `t` do `X-Webhook-Signature` (parágrafo acima).
 2. Passe a conferir o `X-Webhook-Signature` (seções 3, 5 e 6) e, **a partir
    desse momento, recuse a requisição que chega sem ele**. Não use o

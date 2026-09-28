@@ -34,9 +34,9 @@ const VETOR = {
   t: 1767225600,
   entrega: "209f529f-3a34-5ccb-9486-5e20cd48fb45",
   corpo:
-    '{"event":"lead.created","occurred_at":"2026-01-01T00:00:00.000Z","delivery_id":"209f529f-3a34-5ccb-9486-5e20cd48fb45","data":{"lead":{"id":"lead-1"}}}',
-  v1: "619127abca12d74bf823c17866b3c6c6a6f2f25c1da06a3e72bc8a28c5c55b37",
-  legada: "c1549192249a39856d29a655e835efb52787b22f7c4be8777fd8abf81cb539d6",
+    '{"event":"lead.created","occurred_at":"2026-01-01T00:00:00.000Z","happened_at":"2025-12-31T21:00:00.000Z","delivery_id":"209f529f-3a34-5ccb-9486-5e20cd48fb45","data":{"lead":{"id":"lead-1"}}}',
+  v1: "bccb00c040649c7e2618d9cd4a3bc79ade96d5dd939c0fb11f26064c538e57a5",
+  legada: "6aa08c69080a291fadcdd6913d78e79dbd2705a95b3cf87c8a0018491a1a8dab",
 };
 
 /** As linhas `| rótulo | `valor` |` da §7 do guia, na ordem em que aparecem. */
