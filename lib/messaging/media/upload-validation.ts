@@ -14,7 +14,14 @@ export type MessageKind = "image" | "video" | "audio" | "document";
  * `docs/doctrine/restricao-de-canal.md` proíbe.
  */
 export function isMediaPathOwnedBy(path: string, orgId: string, conversationId: string): boolean {
-  return path.startsWith(`${orgId}/${conversationId}/`);
+  const prefixo = `${orgId}/${conversationId}/`;
+  if (!path.startsWith(prefixo)) return false;
+  // O prefixo sozinho não prova posse: `{org}/{conv}/../../{outra}/x` começa certo e,
+  // se o Storage resolver o `..`, aponta para o arquivo de outra conversa ou organização.
+  // Só segmento de nome comum depois do prefixo — nada de `..`, `.`, vazio ou barra invertida.
+  const resto = path.slice(prefixo.length);
+  if (resto.includes("\\")) return false;
+  return resto.split("/").every((s) => s !== "" && s !== "." && s !== "..");
 }
 
 const DOCUMENT_MIMES = new Set([
