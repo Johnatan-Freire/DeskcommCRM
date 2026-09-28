@@ -54,10 +54,17 @@ function enderecoDaMensagem(input: { recipient: string | null; externalId: strin
   if (!client) throw new Error("waha_not_configured");
   const chatId = chatIdFromWaMessageId(input.externalId) ?? input.recipient;
   if (!chatId) throw new Error("recipient_unavailable");
-  const messageId = input.externalId.includes("_")
-    ? input.externalId
-    : `true_${chatId}_${bareWaMessageId(input.externalId)}`;
-  return { client, chatId, messageId };
+  return { client, chatId, messageId: idCompletoDaMensagem(input.externalId, chatId) };
+}
+
+/**
+ * O id que a API do WAHA pede (editar, apagar, citar) é o COMPLETO. Só o que é
+ * nosso fica gravado bare — o envio e, desde o #1855, o eco do que o dono digitou
+ * no celular —, e o que é nosso é sempre `fromMe`, daí o `true_`. O inbound
+ * chega composto e passa intacto.
+ */
+function idCompletoDaMensagem(externalId: string, chatId: string): string {
+  return externalId.includes("_") ? externalId : `true_${chatId}_${bareWaMessageId(externalId)}`;
 }
 
 export const wahaAdapter: ChannelAdapter = {
@@ -271,7 +278,7 @@ export const wahaAdapter: ChannelAdapter = {
         envelope.body ?? "",
         // A citação é enfeite da conversa, nunca condição de envio: quando não
         // há, o envio segue igual. Ver `OutboundEnvelope.replyToExternalId`.
-        envelope.replyToExternalId,
+        envelope.replyToExternalId ? idCompletoDaMensagem(envelope.replyToExternalId, to) : null,
       );
     }
 

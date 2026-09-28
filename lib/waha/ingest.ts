@@ -900,11 +900,22 @@ async function handleOutboundFromUserPhone(
   // ECO DO PRÓPRIO ENVIO — não duplicar.
   //
   // Toda mensagem que o CRM manda (composer ou IA) volta pelo webhook como
-  // `fromMe=true`. O dedup por `external_id` NÃO pega esse caso, porque os dois
-  // lados gravam formas diferentes do mesmo id: o envio grava o id "bare"
-  // (`3EB0…`) e o webhook chega com o composto (`true_<chat>_3EB0…`). São
-  // strings distintas, então o unique não dispara e nasce uma segunda linha —
-  // a mesma frase aparecendo duas vezes na conversa.
+  // `fromMe=true`. O SELECT abaixo é CHECK-THEN-ACT — leitura e depois
+  // escrita, sem transação —, então ele só enxerga o mundo de ANTES: se o
+  // envio carimbar o `external_id` nesse intervalo, o SELECT não vê e o INSERT
+  // roda solto. Fechar a janela é trabalho do `unique (organization_id,
+  // external_id)` + da captura do `23505` que este mesmo handler já faz — a
+  // mesma rede do inbound.
+  //
+  // Mas o unique só age se os DOIS lados gravarem a MESMA string. É o que
+  // estava errado: o envio grava o id "bare" (`3EB0…`) e este eco chegava com
+  // o composto (`true_<chat>_3EB0…`). Strings distintas, nenhuma colisão,
+  // `23505` nunca disparava — e nascia a segunda linha com a mesma frase.
+  //
+  // Por isso o INSERT lá embaixo grava `bare`, não `p.id`: a forma canônica, a
+  // mesma que o envio grava e a mesma que `handleAck` e `wahaEchoExternalIds`
+  // (que traz o bare nos candidatos) já consultam. `tests/unit/
+  // dedup-external-id-waha.test.ts` é a catraca: reprova com o id cru.
   //
   // Antes isto não aparecia por acidente: sem `to`, esta função voltava cedo e
   // o eco era descartado junto com as mensagens legítimas do celular. Ao
@@ -957,7 +968,7 @@ async function handleOutboundFromUserPhone(
       conversation_id: conversationId,
       channel_session_id: session.id,
       contact_id: contactId,
-      external_id: p.id,
+      external_id: bare,
       type: resolveMessageType(p),
       direction: "outbound",
       status: "sent",
@@ -978,7 +989,9 @@ async function handleOutboundFromUserPhone(
     // Mesma razão do inbound: dedup é esperado, invisível não.
     logger.info("waha.ingest: outbound ja ingerido, dedup por external_id", {
       organization_id: session.organization_id,
-      external_id: p.id,
+      // A forma GRAVADA — é ela que a linha existente carimpa e que o grep por
+      // `external_id` tem de achar; `p.id` é só o que o webhook entregou.
+      external_id: bare,
       direcao: "outbound",
     });
     return;
