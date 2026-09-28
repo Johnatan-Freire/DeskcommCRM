@@ -3980,6 +3980,9 @@ export const DICIONARIO: Traducoes = {
   "Se preencher, enviaremos uma assinatura para o outro sistema conferir que fomos nós.": {
     es: "Si lo completas, enviaremos una firma para que el otro sistema confirme que fuimos nosotros.",
   },
+  "Como o outro sistema confere a assinatura e reconhece reenvios: guia de integração em docs/integracao/webhooks-de-saida.md, na documentação do projeto.": {
+    es: "Cómo el otro sistema verifica la firma y reconoce los reenvíos: guía de integración en docs/integracao/webhooks-de-saida.md, en la documentación del proyecto.",
+  },
   "Quando um horário for marcado": { es: "Cuando se agende una cita" },
   "Quando um horário pendente for confirmado": { es: "Cuando se confirme una cita pendiente" },
   "Quando um horário for remarcado": { es: "Cuando se reagende una cita" },
