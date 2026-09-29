@@ -20605,6 +20605,17 @@ grant execute on function public.fn_appointment_enrollment_current(uuid,uuid,tex
 create or replace function public.fn_followup_generation_write()
 returns trigger language plpgsql security definer set search_path=public as $$
 begin
+ -- #1862 — DELETE que chega em CASCATA não é escrita de follow-up. Este gatilho
+ -- é BEFORE ROW: o DELETE vindo de `on delete cascade` roda sob o gatilho da
+ -- chave estrangeira, com `pg_trigger_depth() > 1`. Passa QUALQUER cascata, não
+ -- só a da ficha: apagar o contato, a inscrição (followup_enrollments), o fluxo
+ -- (followup_flow_pointers) ou a organização leva junto os registros internos.
+ -- O turno que sobra sem inscrição/evento falha fechado em
+ -- fn_followup_job_current. A profundidade não distingue cascata de DELETE
+ -- feito por outro gatilho: hoje nenhum gatilho apaga nestas duas tabelas, e
+ -- quem criar um herda esta passagem. O DELETE DIRETO (profundidade 1, com
+ -- `auth.uid()`) continua caindo na recusa abaixo — a 42501 não afrouxa.
+ if tg_op='DELETE' and pg_trigger_depth()>1 then return old; end if;
  if tg_table_name='job_queue' then
   if auth.uid() is not null and ((tg_op<>'DELETE' and new.kind='followup_turn') or (tg_op<>'INSERT' and old.kind='followup_turn')) then
    raise exception 'followup_job_internal' using errcode='42501';
@@ -39094,6 +39105,53 @@ drop trigger if exists trg_aviso_da_central_criado on public.agent_inbox_items;
 create trigger trg_aviso_da_central_criado
   after insert on public.agent_inbox_items
   for each row execute function public.fn_emit_aviso_da_central();
+
+-- ---- Exclusão de contato com turno de follow-up: ficha inteira (migration 0488) ----
+-- Issue #1862: a rota apagava `messages`, `conversations` e `contacts` em três
+-- chamadas separadas, e o `contacts` era recusado com 42501 pelo gatilho de
+-- follow-up quando a ficha tinha turno — histórico apagado, ficha ficando.
+-- A função nova abaixo é a chamada ÚNICA que a rota passa a fazer: as três
+-- saem numa transação só. SECURITY INVOKER de propósito, como os três DELETE
+-- separados que ela substitui: a RLS de quem chama continua valendo, e
+-- `p_organization_id` fecha a linha por dentro — sem service role.
+-- O conserto da outra metade (a guarda do gatilho, `pg_trigger_depth() > 1`)
+-- está no bloco da 0224, EDITADO NO LUGAR, porque é a MESMA função.
+create or replace function public.fn_apagar_contato_com_historico(
+  p_contact_id uuid,
+  p_organization_id uuid
+)
+returns boolean
+language plpgsql
+volatile
+security invoker
+set search_path to 'public', 'pg_temp'
+as $$
+begin
+  -- RESTRICT da #752: o histórico sai antes da ficha, na mesma transação.
+  delete from public.messages
+   where contact_id = p_contact_id
+     and organization_id = p_organization_id;
+
+  delete from public.conversations
+   where contact_id = p_contact_id
+     and organization_id = p_organization_id;
+
+  delete from public.contacts
+   where id = p_contact_id
+     and organization_id = p_organization_id;
+
+  -- `found` é do DELETE da ficha: false = a ficha não estava acessível para quem
+  -- chamou (outra organização, RLS, corrida) — a rota devolve 404 nesse caso.
+  return found;
+end;
+$$;
+
+-- Função nova em `public` nasce exposta (ALTER DEFAULT PRIVILEGES do dump):
+-- o revoke tira anon e o grant deixa só quem a rota usa.
+revoke execute on function public.fn_apagar_contato_com_historico(uuid, uuid) from public, anon;
+grant  execute on function public.fn_apagar_contato_com_historico(uuid, uuid) to authenticated, service_role;
+
+notify pgrst, 'reload schema';
 
 -- ---- followup_enrollments e followup_flow_pointers: RLS por operação (migration 0489) ----
 -- A policy `for all` sem papel mínimo deixava `viewer` apagar inscrição e fluxo pelo PostgREST,
