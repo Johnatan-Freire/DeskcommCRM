@@ -423,7 +423,7 @@ test.describe("followup — jornada completa (Task 8.3)", () => {
       //    com last_inbound_at bem mais velho que o threshold_minutes=5 do
       //    trigger.
       // =========================================================================
-      seed = runHelper(["seed-silent-contact", "5", "jornada"]) as {
+      seed = runHelper(["seed-silent-contact", "5", "jornada", agentId]) as {
         contactId: string;
         contactName: string;
         conversationId: string;

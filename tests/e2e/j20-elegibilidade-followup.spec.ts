@@ -157,9 +157,11 @@ test.describe("J20.12 — o follow-up automático respeita o gate", () => {
       pointerId = await publicarFluxoDeSilencio(page);
       agentId = helper<{ agentId: string }>("publish-agent", pointerId).agentId;
 
-      // (2) Dois contatos silenciosos no MESMO canal com gate — um de cada lado.
-      const a = helper<{ contactId: string }>("seed-silent-contact", "1", String(THRESHOLD_MIN));
-      const b = helper<{ contactId: string }>("seed-silent-contact", "0", String(THRESHOLD_MIN));
+      // (2) Dois contatos silenciosos no MESMO canal com gate — um de cada lado. Nos dois,
+      // a IA do agente publicado respondeu e o cliente calou (régua da 0403: se o cliente
+      // falou por último, a empresa deve resposta e não há silêncio a cobrar).
+      const a = helper<{ contactId: string }>("seed-silent-contact", "1", String(THRESHOLD_MIN), agentId);
+      const b = helper<{ contactId: string }>("seed-silent-contact", "0", String(THRESHOLD_MIN), agentId);
       autorizadoId = a.contactId;
       semAutorizacaoId = b.contactId;
 
