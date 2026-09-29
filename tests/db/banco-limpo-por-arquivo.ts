@@ -43,6 +43,11 @@
  * psql embrulharia numa transação só). É seguro porque a config tem
  * `fileParallelism: false`: um arquivo por vez, dono único do ponteiro.
  */
+// Trava global de envio (lib/channels/envio-de-saida.ts): fail-closed fora do literal
+// `enabled`. Os invariantes exercitam o caminho de envio; ligam aqui, como o setup do
+// test:unit. Quem prova a trava FECHADA passa o ambiente explicitamente.
+process.env.OUTBOUND_MESSAGING = "enabled";
+
 import { execFileSync } from "node:child_process";
 
 const container = process.env.TEST_DB_CONTAINER;

@@ -18,6 +18,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { graphVersion } from "@/lib/graph-version";
 import { createAdminClient } from "@/lib/supabase/admin";
 
+import { exigirEnvioDeConversaLigado } from "../envio-de-saida";
 import { linhaDoEspelho } from "../linha-do-espelho";
 
 import { resolveMetaCreds } from "./credentials";
@@ -71,6 +72,9 @@ export async function sendTemplateForSession(
   db: SupabaseClient,
   input: SendTemplateForSessionInput,
 ): Promise<string | null> {
+  // Trava global (`../envio-de-saida`): este caminho fala com a plataforma sem
+  // passar pelo adapter, então pergunta por conta própria.
+  exigirEnvioDeConversaLigado();
   if (!input.name || !input.language) {
     throw new Error("template_incompleto: nome e idioma são obrigatórios em type=template");
   }

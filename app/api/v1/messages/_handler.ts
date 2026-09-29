@@ -45,6 +45,11 @@ import {
 } from "@/lib/messaging/contact-card";
 import type { ListMessagesQuery, SendMessageInput } from "@/lib/schemas";
 import { sendTemplateForSession } from "@/lib/channels/meta/send-template-for-session";
+import {
+  CODIGO_ENVIO_DESLIGADO,
+  envioDeConversaLigado,
+  FRASE_ENVIO_DESLIGADO,
+} from "@/lib/channels/envio-de-saida";
 import { nomeDoContato } from "@/lib/contacts/rotulo-do-contato";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { Message } from "@/lib/types/messaging";
@@ -681,7 +686,19 @@ export async function sendMessageHandler(
     channelSessionId: c.channel_session_id,
     contactPhoneNumber: c.contacts?.phone_number ?? "",
   }).catch(() => ({ permite: false, motivo: "pre_go_live_indisponivel" }));
-  if (acessoAtual && !acessoAtual.permite) {
+  if (!envioDeConversaLigado()) {
+    // TRAVA GLOBAL (`lib/channels/envio-de-saida.ts`), antes de qualquer outro
+    // ramo e para QUALQUER ator — humano pela Inbox inclusive. `failed` com
+    // código próprio, nunca `queued`: fila seria reenviada na reconexão, e esta
+    // mensagem só sai se alguém a mandar de novo com o envio ligado.
+    const { data: updated, error } = await supabase.from("messages").update({
+      status: "failed",
+      error_code: CODIGO_ENVIO_DESLIGADO,
+      error_message: FRASE_ENVIO_DESLIGADO,
+    }).eq("organization_id", ctx.organization_id).eq("id", message.id).select(MSG_COLS).single();
+    if (error || !updated) throw new ApiError(500, "internal_error", undefined, ctx.requestId, "Não foi possível registrar o bloqueio do envio.");
+    message = updated as unknown as Message;
+  } else if (acessoAtual && !acessoAtual.permite) {
     const { data: updated, error } = await supabase.from("messages").update({
       status: "failed",
       error_code: acessoAtual.motivo === "pre_go_live_indisponivel" ? "pre_go_live_indisponivel" : "pre_go_live",

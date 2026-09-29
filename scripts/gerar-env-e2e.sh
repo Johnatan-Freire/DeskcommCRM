@@ -135,6 +135,11 @@ SUPABASE_DB_URL=$DB_URL
 # Precisa bater com o baseURL real do Playwright (ver comentário acima).
 NEXT_PUBLIC_APP_URL=http://localhost:$E2E_PORT
 
+# Trava global de envio (lib/channels/envio-de-saida.ts): sem este valor LITERAL
+# nenhuma mensagem de conversa sai. A suíte prova envio (Inbox, IA, receiver de
+# verdade), então liga explicitamente — a produção fica desligada por ausência.
+OUTBOUND_MESSAGING=enabled
+
 # Catálogo servido pelas provas de extensões. A exceção HTTP só é aceita
 # quando o aplicativo também é local; o ambiente do produto deixa isto vazio.
 EXTENSIONS_LOCAL_CATALOG_ORIGIN=http://127.0.0.1:56331

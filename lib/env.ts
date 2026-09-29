@@ -308,6 +308,14 @@ const schema = z.object({
   RESEND_FROM_EMAIL: z.string().optional().default(""),
 
   /**
+   * Trava global de envio de mensagens de conversa (`lib/channels/envio-de-saida.ts`).
+   * Só o literal `enabled` liga; ausente ou qualquer outro valor DESLIGA. Aqui é só
+   * documentação — a trava lê `process.env` a cada envio, e um valor inesperado não
+   * derruba o boot (desligar é o desfecho seguro dele).
+   */
+  OUTBOUND_MESSAGING: z.string().optional().default(""),
+
+  /**
    * SMTP — o SEGUNDO transporte de e-mail, ao lado da Resend, nunca no lugar
    * dela. Quem já roda com Resend não mexe em nada; quem instala numa VPS e não
    * quer criar conta em serviço externo preenche estas sete e o envio sai pelo

@@ -7,6 +7,7 @@ import { metaCloudAdapter } from "./adapters/meta-cloud";
 import { wahaAdapter } from "./adapters/waha";
 import { socialAdapter } from "./social/adapter";
 import { zernioAdapter } from "./adapters/zernio";
+import { exigirEnvioDeConversaLigado } from "./envio-de-saida";
 import type { ChannelAdapter, ChannelProvider, ProviderDeMensagem } from "./types";
 
 /**
@@ -22,13 +23,41 @@ const ADAPTERS: Record<ProviderDeMensagem, ChannelAdapter | null> = {
 };
 
 /**
+ * O adapter que o resto do sistema recebe: o mesmo, com `send`/`sendTemplate`
+ * atrás da trava global (`./envio-de-saida`). `Object.create` mantém todo o resto
+ * (codes, resolveRecipient, capacidades opcionais) e o `this` de cada método.
+ */
+function atrasDaTravaDeSaida(adapter: ChannelAdapter): ChannelAdapter {
+  const travado = Object.create(adapter) as ChannelAdapter;
+  travado.send = async (envelope) => {
+    exigirEnvioDeConversaLigado();
+    return adapter.send(envelope);
+  };
+  const sendTemplate = adapter.sendTemplate;
+  if (sendTemplate) {
+    travado.sendTemplate = async (input) => {
+      exigirEnvioDeConversaLigado();
+      return sendTemplate.call(adapter, input);
+    };
+  }
+  return travado;
+}
+
+const TRAVADOS = new Map<ChannelAdapter, ChannelAdapter>();
+
+/**
  * Fail-closed: provider sem adapter (ou fora da matriz) lança em vez de cair no
  * WAHA por default. Enviar pelo canal errado é pior que não enviar.
  */
 export function getAdapter(provider: ChannelProvider): ChannelAdapter {
   const adapter = ADAPTERS[provider as ProviderDeMensagem];
   if (!adapter) throw new Error(`unknown_channel_provider: ${provider}`);
-  return adapter;
+  let travado = TRAVADOS.get(adapter);
+  if (!travado) {
+    travado = atrasDaTravaDeSaida(adapter);
+    TRAVADOS.set(adapter, travado);
+  }
+  return travado;
 }
 
 export {
