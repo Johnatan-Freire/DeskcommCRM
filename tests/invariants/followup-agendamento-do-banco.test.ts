@@ -289,6 +289,10 @@ describe("agendar 'para agora' usa o relógio do BANCO — retomada", () => {
     const enrollmentId = enr[0]!.id;
 
     const db: ReactivityAdminClient = {
+      // A mensagem deste cenário é posterior à conexão do número — o corte da 0398 não se aplica.
+      async mensagemAnteriorAConexao() {
+        return false;
+      },
       async loadConversationContactId() {
         return c.contactId;
       },

@@ -166,3 +166,6 @@ __pycache__/
 
 # Runtime do instalador single-server: Supabase self-hosted, credenciais e dados.
 .runtime/
+
+# Handoff local de sessão — referencia infraestrutura de cliente; nunca versionar.
+LEMBRAR.md

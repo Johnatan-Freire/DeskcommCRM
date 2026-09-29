@@ -122,7 +122,7 @@ export async function processSentiment(event: EventRow): Promise<SentimentResult
     }
 
     // ── Corte de conexão (migration 0398) ──────────────────────────────────
-    // Mensagem sincronizada pelo WAHA de ANTES do pareamento não pode virar
+    // Mensagem sincronizada pelo canal de ANTES do pareamento não pode virar
     // `ai.sentiment_alert` — esse evento dispara handoff automático
     // (`workers/ai-handoff-from-sentiment.handler.ts`), que AVISA O LEAD por
     // WhatsApp (`lib/ai/handoff/aviso-ao-lead.ts`) sem depender de agente

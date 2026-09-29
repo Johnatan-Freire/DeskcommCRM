@@ -147,10 +147,10 @@ export async function aplicarTextoNosFollowups(
   const ultimo = await ultimoInboundDoContato(admin, sinal.organizationId, contactIds);
   const texto = (sinal.texto?.trim() || ultimo.texto).trim();
   if (!texto) return;
-  // Corte de conexão (migration 0398): mensagem sincronizada pelo WAHA de
+  // Corte de conexão (migration 0398): mensagem sincronizada pelo canal de
   // ANTES do pareamento não é "a resposta do lead" — tratá-la como
   // `enviadaEm` ausente reusa o mesmo caminho fail-closed que
-  // `inboundEhDestaPergunta` já tem para quando o WAHA não manda timestamp
+  // `inboundEhDestaPergunta` já tem para quando o canal não manda timestamp
   // (ver `aplicarTextoAosEnrollmentsEmEspera` abaixo).
   const historica = await mensagemAnteriorAConexao(admin, sinal.organizationId, ultimo.messageId);
   const enviadaEm = historica ? null : ultimo.enviadaEm;

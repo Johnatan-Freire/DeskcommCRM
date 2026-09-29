@@ -39,6 +39,10 @@ function montarDb(
   const espiao: Espiao = { eventos: [], patches: [] };
 
   const db: ReactivityAdminClient = {
+    // A mensagem destes cenários é posterior à conexão do número — o corte da 0398 não se aplica.
+    async mensagemAnteriorAConexao() {
+      return false;
+    },
     async loadConversationContactId() {
       return CONTATO;
     },
