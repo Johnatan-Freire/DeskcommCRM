@@ -7288,18 +7288,10 @@ alter table followup_flow_pointers enable row level security;
 alter table followup_enrollments enable row level security;
 alter table followup_enrollment_events enable row level security;
 
-do $$ begin
-  create policy tenant_isolation_followup_flow_versions_all on followup_flow_versions
-    for all using (organization_id in (select fn_user_org_ids()))
-    with check (organization_id in (select fn_user_org_ids()));
-exception when duplicate_object then null; end $$;
--- followup_flow_pointers e followup_enrollments: a policy `for all` daqui saiu na
--- migration 0489 (issue #1913). As policies por operação estão no apêndice dela.
-do $$ begin
-  create policy tenant_isolation_followup_enrollment_events_all on followup_enrollment_events
-    for all using (organization_id in (select fn_user_org_ids()))
-    with check (organization_id in (select fn_user_org_ids()));
-exception when duplicate_object then null; end $$;
+-- As policies `for all` das quatro tabelas saíram daqui: followup_flow_pointers e
+-- followup_enrollments na migration 0489 (issue #1913), followup_flow_versions e
+-- followup_enrollment_events na 0490 (issue #1915). As policies por operação estão nos
+-- apêndices delas.
 
 -- Claim atômico do worker (SKIP LOCKED) — service role only
 create or replace function fn_claim_due_followup_enrollments(p_limit int, p_lease_seconds int)
@@ -39206,6 +39198,35 @@ create policy followup_flow_pointers_update on public.followup_flow_pointers
 
 drop policy if exists followup_flow_pointers_delete on public.followup_flow_pointers;
 create policy followup_flow_pointers_delete on public.followup_flow_pointers
+  for delete
+  using (organization_id in (select public.fn_user_org_ids())
+         and public.fn_role_at_least(organization_id, 'manager'));
+
+-- ---- followup_enrollment_events e followup_flow_versions: RLS por operação (migration 0490) ----
+-- A policy `for all` sem papel mínimo deixava `viewer` apagar ou reescrever a trilha de uma
+-- inscrição e as versões de um fluxo pelo PostgREST (issue #1915). Escrita só onde uma rota
+-- escreve pela sessão (`manager`); o resto fica com o motor. Corpo e porquê: a migration 0490.
+
+drop policy if exists tenant_isolation_followup_enrollment_events_all on public.followup_enrollment_events;
+
+drop policy if exists followup_enrollment_events_select on public.followup_enrollment_events;
+create policy followup_enrollment_events_select on public.followup_enrollment_events
+  for select using (organization_id in (select public.fn_user_org_ids()));
+
+drop policy if exists followup_enrollment_events_insert on public.followup_enrollment_events;
+create policy followup_enrollment_events_insert on public.followup_enrollment_events
+  for insert
+  with check (organization_id in (select public.fn_user_org_ids())
+              and public.fn_role_at_least(organization_id, 'manager'));
+
+drop policy if exists tenant_isolation_followup_flow_versions_all on public.followup_flow_versions;
+
+drop policy if exists followup_flow_versions_select on public.followup_flow_versions;
+create policy followup_flow_versions_select on public.followup_flow_versions
+  for select using (organization_id in (select public.fn_user_org_ids()));
+
+drop policy if exists followup_flow_versions_delete on public.followup_flow_versions;
+create policy followup_flow_versions_delete on public.followup_flow_versions
   for delete
   using (organization_id in (select public.fn_user_org_ids())
          and public.fn_role_at_least(organization_id, 'manager'));

@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, it } from "vitest";
 
-import { GOV_AGENT_A, GOV_ORG, GOV_SESSION, lastLine, seedGov, sql } from "./gov-helpers";
+import { GOV_AGENT_A, GOV_MANAGER, GOV_ORG, GOV_SESSION, lastLine, seedGov, sql } from "./gov-helpers";
 
 /**
  * #1862 — excluir um contato que já passou por retorno automático apaga a ficha INTEIRA.
@@ -158,12 +158,30 @@ describe("excluir contato com turno de follow-up (#1862)", () => {
     const doTurno = stderrDe(GOV_AGENT_A, `delete from public.job_queue where id = '${TURNO_A}';`);
     expect(doTurno).toContain("followup_job_internal");
 
-    // O outro alvo do mesmo gatilho: o evento interno (idempotency_key 'nó:1').
-    const doEvento = stderrDe(
-      GOV_AGENT_A,
-      `delete from public.followup_enrollment_events where id = '${EVENTO_A}';`,
+    // O outro alvo: o evento interno (idempotency_key 'nó:1'). Desde a 0490
+    // (#1915) a trilha não tem policy de DELETE para a sessão, então a recusa
+    // chega ANTES do gatilho: a RLS esconde a linha e o DELETE apaga zero.
+    // Medido como contagem explícita — "sem erro" sozinho não prova recusa.
+    const apagados = lastLine(
+      comoUsuario(
+        GOV_AGENT_A,
+        `with d as (delete from public.followup_enrollment_events where id = '${EVENTO_A}' returning 1) select count(*) from d;`,
+      ),
     );
-    expect(doEvento).toContain("followup_step_internal");
+    expect(apagados).toBe("0");
+
+    // A guarda do gatilho segue viva onde a sessão ainda alcança a trilha: o
+    // INSERT de `manager` (a policy deixa, as rotas de intervenção usam). Evento
+    // com chave de passo do motor ('nó:N') continua 42501 para `auth.uid()`.
+    const passoForjado = stderrDe(
+      GOV_MANAGER,
+      `insert into public.followup_enrollment_events (organization_id, enrollment_id, node_id, event_type, idempotency_key)
+         values ('${GOV_ORG}', '${ENROLL_A}', 'inicio', 'turn_enqueued', 'inicio:2');`,
+    );
+    expect(passoForjado).toContain("followup_step_internal");
+    expect(
+      contar(`select count(*) from public.followup_enrollment_events where enrollment_id = '${ENROLL_A}' and idempotency_key = 'inicio:2'`),
+    ).toBe(0);
 
     // Recusado E intacto: nada da ficha saiu com a tentativa.
     expect(contar(`select count(*) from public.job_queue where id = '${TURNO_A}'`)).toBe(1);
