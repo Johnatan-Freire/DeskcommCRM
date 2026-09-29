@@ -1,53 +1,39 @@
 /**
- * DEPLOY.YML NÃO PODE ENGOLIR ERRO REAL DE SCHEMA.
+ * DEPLOY NÃO PODE ENGOLIR ERRO REAL DE SCHEMA — NEM APLICÁ-LO COM O SISTEMA NO AR.
  *
  * ## Por que este arquivo existe
  *
- * Medido em produção em 2026-09-25: a migration 0401 (colunas `can_mark_won`/
- * `can_mark_lost` em `ai_agent_versions`, o guard fail-closed do agente
- * comercial) estava presente e correta no `baseline.sql` reaplicado pelo
- * `deploy.yml`, mas as duas colunas nunca chegaram a existir na tabela. A causa
- * não foi o SQL — foi o próprio workflow: ele capturava a saída do `psql -f`,
- * filtrava erros "benignos" por regex e, quando sobrava algo INESPERADO, só
- * imprimia um aviso (`echo "⚠ avisos inesperados..."`) e seguia direto para
- * `docker compose pull`/`up -d` de qualquer jeito. Um erro real de schema
- * silenciosamente não bloqueava nada — só um `git grep` manual no log do
- * Actions (que este projeto não tem `gh`/token pra consultar rotineiramente)
- * revelaria a causa.
+ * Medido em produção em 2026-09-25: a migration 0401 estava no `baseline.sql`
+ * reaplicado pelo `deploy.yml`, mas as colunas nunca chegaram à tabela — o
+ * workflow filtrava os erros por regex e, quando sobrava algo inesperado, só
+ * avisava e seguia para o `up -d`. O conserto trocou isso por
+ * `reaplicar_baseline` (`hostgator-setup-kit/_common.sh`), o mesmo mecanismo do
+ * `update.sh`, provado em `tests/shell/baseline-reaplica-apos-disputa.test.sh`.
  *
- * O conserto trocou o grep manual (sem retry, sem exit) por `reaplicar_baseline`
- * (`hostgator-setup-kit/_common.sh`) — o MESMO mecanismo que `update.sh` do kit
- * self-host usa, já exaustivamente provado por
- * `tests/shell/baseline-reaplica-apos-disputa.test.sh` (erro benigno/disputa
- * tenta de novo até 3 passadas; erro real devolve `rc=1`; conexão que cai no
- * meio sem a palavra ERROR também é pega pelo código de saída do psql).
+ * Medido de novo em 2026-09-26: com o erro agora obedecido, as duas rodadas do
+ * deploy morreram em `deadlock detected` nas três passadas — app, worker e
+ * scheduler seguiam no ar disputando lock com o baseline. O passo remoto foi
+ * para `scripts/deploy-vps.sh`, que PAUSA o sistema antes de aplicar (como o
+ * `update.sh`) e só quando o baseline mudou.
  *
- * ## O que ESTE arquivo prova, e o que ele conscientemente NÃO reprova
+ * ## O que ESTE arquivo prova
  *
- * `reaplicar_baseline` decidir certo (benigno vs real) já está provado noutro
- * arquivo. O que faltava provar é ESPECÍFICO de `deploy.yml`: que o resultado
- * dela é OBEDECIDO — erro real vira `exit 1` ANTES do `pull`/`up -d`, dentro do
- * MESMO bloco remoto que roda sob `set -euo pipefail` (então esse `exit 1`
- * de fato aborta o script, em vez de só imprimir e continuar). Não há aqui um
- * SSH real nem um Postgres real — replicar isso pediria simular a VPS inteira
- * pra provar uma coisa que é de CONTROLE DE FLUXO textual, não de lógica SQL.
- *
- * ## Sem parser YAML nas dependências
- *
- * Mesma limitação (e a mesma solução) de `workflows-tem-permissions.test.ts`:
- * extração por marcador + CONTROLE POSITIVO no primeiro teste, para o gate não
- * ficar verde vigiando lista vazia se o arquivo mudar de formato.
+ * O COMPORTAMENTO do script (ordem das chamadas, fail-closed, marca) é provado
+ * com dublê de docker em `tests/shell/deploy-vps.test.sh`. Aqui fica o que é
+ * textual e barato: que o `deploy.yml` chama o script, e que o script mantém as
+ * propriedades que já custaram um deploy cada.
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-const CAMINHO = join(process.cwd(), ".github/workflows/deploy.yml");
+const WORKFLOW = join(process.cwd(), ".github/workflows/deploy.yml");
+const SCRIPT = join(process.cwd(), "scripts/deploy-vps.sh");
 
 /** O bloco remoto é tudo entre a linha do `ssh ... VPS_SSH_HOST` e a aspas simples de fechamento, sozinha na linha. */
-function extrairPassoDeSchema(): string {
-  const linhas = readFileSync(CAMINHO, "utf8").split("\n");
+function extrairBlocoRemoto(): string {
+  const linhas = readFileSync(WORKFLOW, "utf8").split("\n");
   const iInicio = linhas.findIndex((l) => l.includes("VPS_SSH_HOST"));
   if (iInicio === -1) throw new Error("linha com VPS_SSH_HOST não encontrada em deploy.yml");
   const iFim = linhas.findIndex((l, i) => i > iInicio && /^\s*'\s*$/.test(l));
@@ -55,57 +41,69 @@ function extrairPassoDeSchema(): string {
   return linhas.slice(iInicio + 1, iFim).join("\n");
 }
 
-describe("deploy.yml — erro real de schema derruba o deploy (fail-closed)", () => {
-  it("controle positivo: o instrumento acha o bloco remoto, e ele contém o up -d esperado", () => {
-    const bloco = extrairPassoDeSchema();
-    expect(bloco.length).toBeGreaterThan(200);
-    expect(bloco).toContain("docker compose -f docker-compose.prod.yml up -d app worker scheduler");
+const script = () => readFileSync(SCRIPT, "utf8");
+const codigo = () =>
+  script()
+    .split("\n")
+    .filter((l) => !/^\s*#/.test(l));
+
+describe("deploy.yml → scripts/deploy-vps.sh", () => {
+  it("controle positivo: o bloco remoto sincroniza o código e DEPOIS chama o script", () => {
+    const bloco = extrairBlocoRemoto();
+    expect(bloco.length).toBeGreaterThan(100);
+    expect(bloco).toMatch(/^\s*set -euo pipefail\s*$/m);
+    const iReset = bloco.indexOf("git reset --hard FETCH_HEAD");
+    const iScript = bloco.indexOf("bash scripts/deploy-vps.sh");
+    expect(iReset).toBeGreaterThan(-1);
+    expect(iScript, "o script roda na versão que o reset trouxe").toBeGreaterThan(iReset);
   });
 
-  it("usa reaplicar_baseline (mecanismo testado, com retry em disputa benigna) — não grep manual", () => {
-    const bloco = extrairPassoDeSchema();
-    expect(bloco).toContain("source hostgator-setup-kit/_common.sh");
-    expect(bloco).toContain("enter_project");
-    expect(bloco).toContain('reaplicar_baseline "$PROJECT_DIR/supabase/baseline.sql"');
+  it("não sobrou o padrão antigo (grep manual + aviso sem exit) — nem no workflow, nem no script", () => {
+    for (const texto of [extrairBlocoRemoto(), script()]) {
+      expect(texto).not.toMatch(/inesperado="\$\(printf/);
+      expect(texto).not.toContain('benigno="already exists');
+      expect(texto).not.toContain("avisos inesperados ao reaplicar");
+    }
+  });
+});
+
+describe("scripts/deploy-vps.sh — fail-closed e sem disputa de lock", () => {
+  it("roda sob set -euo pipefail — um exit 1 de fato aborta", () => {
+    expect(script()).toMatch(/^set -euo pipefail$/m);
   });
 
-  it("o baseline vai por caminho ABSOLUTO — relativo o Docker lê como nome de volume e o deploy morre", () => {
-    // Medido no 1º deploy real (2026-09-26): `reaplicar_baseline supabase/baseline.sql`
-    // → docker: "supabase/baseline.sql" includes invalid characters for a local
-    // volume name. A versão anterior DESTE teste exigia exatamente essa linha.
-    const bloco = extrairPassoDeSchema();
-    const chamada = bloco.split("\n").find((l) => /if reaplicar_baseline /.test(l)) ?? "";
-    const arg = chamada.replace(/.*if reaplicar_baseline\s+/, "").split(/\s+/)[0] ?? "";
-    expect(arg, `argumento do baseline: ${arg}`).toMatch(/^"?(\$PROJECT_DIR\/|\/)/);
+  it("usa reaplicar_baseline do kit, com o baseline por caminho ABSOLUTO", () => {
+    // Medido no 1º deploy real (2026-09-26): caminho relativo o Docker lê como
+    // nome de volume ("includes invalid characters for a local volume name").
+    const s = script();
+    expect(s).toContain("source hostgator-setup-kit/_common.sh");
+    expect(s).toContain("enter_project");
+    expect(s).toContain('BASELINE="$PROJECT_DIR/supabase/baseline.sql"');
+    expect(s).toContain('if reaplicar_baseline "$BASELINE"');
   });
 
-  it("em erro real, sai com exit 1 ANTES do pull e do up -d dos containers", () => {
-    const bloco = extrairPassoDeSchema();
-    const linhas = bloco.split("\n");
+  it("para app/worker/scheduler ANTES do baseline, e o exit 1 do erro vem ANTES do up -d", () => {
+    const linhas = codigo();
+    const iStop = linhas.findIndex((l) => /dcp stop "\$\{SERVICOS\[@\]\}"/.test(l));
     const iChamada = linhas.findIndex((l) => l.includes("if reaplicar_baseline"));
     const iElse = linhas.findIndex((l, i) => i > iChamada && /^\s*else\s*$/.test(l));
     const iExit = linhas.findIndex((l, i) => i > iElse && /\bexit 1\b/.test(l));
-    const iPull = linhas.findIndex((l) => l.includes("docker compose -f docker-compose.prod.yml pull"));
-    const iUp = linhas.findIndex((l) => l.includes("docker compose -f docker-compose.prod.yml up -d"));
+    const iUp = linhas.findIndex((l) => /dcp up -d "\$\{SERVICOS\[@\]\}"/.test(l));
 
-    expect(iChamada, "chamada `if reaplicar_baseline ...`").toBeGreaterThan(-1);
-    expect(iElse, "branch else do resultado, depois da chamada").toBeGreaterThan(iChamada);
-    expect(iExit, "`exit 1` dentro do else").toBeGreaterThan(iElse);
-    expect(iPull, "linha do pull").toBeGreaterThan(-1);
-    expect(iUp, "linha do up -d").toBeGreaterThan(-1);
-    expect(iExit, "exit 1 vem ANTES do pull").toBeLessThan(iPull);
-    expect(iExit, "exit 1 vem ANTES do up -d").toBeLessThan(iUp);
+    expect(iStop, "stop dos serviços").toBeGreaterThan(-1);
+    expect(iChamada, "chamada do baseline").toBeGreaterThan(iStop);
+    expect(iElse).toBeGreaterThan(iChamada);
+    expect(iExit, "exit 1 no else").toBeGreaterThan(iElse);
+    expect(iUp, "up -d depois do exit").toBeGreaterThan(iExit);
   });
 
-  it("não sobrou o padrão antigo (grep manual + aviso sem exit) — regressão ficaria visível aqui", () => {
-    const bloco = extrairPassoDeSchema();
-    expect(bloco).not.toMatch(/inesperado="\$\(printf/);
-    expect(bloco).not.toContain('benigno="already exists');
-    expect(bloco).not.toContain("avisos inesperados ao reaplicar");
-  });
-
-  it("o bloco remoto roda sob set -euo pipefail — um exit 1 nele de fato aborta o script", () => {
-    const bloco = extrairPassoDeSchema();
-    expect(bloco).toMatch(/^\s*set -euo pipefail\s*$/m);
+  it("confere as regras de isolamento antes de subir, e só grava a marca depois", () => {
+    const linhas = codigo();
+    const iConfere = linhas.findIndex((l) => l.includes('faltando="$(regras_de_isolamento_faltando)"'));
+    const iMarca = linhas.findIndex((l) => /> "\$MARCA"/.test(l));
+    const iUp = linhas.findIndex((l) => /dcp up -d/.test(l));
+    expect(iConfere).toBeGreaterThan(-1);
+    expect(iMarca).toBeGreaterThan(iConfere);
+    expect(iUp).toBeGreaterThan(iMarca);
   });
 });
