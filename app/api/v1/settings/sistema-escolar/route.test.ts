@@ -95,7 +95,7 @@ describe("GET /api/v1/settings/sistema-escolar", () => {
 
 describe("PUT /api/v1/settings/sistema-escolar", () => {
   it("recusa acompanhamento administrativo somente-leitura antes de checar role", async () => {
-    vi.mocked(requireSupportWrite).mockResolvedValue(new Response("readonly", { status: 403 }));
+    vi.mocked(requireSupportWrite).mockResolvedValue(new Response("readonly", { status: 403 }) as never);
     const r = await PUT(putReq({ base_url: "https://escola.example", api_key: "chave-123456", is_active: true }));
     expect(r.status).toBe(403);
     expect(requireRole).not.toHaveBeenCalled();
@@ -173,7 +173,7 @@ describe("PUT /api/v1/settings/sistema-escolar", () => {
 
 describe("DELETE /api/v1/settings/sistema-escolar", () => {
   it("recusa acompanhamento administrativo somente-leitura antes de checar role", async () => {
-    vi.mocked(requireSupportWrite).mockResolvedValue(new Response("readonly", { status: 403 }));
+    vi.mocked(requireSupportWrite).mockResolvedValue(new Response("readonly", { status: 403 }) as never);
     const r = await DELETE();
     expect(r.status).toBe(403);
     expect(requireRole).not.toHaveBeenCalled();

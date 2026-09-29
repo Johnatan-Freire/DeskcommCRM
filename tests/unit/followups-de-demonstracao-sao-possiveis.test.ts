@@ -166,6 +166,11 @@ class BancoEmMemoria implements TurnBridgeAdminClient, ReactivityAdminClient {
 
   constructor(public inscricao: EnrollmentRow) {}
 
+  /** A mensagem da demonstração é posterior à conexão do número — o corte da 0398 não se aplica. */
+  async mensagemAnteriorAConexao(): Promise<boolean> {
+    return false;
+  }
+
   async claimDueEnrollments(_limit: number, leaseSeconds: number): Promise<EnrollmentRow[]> {
     const e = this.inscricao;
     const devida =
