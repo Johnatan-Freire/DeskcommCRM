@@ -6626,8 +6626,8 @@ export const DICIONARIO: Traducoes = {
   },
   "Contato anonimizado.": { es: "Contacto anonimizado." },
   "Anonimizar contato (LGPD)": { es: "Anonimizar contacto (LGPD)" },
-  "Esta ação é irreversível. O nome será substituído por \"Cliente Anonimizado #N\", email/telefone/CPF serão limpos, e atividades terão conteúdo redigido.": {
-    es: "Esta acción es irreversible. El nombre se reemplazará por \"Cliente Anonimizado #N\", se borrarán el email, el teléfono y el CPF, y se redactará el contenido de las actividades.",
+  "Esta ação é irreversível. O nome será substituído por \"Cliente Anonimizado #N\", email, telefone e documento serão limpos, e atividades terão conteúdo redigido.": {
+    es: "Esta acción es irreversible. El nombre se reemplazará por \"Cliente Anonimizado #N\", se borrarán el email, el teléfono y el documento, y se redactará el contenido de las actividades.",
   },
   "Justificativa (mínimo 10 caracteres)": { es: "Justificación (mínimo 10 caracteres)" },
   "Ex.: Solicitação formal do titular via email em DD/MM/YYYY": {
@@ -9451,8 +9451,8 @@ export const DICIONARIO: Traducoes = {
   },
   "e-mail inválido: ": { es: "e-mail inválido: " },
   "telefone inválido: ": { es: "teléfono inválido: " },
-  " (use DDI+DDD+número, ex.: +5511999998888)": {
-    es: " (usa código de país+código de área+número, ej.: +5511999998888)",
+  " (use o número com o código do país, por exemplo ": {
+    es: " (usa el número con el código del país, por ejemplo ",
   },
   "linha sem telefone nem e-mail": { es: "fila sin teléfono ni e-mail" },
   "Cabeçalho inválido:": { es: "Encabezado inválido:" },
