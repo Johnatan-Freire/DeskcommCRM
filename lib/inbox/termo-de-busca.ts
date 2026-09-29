@@ -66,7 +66,22 @@ export function normalizarTermoDeBusca(bruto: string): string {
  * piso veio consertar, reintroduzido por outra porta.
  *
  * O piso em caracteres crus não pega esse caso: `", ,"` tem 3 caracteres.
+ *
+ * O PARÊNTESE entra aqui pelos MESMOS dois motivos:
+ *
+ * - `normalizarTermoDeBusca` colapsa `\s,;` — parêntese não é separador, então
+ *   `"()"` vira 2 caracteres e passa um piso qualquer.
+ * - `termoSeguroParaOr` (o `or=` da inbox) troca `()` por `*`: `"()"` vira `**`,
+ *   o PostgREST vira `%%%%`, e a busca devolve a LISTA INTEIRA — o defeito que a
+ *   #1892 consertou no handler de contatos e que este módulo torna régua única,
+ *   valendo também para o schema (`lib/schemas/messaging.ts`) e a tela
+ *   (`components/inbox/InboxLayout.tsx`), que leem daqui.
+ *
+ * O `replace` NO PISO não muda o termo que vai ao banco — ele só decide se vale
+ * consultar. O parêntese que sobra (ex. um telefone `(15) 99259-4261`) continua
+ * vindo atrás dele e segue funcionando, como os controles abaixo provam.
  */
 export function buscaValeConsulta(bruto: string): boolean {
-  return normalizarTermoDeBusca(bruto).length >= PISO_DA_BUSCA;
+  const semParenteses = bruto.replace(/[()]/g, " ");
+  return normalizarTermoDeBusca(semParenteses).length >= PISO_DA_BUSCA;
 }

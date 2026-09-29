@@ -101,3 +101,32 @@ describe("termo que não sobra nada depois de normalizado não vale consulta", (
     expect(buscaValeConsulta("+55 15 99259-4261")).toBe(true);
   });
 });
+
+/**
+ * O parêntese (#1895): a lista inteira de volta pela porta do `termoSeguroParaOr`.
+ *
+ * Medido na instalação real (vira `%` no PostgREST): `buscaValeConsulta("()")`
+ * passava no piso — `normalizarTermoDeBusca` não colapsa `()`, então o termo vira
+ * 2 caracteres; `termoSeguroParaOr` troca `()` por `**`; e o `or=` vira `%%%%`,
+ * que casa TUDO. `"(a"` vira `%a%`, igualmente amplíssimo.
+ *
+ * A régua agora tira os parênteses ANTES de medir o piso — dentro de
+ * `buscaValeConsulta`. Se alguém remover o `replace`, estes dois casos ficam
+ * VERMELHOS (a sabotagem da #1895 prevê exatamente isso).
+ */
+describe("termo de busca não devolve a lista inteira pelo parêntese (#1895)", () => {
+  it("'()' NÃO vale consulta", () => {
+    expect(buscaValeConsulta("()")).toBe(false);
+  });
+
+  it("parêntese aberto não vale consulta", () => {
+    expect(buscaValeConsulta("((")).toBe(false);
+    expect(buscaValeConsulta("(a")).toBe(false);
+  });
+
+  it("CONTROLE: parêntese com conteúdo real continua valendo", () => {
+    // Sem estes, uma implementação que recusasse qualquer parêntese passaria.
+    expect(buscaValeConsulta("paulo (jr)")).toBe(true);
+    expect(buscaValeConsulta("(15) 99259")).toBe(true);
+  });
+});
