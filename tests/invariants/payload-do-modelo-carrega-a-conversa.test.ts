@@ -215,7 +215,14 @@ beforeAll(async () => {
   await msg({ direction: "outbound", sentVia: "ai", body: FALA_DA_IA, sentAt: seg(60), createdAt: seg(60.2) });
   await msg({ direction: "inbound", sentVia: "external_device", body: FALA_ANTIGA_DO_CLIENTE, sentAt: seg(120), createdAt: seg(120.2) });
   // O agente é ligado AGORA — depois de tudo acima.
-  await publicarAgenteNaSessao(pool, ORG, SESSION);
+  // Ativação FIXADA um minuto antes da mensagem atual. Sem `ativoDesde`, o trigger da
+  // 0403 grava `now()` do Postgres (microssegundos) e a mensagem nasce com `new Date()`
+  // do Node (milissegundos): no mesmo milissegundo, `.123` < `.123456`, a mensagem fica
+  // ANTES da ativação, o corte (com razão) não responde e o teste acusava "nenhuma
+  // chamada do turno" — medido no CI, pg17 vermelho e verde com a mesma árvore.
+  await publicarAgenteNaSessao(pool, ORG, SESSION, {
+    ativoDesde: new Date(Date.now() - 60_000).toISOString(),
+  });
   const agora = new Date();
   await msg({ id: MSG_ATUAL, direction: "inbound", sentVia: "external_device", body: MENSAGEM_ATUAL, sentAt: agora, createdAt: agora });
   await pool.query(

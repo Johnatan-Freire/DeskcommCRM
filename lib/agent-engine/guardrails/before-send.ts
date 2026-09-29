@@ -89,6 +89,18 @@ export interface GateContext {
    */
   optedOut: boolean;
   /**
+   * A IA foi SILENCIADA nesta conversa depois que o turno começou — alguém clicou
+   * "Assumir", pausou o automático ou respondeu à mão (`bot_silenced_until` no futuro,
+   * o MESMO predicado de `isLeadInHandoff`). Lido SOB o lock, no instante do envio.
+   *
+   * Só é lido quando o chamador declara `revalidarSilencioDaIa` (turno autônomo). Todo
+   * turno autônomo já exige "não silenciada" no INÍCIO (`isLeadInHandoff`), então um
+   * `true` aqui significa, por construção, que o silêncio nasceu DURANTE a geração — e a
+   * resposta gerada fala por cima de quem assumiu. `force_human` já está em `optedOut`.
+   * Ausente = não avaliado (avisos de passagem, resposta aprovada, reunião, preview).
+   */
+  iaSilenciada?: boolean;
+  /**
    * Canal desta tentativa. Nenhum gate pergunta QUEM é o provider (invariante 1
    * de `docs/doctrine/restricao-de-canal.md`) — só o entrega a `capabilitiesOf`
    * para perguntar o que o canal permite.
@@ -298,7 +310,15 @@ const stopGate: Gate = {
             'o lead optou por sair do atendimento (bloqueio/opt-out irrevogável) — não é ' +
             'possível enviar nada a ele; encerre o turno sem tentar de novo.',
         }
-      : { pass: true },
+      : ctx.iaSilenciada === true
+        ? {
+            pass: false,
+            code: 'ia_silenciada',
+            reason:
+              'uma pessoa da equipe assumiu ou pausou o atendimento enquanto você respondia — ' +
+              'a resposta NÃO foi enviada. Não tente de novo; encerre o turno agora.',
+          }
+        : { pass: true },
 };
 
 /**
@@ -882,6 +902,13 @@ export interface RunBeforeSendArgs {
   /** `contacts.is_blocked` lido no get_lead_context deste turno; OR com a leitura direta da fonte no gate stop. */
   optedOutThisTurn: boolean;
   /**
+   * Esta tentativa é fala AUTÔNOMA da IA (turno de entrada, follow-up)? Arma a releitura
+   * do silêncio da conversa sob o lock — ver `GateContext.iaSilenciada`. Ausente = não
+   * relê: os avisos de passagem saem ANTES do silêncio por construção, e resposta
+   * aprovada/reunião são decisões humanas que o silêncio não pode barrar.
+   */
+  revalidarSilencioDaIa?: boolean;
+  /**
    * Agente do turno (`ai_agents.id`), quando o chamador o conhece. Sem ele a
    * atividade de veto entra como 'system' — com o lastro do trace, mas sem
    * afirmar QUAL agente decidiu calar. Opcional de propósito: nem todo caminho
@@ -1144,6 +1171,10 @@ export async function runBeforeSend(args: RunBeforeSendArgs): Promise<BeforeSend
         args.leadId,
         meetingPolicy?.humanCommand === true || replyPolicy !== null,
       ));
+    const iaSilenciada =
+      args.revalidarSilencioDaIa === true
+        ? await lerIaSilenciada(client, args.tenantId, args.leadId)
+        : undefined;
     const pacingCfg = await loadChannelKnobs(
       client,
       args.tenantId,
@@ -1196,6 +1227,7 @@ export async function runBeforeSend(args: RunBeforeSendArgs): Promise<BeforeSend
       now: args.now,
       body: bodyDoModelo,
       optedOut,
+      ...(iaSilenciada !== undefined ? { iaSilenciada } : {}),
       provider,
       messagingWindow: { lastInboundAt, ...(args.isTemplate === true ? { isTemplate: true } : {}) },
       pacing: {
@@ -1360,6 +1392,27 @@ async function readStopFlags(
     [organizationId, contactId],
   );
   return rows[0]?.stopped === true;
+}
+
+/**
+ * O silêncio da IA em QUALQUER conversa do contato — o mesmo predicado de
+ * `isLeadInHandoff` (`human-handoff.ts`) sem o `force_human`, que já chega por
+ * `readStopFlags`. Uma regra só nos dois instantes: início do turno e envio.
+ */
+export async function lerIaSilenciada(
+  db: Queryable,
+  organizationId: string,
+  contactId: string,
+): Promise<boolean> {
+  const { rows } = await db.query<{ silenciada: boolean }>(
+    `select exists (
+       select 1 from conversations v
+        where v.organization_id = $1 and v.contact_id = $2
+          and v.bot_silenced_until is not null and v.bot_silenced_until > now()
+     ) as silenciada`,
+    [organizationId, contactId],
+  );
+  return rows[0]?.silenciada === true;
 }
 
 /**

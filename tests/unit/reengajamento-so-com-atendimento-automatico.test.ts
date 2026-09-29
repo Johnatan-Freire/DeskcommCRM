@@ -12,6 +12,7 @@
 import { describe, expect, it } from "vitest";
 
 import { createSupabaseSilenceSweepDb } from "@/lib/followup/silence-sweep";
+import { AGENTE_DO_FLUXO, comFalaDoAgente } from "../support/fala-do-agente";
 
 function conversa(contactId: string) {
   const conversationId = `conversation-${contactId}`;
@@ -51,7 +52,7 @@ function supabase(data: unknown[], regua: (conversationId: string) => string | E
     const r = regua(args.p_conversation as string);
     return r instanceof Error ? { data: null, error: { message: r.message } } : { data: r, error: null };
   };
-  return { admin: { from: () => chain, rpc } as never, perguntas };
+  return { admin: comFalaDoAgente({ from: () => chain, rpc }), perguntas };
 }
 
 const CORTE = "2026-09-02T10:00:00.000Z";
@@ -68,7 +69,7 @@ describe("sweep de silêncio × régua central de reengajamento", () => {
       ["ok", "humano", "pausado", "handoff"].map(conversa),
       (id) => recusas[id] ?? "autorizado",
     );
-    const ids = await createSupabaseSilenceSweepDb(admin).loadSilentContactIds("org", CORTE, []);
+    const ids = await createSupabaseSilenceSweepDb(admin).loadSilentContactIds("org", CORTE, [], [AGENTE_DO_FLUXO]);
     expect(ids).toEqual(["ok"]);
     // Uma pergunta por candidato, com a conversa do candidato e para INSCREVER
     // (é o que liga "um reengajamento por silêncio").
@@ -79,14 +80,14 @@ describe("sweep de silêncio × régua central de reengajamento", () => {
   it("régua fora do ar: NINGUÉM é inscrito (fail-closed — o pointer falha inteiro)", async () => {
     const { admin } = supabase([conversa("ok")], () => new Error("db down"));
     await expect(
-      createSupabaseSilenceSweepDb(admin).loadSilentContactIds("org", CORTE, []),
+      createSupabaseSilenceSweepDb(admin).loadSilentContactIds("org", CORTE, [], [AGENTE_DO_FLUXO]),
     ).rejects.toThrow(/db down/);
   });
 
   it("controle: com a régua autorizando todos, todos os silenciosos entram", async () => {
     const { admin } = supabase(["a", "b"].map(conversa), () => "autorizado");
     await expect(
-      createSupabaseSilenceSweepDb(admin).loadSilentContactIds("org", CORTE, []),
+      createSupabaseSilenceSweepDb(admin).loadSilentContactIds("org", CORTE, [], [AGENTE_DO_FLUXO]),
     ).resolves.toEqual(["a", "b"]);
   });
 });

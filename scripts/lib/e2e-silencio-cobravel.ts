@@ -1,13 +1,14 @@
 /**
  * O ESTADO QUE A VARREDURA DE SILÊNCIO COBRA — para os helpers de e2e.
  *
- * Os seeds de silêncio criavam só o inbound velho. A migration 0403
- * (`fn_silencio_pode_reengajar`) tornou esse estado incobrável por construção, e os e2e
- * ficaram esperando o comportamento velho: o cliente falou por último é a empresa devendo
- * resposta (`contato_aguardando_resposta`), e a mensagem tem de ser posterior à conexão do
- * número (0398) e à ativação do agente.
+ * Os seeds de silêncio criavam só o inbound velho. Duas regras posteriores tornaram
+ * esse estado incobrável por construção, e os e2e ficaram esperando o comportamento velho:
  *
- * A fala da IA leva `metadata.ai_actor_id` (quem a assinou), como o envio real grava.
+ *   · migration 0403 (`fn_silencio_pode_reengajar`) — o cliente falou por último é a empresa
+ *     devendo resposta (`contato_aguardando_resposta`), e a mensagem tem de ser posterior à
+ *     conexão do número (0398) e à ativação do agente;
+ *   · dono da pendência (`lib/followup/origem-da-pendencia.ts`) — a última fala da IA depois
+ *     do último inbound tem de ser de um agente que HABILITA o fluxo.
  *
  * Aqui mora a fixture certa: número e agente "no ar há uma hora", o cliente escreveu, a IA
  * respondeu (assinada por `autorDaFala`) e ele calou.
@@ -31,7 +32,7 @@ export interface SilencioCobravel {
   contactId: string;
   /** Agente publicado que habilita o fluxo — é a ativação DELE que retroage. */
   agentId: string;
-  /** Quem assina a fala da IA (`metadata.ai_actor_id`). Default: `agentId`. */
+  /** Quem assina a fala da IA. Default: `agentId`. Outro id = o caso "pendência de outro agente". */
   autorDaFala?: string;
   /** Instante do inbound (mais velho que o threshold do gatilho). */
   inboundAt: string;

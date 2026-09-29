@@ -297,8 +297,9 @@ test("fechar canal preserva demanda, desfecho explícito e nova entrada volta à
  * Este caso nasceu em 07/09 (#613), quando a varredura contava só o último inbound: ele
  * criava APENAS mensagens do cliente e esperava inscrição. A migration 0403 (26/09) passou a
  * exigir que o atendimento AUTOMÁTICO esteja esperando o cliente (`fn_silencio_pode_reengajar`:
- * cliente falou por último = `contato_aguardando_resposta`). As asserções positivas antigas
- * ficaram impossíveis; as negativas, verdes sem dentes.
+ * cliente falou por último = `contato_aguardando_resposta`), e a varredura passou a exigir que
+ * a fala seja do agente que habilita o fluxo (`origem-da-pendencia.ts`). As asserções positivas
+ * antigas ficaram impossíveis; as negativas, verdes sem dentes.
  *
  * A intenção do caso continua a mesma — mensagem legada e reabertura não viram autorização —
  * e agora cada negativa tem uma positiva ao lado que a torna significativa. O agente é
@@ -322,6 +323,7 @@ test("silêncio consulta proveniência real pelo PostgREST: legado e reabertura 
     });
     const publicou = await db.from("ai_agents").update({ published_version_id: versao }).eq("organization_id", org).eq("id", agente);
     if (publicou.error) throw publicou.error;
+    const outroAgente = randomUUID();
 
     let relogio = Date.now() + 2_000;
     const proximo = () => new Date((relogio += 1_000)).toISOString();
@@ -337,12 +339,15 @@ test("silêncio consulta proveniência real pelo PostgREST: legado e reabertura 
       await rpc("fn_mark_conversation_message", { p_conv: conversation, p_direction: "outbound", p_preview: "Resposta", p_at: at });
     };
     const sweep = createSupabaseSilenceSweepDb(db);
-    const silenciosos = () => sweep.loadSilentContactIds(org, new Date(relogio + 60_000).toISOString(), []);
+    const silenciosos = () => sweep.loadSilentContactIds(org, new Date(relogio + 60_000).toISOString(), [], [agente]);
 
     const old = await inbound();
     // Régua 0403: o CLIENTE falou por último — a empresa está devendo resposta, não é silêncio.
     expect(await silenciosos()).toEqual([]);
-    // A IA respondeu e o cliente calou: agora é silêncio cobrável — a POSITIVA que dá dentes às negativas.
+    // Resposta de OUTRO agente: a pendência não é do agente que habilita o fluxo.
+    await respostaDaIa(outroAgente);
+    expect(await silenciosos()).toEqual([]);
+    // Resposta do agente do fluxo: agora é silêncio cobrável — a POSITIVA que dá dentes às negativas.
     await respostaDaIa(agente);
     expect(await silenciosos()).toEqual([contact]);
 
@@ -356,7 +361,7 @@ test("silêncio consulta proveniência real pelo PostgREST: legado e reabertura 
     await rpc("fn_service_begin", { p_org: org, p_contact: contact, p_session: session });
     expect(await silenciosos()).toEqual([]);
 
-    // Episódio novo com inbound carimbado + resposta da IA: volta a valer.
+    // Episódio novo com inbound carimbado + resposta do agente do fluxo: volta a valer.
     await inbound();
     expect(await silenciosos()).toEqual([]);
     await respostaDaIa(agente);

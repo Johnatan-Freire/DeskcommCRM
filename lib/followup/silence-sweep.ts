@@ -34,6 +34,11 @@ import { StaleServiceBoundaryError, parseServiceBoundary, assertCurrentServiceBo
  * ARMA o pointer (menor uuid se >1). Grafo só de texto fixo nasce com
  * `agent_id` nulo. Grafo que pede IA sem agente é gate-out.
  *
+ * DONO DA PENDÊNCIA (`origem-da-pendencia.ts`): além da régua SQL, a conversa só
+ * entra se a última fala da IA depois do último inbound saiu de um agente que
+ * HABILITA este pointer. Fluxo que nenhum agente habilita — texto fixo incluído —
+ * não inscreve ninguém por silêncio: não há de quem ser a pendência.
+ *
  * `segments`: única primitiva de segmentação já modelada no schema é
  * `contacts.tags` (GIN index `idx_contacts_tags_gin` já existe) — interpretado
  * como overlap entre `trigger_config.params.segments` e `contacts.tags`.
@@ -52,7 +57,9 @@ import { AUTORIZADO, silencioPodeReengajarViaSupabase } from "@/lib/ai/ativacao/
 
 import { flowGraphSchema } from "./graph-schema";
 import { triggerConfigSchema } from "./api-schemas";
+import { decidirOrigemDaPendencia } from "./origem-da-pendencia";
 import {
+  agentsEnablingPointer,
   decidirAgenteDoEnrollmentAutomatico,
   noDeGatilhoDoGrafo,
   type FollowupGateDb,
@@ -71,8 +78,18 @@ export interface SilencePointer {
 export interface SilenceSweepDb {
   /** Pointers ativos com trigger_config.kind='silence', de TODAS as orgs. */
   loadActiveSilencePointers(): Promise<SilencePointer[]>;
-  /** Contact ids da org sem inbound desde `cutoffIso` (inclusive); `segments` vazio = todos. */
-  loadSilentContactIds(orgId: string, cutoffIso: string, segments: string[]): Promise<string[]>;
+  /**
+   * Contact ids da org sem inbound desde `cutoffIso` (inclusive); `segments` vazio = todos.
+   * `agentesDoFluxo`: agentes publicados que HABILITAM o pointer — só entra a conversa cuja
+   * última fala da IA saiu de um deles (`origem-da-pendencia.ts`). Obrigatório de propósito:
+   * um chamador que o esquecesse voltaria a cobrar em nome de qualquer IA.
+   */
+  loadSilentContactIds(
+    orgId: string,
+    cutoffIso: string,
+    segments: string[],
+    agentesDoFluxo: readonly string[],
+  ): Promise<string[]>;
   /** Nó `trigger` do grafo pinado + se o fluxo pede agente; `null` se version/nó não existir. */
   loadTriggerNode(orgId: string, versionId: string): Promise<NoDeGatilho | null>;
   /** Insere o enrollment nascendo no nó trigger; `inserted:false` = 23505 (já vivo nesse pointer) → skip. */
@@ -153,7 +170,16 @@ export async function runSilenceSweep(deps: SilenceSweepDeps): Promise<SilenceSw
       }
 
       const cutoffIso = new Date(clock().getTime() - pointer.threshold_minutes * 60_000).toISOString();
-      const contactIds = await db.loadSilentContactIds(pointer.organization_id, cutoffIso, pointer.segments);
+      const agentesDoFluxo = agentsEnablingPointer(
+        await gateDb.loadEnabledPublishedFollowupAgents(pointer.organization_id),
+        pointer.id,
+      );
+      const contactIds = await db.loadSilentContactIds(
+        pointer.organization_id,
+        cutoffIso,
+        pointer.segments,
+        agentesDoFluxo,
+      );
       const nextEvalAt = clock().toISOString();
 
       for (const contactId of contactIds) {
@@ -227,7 +253,7 @@ export function createSupabaseSilenceSweepDb(admin: SupabaseClient): SilenceSwee
       return pointers;
     },
 
-    async loadSilentContactIds(orgId, cutoffIso, segments) {
+    async loadSilentContactIds(orgId, cutoffIso, segments, agentesDoFluxo) {
       // last_inbound_at é POR CONVERSA; o enrollment é POR CONTATO — reduz
       // client-side pro MAIS RECENTE `last_inbound_at` entre as conversas do
       // contato (um contato com 2+ channel_sessions não pode ser marcado
@@ -331,6 +357,24 @@ export function createSupabaseSilenceSweepDb(admin: SupabaseClient): SilenceSwee
           true,
         );
         if (motivo !== AUTORIZADO) continue;
+        // DE QUEM É A PENDÊNCIA (`origem-da-pendencia.ts`): a régua acima aceita
+        // QUALQUER IA falando por último; o fluxo só cobra a fala do agente que o
+        // habilita. Sem isto, "8,5" do agente do aluno virava lead comercial calado.
+        const falas = await admin
+          .from("messages")
+          .select("metadata")
+          .eq("organization_id", orgId)
+          .eq("conversation_id", v.boundary.conversation_id)
+          .eq("direction", "outbound")
+          .eq("sent_via", "ai")
+          .gt("sent_at", new Date(v.at).toISOString())
+          .order("sent_at", { ascending: false })
+          .limit(1);
+        if (falas.error) throw new Error(falas.error.message);
+        const meta = ((falas.data ?? [])[0] as { metadata?: Record<string, unknown> | null } | undefined)
+          ?.metadata;
+        const autor = typeof meta?.ai_actor_id === "string" ? meta.ai_actor_id : null;
+        if (decidirOrigemDaPendencia(autor, agentesDoFluxo) !== "autorizado") continue;
         silentIds.push(contactId);
         origins.set(`${orgId}:${contactId}`, v.boundary);
       }

@@ -2887,6 +2887,7 @@ async function executarTurnoDoAgente(
           // Só ESTE gate muda; stop, LGPD e pacing continuam valendo integralmente.
           isTemplate: true,
           optedOutThisTurn,
+          revalidarSilencioDaIa: true,
           crmDailyLimit: null,
           now: clock(),
           sleep: deps.sleep,
@@ -2992,6 +2993,16 @@ async function executarTurnoDoAgente(
               ok: true,
               encontrado: false,
               message: 'nenhum aluno foi encontrado com o telefone desta conversa; não invente dados.',
+            };
+          }
+          if (selecao.status === 'correspondencia_nao_confirmada') {
+            runLog.warn('sistema escolar respondeu sem match_type=exact — nenhum dado de aluno repassado', {});
+            return {
+              ok: true,
+              encontrado: false,
+              message:
+                'não foi possível confirmar que este número pertence a um aluno; não informe nenhum dado ' +
+                'acadêmico nem financeiro, não invente, e ofereça passar para uma pessoa da equipe.',
             };
           }
           if (selecao.status === 'ambiguo') {
@@ -3151,6 +3162,9 @@ async function executarTurnoDoAgente(
             channelSessionId: input.channelSessionId,
             body,
             optedOutThisTurn,
+            // Fala autônoma: relê o silêncio da conversa SOB o lock do envio. Quem
+            // clicou "Assumir" durante a geração não recebe a IA por cima.
+            revalidarSilencioDaIa: true,
             // ponytail: channel_sessions.daily_message_limit do CRM ainda não é lido
             // no runtime — null cai nos degraus de warm-up (conservadores). Injetar
             // aqui quando o drain expuser o limite da sessão.
@@ -4297,6 +4311,7 @@ async function executarTurnoDoAgente(
               channelSessionId: input.channelSessionId,
               body: texto,
               optedOutThisTurn,
+              revalidarSilencioDaIa: true,
               crmDailyLimit: null,
               // A pergunta repete por design (foi feita e não respondida); o
               // anti-blast vetaria justamente o que esta trava garante. Mesmo

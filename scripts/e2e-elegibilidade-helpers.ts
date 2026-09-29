@@ -216,12 +216,15 @@ async function main(): Promise<void> {
       // O estado que a varredura de silêncio cobra, sob a régua ATUAL: o cliente
       // escreveu há mais que o threshold, a IA RESPONDEU, e ele calou. (J20.12.)
       //
-      // Esta fixture criava só o inbound. A migration 0403 a tornou incobrável
-      // por construção, e o teste ficou esperando o comportamento velho: o
-      // cliente falou por último = a empresa deve resposta
-      // (`contato_aguardando_resposta`), e a mensagem tem de ser posterior à
-      // ativação do agente e à conexão do número.
-      // `autorDaFala` (default: o próprio `agentId`) assina a fala da IA.
+      // Esta fixture criava só o inbound. Duas regras posteriores a tornaram
+      // incobrável por construção, e o teste ficou esperando o comportamento velho:
+      //   · migration 0403 — o cliente falou por último = a empresa deve resposta
+      //     (`contato_aguardando_resposta`), e a mensagem tem de ser posterior à
+      //     ativação do agente e à conexão do número;
+      //   · dono da pendência (`lib/followup/origem-da-pendencia.ts`) — a última
+      //     fala da IA tem de ser de um agente que HABILITA o fluxo.
+      // `autorDaFala` (default: o próprio `agentId`) existe para o caso negativo:
+      // a fala de OUTRO agente não pode ser cobrada por este fluxo.
       case "seed-silent-contact": {
         const autorizado = args[0] === "1";
         const thresholdMinutes = Number(args[1] ?? "5");

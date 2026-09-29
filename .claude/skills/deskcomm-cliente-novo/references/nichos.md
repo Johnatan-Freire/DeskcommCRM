@@ -147,6 +147,9 @@ de turma, bônus vigentes, política de reembolso. **Promessas**: desconto máxi
 máximas. **Teste**: "serve para iniciante?", "tem certificado?", "quanto custa e parcela?", "sou
 aluno e não consigo entrar", "tem desconto?".
 
+Com o sistema escolar integrado, o "Suporte ao aluno" vira um agente acadêmico completo (nota,
+frequência, turma, horário, situação financeira) — pacote em `atendimento-ao-aluno.md`.
+
 ---
 
 ## Loja — online ou de rua

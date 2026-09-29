@@ -5603,6 +5603,9 @@ export const DICIONARIO: Traducoes = {
     es: "El primer mensaje a un contacto nuevo debe indicar que lo escribe un asistente virtual. Se indicó al asistente que lo corrija antes de enviarlo.",
   },
   "Uma trava de segurança segurou esta resposta": { es: "Una medida de seguridad retuvo esta respuesta" },
+  "Uma pessoa da equipe assumiu ou pausou o atendimento enquanto a IA respondia. A resposta da IA foi descartada para não falar por cima de quem assumiu.": {
+    es: "Una persona del equipo asumió o pausó la atención mientras la IA respondía. La respuesta de la IA se descartó para no hablar por encima de quien asumió.",
+  },
   "Ela não foi enviada ao contato.": { es: "No se envió al contacto." },
   "Resposta segurada pela proteção do número": { es: "Respuesta retenida por la protección del número" },
   "Resposta bloqueada por conformidade": { es: "Respuesta bloqueada por cumplimiento normativo" },

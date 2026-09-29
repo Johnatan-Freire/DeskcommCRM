@@ -685,6 +685,9 @@ async function sendFixedOutbound(
     channelSessionId,
     body,
     optedOutThisTurn,
+    // O `isLeadInHandoff` lá em cima é a leitura do INÍCIO; esta é a do envio, sob
+    // o lock — entre as duas cabem o getLeadContext e a fila do número.
+    revalidarSilencioDaIa: true,
     crmDailyLimit: null,
     now: clock(),
     sleep: deps.sleep,

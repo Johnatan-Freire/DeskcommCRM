@@ -147,6 +147,7 @@ test.describe("J20.12 — o follow-up automático respeita o gate", () => {
     let agentId = "";
     let autorizadoId = "";
     let semAutorizacaoId = "";
+    let deOutroAgenteId = "";
 
     try {
       await login(page, creds.users.manager!.email);
@@ -157,13 +158,20 @@ test.describe("J20.12 — o follow-up automático respeita o gate", () => {
       pointerId = await publicarFluxoDeSilencio(page);
       agentId = helper<{ agentId: string }>("publish-agent", pointerId).agentId;
 
-      // (2) Dois contatos silenciosos no MESMO canal com gate — um de cada lado. Nos dois,
-      // a IA do agente publicado respondeu e o cliente calou (régua da 0403: se o cliente
-      // falou por último, a empresa deve resposta e não há silêncio a cobrar).
+      // (2) Contatos silenciosos no MESMO canal com gate. Em todos, a IA respondeu e o
+      // cliente calou (régua da 0403); o que muda é UMA coisa por contato:
+      //   a) autorizado + fala do agente que habilita o fluxo → entra;
+      //   b) SEM autorização (gate)                             → não entra;
+      //   c) autorizado, mas a fala é de OUTRO agente          → não entra
+      //      (dono da pendência: o fluxo só cobra o agente que o habilita).
       const a = helper<{ contactId: string }>("seed-silent-contact", "1", String(THRESHOLD_MIN), agentId);
       const b = helper<{ contactId: string }>("seed-silent-contact", "0", String(THRESHOLD_MIN), agentId);
+      const c = helper<{ contactId: string }>(
+        "seed-silent-contact", "1", String(THRESHOLD_MIN), agentId, "00000000-0000-4000-8000-0000000a1000",
+      );
       autorizadoId = a.contactId;
       semAutorizacaoId = b.contactId;
+      deOutroAgenteId = c.contactId;
 
       // (3) Roda o cron de verdade — a varredura de silêncio decide quem entra.
       for (let i = 0; i < 3; i++) {
@@ -183,8 +191,12 @@ test.describe("J20.12 — o follow-up automático respeita o gate", () => {
         helper<{ id: string } | null>("enrollment-for-contact", semAutorizacaoId),
         "contato silencioso NÃO autorizado, no canal com gate: a varredura NÃO enrola",
       ).toBeNull();
+      expect(
+        helper<{ id: string } | null>("enrollment-for-contact", deOutroAgenteId),
+        "a IA que falou por último é de OUTRO agente: este fluxo não cobra a pendência dele",
+      ).toBeNull();
     } finally {
-      for (const id of [autorizadoId, semAutorizacaoId]) {
+      for (const id of [autorizadoId, semAutorizacaoId, deOutroAgenteId]) {
         if (id) {
           try {
             helper("cleanup-contact", id);

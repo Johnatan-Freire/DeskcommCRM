@@ -77,6 +77,13 @@ export function retentionCopy(
         "compliance",
         t("O contato pediu para não receber mensagens (opt-out). Nada será enviado a ele."),
       );
+    case "ia_silenciada":
+      return make(
+        "quality",
+        t(
+          "Uma pessoa da equipe assumiu ou pausou o atendimento enquanto a IA respondia. A resposta da IA foi descartada para não falar por cima de quem assumiu.",
+        ),
+      );
     case "lgpd_anonymized":
       return make(
         "compliance",

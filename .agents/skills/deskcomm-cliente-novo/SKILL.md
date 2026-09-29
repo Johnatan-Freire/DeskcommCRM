@@ -62,6 +62,10 @@ negócio faz, diagnóstico antes da oferta, qualificação, situações e o que 
 limites, estilo, quando chamar uma pessoa. Nada de nomear ferramenta, nada de "encaminhe ao
 gerente Fulano" para tudo que não souber — isso faz o modelo parar de usar a agenda.
 
+Escola com **Configurações › Sistema escolar** ativo e agente separado para alunos e responsáveis
+(nota, frequência, turma, horário, situação financeira): pacote em
+`references/atendimento-ao-aluno.md` — prompt, ferramentas mínimas, lacunas da API e roteador.
+
 ## Passo 3 — aplique pela tela, nesta ordem (o schema impõe)
 
 A ordem importa porque cada peça exige a anterior. Tela a tela, com os campos e o que cada um
