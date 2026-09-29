@@ -130,3 +130,32 @@ describe("termo de busca não devolve a lista inteira pelo parêntese (#1895)", 
     expect(buscaValeConsulta("(15) 99259")).toBe(true);
   });
 });
+
+/**
+ * O asterisco (#1935): a lista inteira de volta por quem digita curinga.
+ *
+ * Medido na main: `buscaValeConsulta("**") === true` porque `normalizarTermoDeBusca`
+ * não colapsa `*` (não é separador), então `"**"` vira 2 caracteres e passa o piso;
+ * `termoSeguroParaOr` NÃO escapa `*`, e no `or=` do PostgREST `*` vira `%` — `**`
+ * casa quase tudo. É o mesmo defeito do parêntese, pela porta do usuário que digita
+ * `*` pensando em curinga.
+ *
+ * A régua tira o `*` ANTES de medir o piso, junto do parêntese. Se alguém remover
+ * o `*` do `replace`, estes casos ficam VERMELHOS (a sabotagem da #1935 prevê isso).
+ */
+describe("termo de busca não devolve a lista inteira pelo asterisco (#1935)", () => {
+  it("'**' NÃO vale consulta", () => {
+    expect(buscaValeConsulta("**")).toBe(false);
+  });
+
+  it("asterisco com conteúdo mínimo por baixo não vale", () => {
+    expect(buscaValeConsulta("s*")).toBe(false);
+    expect(buscaValeConsulta("*")).toBe(false);
+  });
+
+  it("CONTROLE: nome com conteúdo real continua valendo", () => {
+    // Sem estes, uma implementação que recusasse qualquer termo passaria.
+    expect(buscaValeConsulta("sabrina")).toBe(true);
+    expect(buscaValeConsulta("paulo jr")).toBe(true);
+  });
+});
