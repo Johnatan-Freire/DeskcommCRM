@@ -41390,6 +41390,43 @@ alter table public.channel_knobs
     and (resposta_end_hour is null or resposta_end_hour between 1 and 24)
   );
 
+-- ---- atraso humano configurável por conexão (migration 0499) ----
+-- 0499 — os quatro números do atraso humano ANTES da primeira bolha
+-- (`atraso-humano.ts`) viram knob por conexão (issue #653): NOTAR, POR_CARACTERE,
+-- MINIMO e MAXIMO, todos NULL = default em defaults.ts (900/22/1200/7500 — os
+-- valores de antes, regressão zero). Nascem em `channel_knobs`, a mesma tabela
+-- dos knobs de pacing por conexão (0010 e 0495); nada de tabela nova. O jitter
+-- entre bolhas não ganha coluna: ele já é `throttle_ms` + `jitter_max_ms`.
+-- Reaplicável: `add column if not exists` e `drop constraint if exists` antes
+-- do `add constraint` — o `update.sh` roda o apêndice inteiro a cada atualização.
+alter table public.channel_knobs
+  add column if not exists atraso_notar_ms integer,
+  add column if not exists ms_por_caractere integer,
+  add column if not exists atraso_minimo_ms integer,
+  add column if not exists atraso_maximo_ms integer;
+
+comment on column public.channel_knobs.atraso_notar_ms is
+  'Parcela fixa do atraso humano (ms): ver a notificação e abrir a conversa. NULL = default (900).';
+comment on column public.channel_knobs.ms_por_caractere is
+  'Taxa de digitação do atraso humano (ms por caractere). NULL = default (22).';
+comment on column public.channel_knobs.atraso_minimo_ms is
+  'Piso do atraso humano (ms). NULL = default (1200).';
+comment on column public.channel_knobs.atraso_maximo_ms is
+  'Teto do atraso humano (ms). NULL = default (7500).';
+
+alter table public.channel_knobs
+  drop constraint if exists channel_knobs_atraso_humano_saneamento;
+
+alter table public.channel_knobs
+  add constraint channel_knobs_atraso_humano_saneamento
+  check (
+    (atraso_notar_ms   is null or (atraso_notar_ms   between 0 and 600000))
+    and (ms_por_caractere is null or (ms_por_caractere between 0 and 1000))
+    and (atraso_minimo_ms is null or (atraso_minimo_ms between 0 and 600000))
+    and (atraso_maximo_ms is null or (atraso_maximo_ms between 0 and 600000))
+    and (atraso_maximo_ms is null or atraso_minimo_ms is null or atraso_maximo_ms >= atraso_minimo_ms)
+  );
+
 -- ---- dedupe de event_dead atômico: índice único parcial (migration 0491) ----
 -- 0491 — o aviso `event_dead` não abre em dobro com dois drenos concorrentes
 -- (issue #880). O dedupe era uma pergunta seguida de uma escrita: `lib/event-log/
