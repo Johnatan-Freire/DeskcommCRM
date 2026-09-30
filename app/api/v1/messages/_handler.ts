@@ -1,5 +1,5 @@
 import { assertProspectingDelivery } from "@/lib/prospecting/guard";
-import { assertAgentOperationSupabase } from "@/lib/ai/agents/operation";
+import { assertAgentOperationSupabase, assertEscopoDaEtapaSupabase } from "@/lib/ai/agents/operation";
 import {
   assertApprovedReplySupabase,
   recordApprovedReplyReceiptSupabase,
@@ -777,6 +777,9 @@ export async function sendMessageHandler(
         if (ctx.serviceBoundary) await assertServiceBoundarySupabase(supabase, ctx.serviceBoundary);
         if (ctx.approvedReply) await prepareApprovedReplySupabase(supabase, ctx.approvedReply);
         if (ctx.agentOperation) await assertAgentOperationSupabase(supabase, ctx.agentOperation);
+        // A etapa do contato ainda aceita o escopo DESTE agente (0404)? O card pode
+        // ter mudado enquanto o modelo gerava — identidade escolar, humano no quadro.
+        if (ctx.agentOperation) await assertEscopoDaEtapaSupabase(supabase, ctx.agentOperation, c.contact_id);
       };
       // adapter preserva o mesmo branch (e a mesma mensagem de erro de cada
       // método) do outro lado do seam.

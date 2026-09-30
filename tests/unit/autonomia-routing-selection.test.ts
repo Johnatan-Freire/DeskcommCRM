@@ -79,6 +79,10 @@ function setup(a: PublishedAgentConfig, b: PublishedAgentConfig, sticky: boolean
       expect(values).toEqual([ids.org, ids.contact]);
       return { rows: [{ p: 'comercial' }] };
     }
+    // Resolvedor de identidade escolar: funil sem etapa acadêmica — não consulta nada.
+    if (sql.includes("s.service_policy = 'academico'")) {
+      return { rows: [{ tem: false }] };
+    }
     // Contexto curto do classificador (id do signal + limite): não pesa na seleção testada aqui.
     if (sql.includes('id<>$3')) {
       expect(values.slice(0, 2)).toEqual([ids.org, ids.conversation]);

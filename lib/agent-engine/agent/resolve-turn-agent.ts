@@ -68,6 +68,7 @@ import {
   type PublishedAgentConfig,
 } from './agent-config';
 import { classifyIntent, type ClassifierContextMessage } from './intent-classifier';
+import { resolverIdentidadeDoContato } from './identidade-do-contato';
 
 /**
  * Janela de contexto passada ao CLASSIFICADOR, não confundir com
@@ -117,6 +118,12 @@ export interface ResolveTurnAgentDeps {
   classifyIntent?: typeof classifyIntent;
   /** Política da etapa do contato (0404) — injetável para o teste não precisar de banco. */
   politicaDoContato?: (db: pg.Pool, tenantId: string, contactId: string) => Promise<string>;
+  /** Resolvedor de identidade escolar — injetável para o teste não chamar a integração. */
+  resolverIdentidade?: (
+    db: pg.Pool,
+    input: { tenantId: string; contactId: string },
+    log: Logger,
+  ) => Promise<unknown>;
   /** O agente acadêmico do número (0404) — injetável pelo mesmo motivo. */
   agenteAcademicoDoNumero?: (db: pg.Pool, tenantId: string, channelSessionId: string) => Promise<string | null>;
 }
@@ -333,6 +340,18 @@ export async function resolveConversationTurn(
   },
   deps: ResolveTurnAgentDeps,
 ): Promise<TurnAgentResolution> {
+  // IDENTIDADE ANTES DO AGENTE: se o telefone é de um contato relacionado a aluno,
+  // o card vai para a etapa acadêmica AGORA — e a política dela decide abaixo quem
+  // atende. Só em turno de mensagem recebida (follow-up não reclassifica ninguém).
+  // Falha nunca derruba o turno: o resolvedor devolve "desconhecido" e segue.
+  if (input.inbound) {
+    await (deps.resolverIdentidade ?? resolverIdentidadeDoContato)(
+      db,
+      { tenantId: input.tenantId, contactId: input.leadId },
+      deps.log,
+    );
+  }
+
   const { rows } = await db.query<{
     active_ai_agent_id: string | null;
     active_intent: string | null;
