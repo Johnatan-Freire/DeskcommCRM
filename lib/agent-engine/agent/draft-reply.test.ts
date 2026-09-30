@@ -55,6 +55,8 @@ const AGENT: PublishedAgentConfig = {
   sistemaEscolarToolIds: [],
   canMarkWon: false,
   canMarkLost: false,
+  serviceScope: "comercial",
+  canUpdateLeadState: true,
 };
 
 function contextResult(overrides: Partial<LeadContextResult & { ok: true }> = {}): LeadContextResult {

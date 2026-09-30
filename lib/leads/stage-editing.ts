@@ -32,6 +32,10 @@ export interface EtapaEditavel extends EtapaDoMapa {
   slug: string;
   position: number;
   is_archived: boolean;
+  /** `crm_stages.service_policy` (0404). Opcional: banco sem a migration não traz. */
+  service_policy?: string;
+  /** `crm_stages.exit_locked` (0404): o card que entra não sai. */
+  exit_locked?: boolean;
 }
 
 export type Resultado = { ok: true } | { ok: false; erro: string };
@@ -199,12 +203,27 @@ export function validarMarcacao(
     const campo = CAMPO_DO_PASSO[passo];
     const desfecho = passo === "won" ? "de ganho" : "de perda";
 
-    if (!desejado[passo] && etapa[campo]) {
+    // Funil SEM etapa de ganho é legítimo (migration 0404): uma escola que
+    // registra matrícula por outra via não tem coluna "vendido", e forçar uma
+    // etapa operacional a ser ganho faz entrar nela contar como venda
+    // (`fn_crm_lead_close_on_stage`). A perda continua obrigatória.
+    if (!desejado[passo] && etapa[campo] && passo === "lost") {
       return {
         ok: false,
         erro:
           `A etapa «${etapa.name}» é a etapa ${desfecho} deste funil e o funil precisa de uma. ` +
           `Marque OUTRA etapa como ${desfecho} — a marcação se muda, não se apaga.`,
+      };
+    }
+    // Desmarcar o ganho de uma etapa que o assistente ainda usa como «Ganho»
+    // violaria `crm_stages_hint_coerente_com_won_lost` com erro cru: o mapeamento
+    // muda primeiro, e a tela diz isso em vez do Postgres.
+    if (!desejado[passo] && etapa[campo] && passo === "won" && etapa.agent_stage_hint === "won") {
+      return {
+        ok: false,
+        erro:
+          `A etapa «${etapa.name}» representa «${rotuloDoPasso("won")}» no atendimento do assistente. ` +
+          `Mude o mapeamento do assistente antes de tirar o ganho dela.`,
       };
     }
 

@@ -25,6 +25,7 @@ import { requireRole } from "@/lib/auth/require-role";
 import { arquivarEtapa, atualizarEtapa } from "@/lib/leads/stage-operations";
 import { createClient } from "@/lib/supabase/server";
 import { traduzir } from "@/lib/i18n/dicionario";
+import { POLITICAS_DE_ETAPA } from "@/lib/leads/politica-de-etapa";
 
 export const dynamic = "force-dynamic";
 
@@ -44,6 +45,10 @@ const bodySchema = z
     is_won: z.boolean().optional(),
     is_lost: z.boolean().optional(),
     depois_de: z.string().min(1).nullable().optional(),
+    /** Quem pode atender contato nesta etapa (0404) — só ADMIN altera. */
+    service_policy: z.enum(POLITICAS_DE_ETAPA).optional(),
+    /** O card que entra não sai (0404) — só ADMIN altera. */
+    exit_locked: z.boolean().optional(),
   })
   .strict()
   .refine((b) => Object.keys(b).length > 0, { message: "Nada para alterar." });
@@ -72,6 +77,14 @@ export async function PATCH(req: NextRequest, ctx: RouteCtx): Promise<Response> 
       requestId,
       details: parsed.error.flatten(),
     });
+  }
+
+  // Política de atendimento e trava de saída mudam QUEM fala com o contato e se
+  // o card pode sair — configuração de dono, não de gestor. Destravar é a ação
+  // administrativa extraordinária que a trava prevê; não é fluxo comum.
+  if (parsed.data.service_policy !== undefined || parsed.data.exit_locked !== undefined) {
+    const admin = await requireRole("admin", { requestId, resource: "crm_stages" });
+    if (!admin.ok) return admin.response;
   }
 
   const supabase = await createClient();

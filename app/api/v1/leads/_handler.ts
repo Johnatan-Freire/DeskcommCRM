@@ -26,6 +26,7 @@ import {
 } from "@/lib/leads/motivo-da-perda";
 import type { CreateLeadInput, UpdateLeadInput } from "@/lib/schemas";
 import { ehCorrecaoDeMovimentoDaIa } from "@/lib/leads/correcao-humana";
+import { ehRecusaDeEtapaTravada, FRASE_ETAPA_TRAVADA } from "@/lib/leads/politica-de-etapa";
 
 type SB = SupabaseClient;
 
@@ -740,6 +741,10 @@ export async function moveLeadHandler(
   if (updErr) {
     // Rede de segurança (#917) — mesma da rota de arrasto: recusa do banco por
     // motivo da perda vira recusa de negócio, nunca 500.
+    // Trava de saída (0404): etapa permanente — recusa de negócio, nunca 500.
+    if (ehRecusaDeEtapaTravada(updErr)) {
+      throw new ApiError(409, "state_conflict", undefined, ctx.requestId, FRASE_ETAPA_TRAVADA);
+    }
     const recusa = recusaDeMotivoDaPerdaPeloBanco(updErr, ctx.idioma);
     if (recusa) {
       throw new ApiError(422, recusa.codigo, undefined, ctx.requestId, recusa.mensagem);

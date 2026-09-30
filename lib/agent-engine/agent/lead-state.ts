@@ -119,6 +119,34 @@ export function verificarAutorizacaoTerminal(
   return { ok: true };
 }
 
+/**
+ * Autorização para mover o funil (migration 0404): `update_lead_state` inteiro,
+ * não só won/lost. Agente de escopo ACADÊMICO nunca move — o escopo vence a
+ * capability, qualquer que seja `can_update_lead_state`; os outros obedecem a
+ * `can_update_lead_state`. `config === null` (sem agente publicado) mantém o
+ * comportamento de antes: quem barra won/lost ali é `verificarAutorizacaoTerminal`.
+ *
+ * Mesmo autorizado, o agente não tira um card de etapa travada: o gatilho
+ * `trg_crm_leads_trava_de_saida` recusa o espelho no CRM. A trava da etapa vence.
+ */
+export function verificarPermissaoDeMoverFunil(
+  config: { serviceScope: 'comercial' | 'academico'; canUpdateLeadState: boolean } | null,
+): { ok: true } | { ok: false; error: { code: 'funil_nao_autorizado'; message: string } } {
+  if (config === null) return { ok: true };
+  if (config.serviceScope === 'academico' || !config.canUpdateLeadState) {
+    return {
+      ok: false,
+      error: {
+        code: 'funil_nao_autorizado',
+        message:
+          'Este agente não move o contato no funil. Siga o atendimento; se a conversa precisar ' +
+          'de uma pessoa, use o pedido de atendimento humano.',
+      },
+    };
+  }
+  return { ok: true };
+}
+
 function teachInvalidTransition(current: LeadStage, to: LeadStage): LeadStateUpdateResult {
   const valid = LEAD_STAGE_TRANSITIONS[current];
   const options =

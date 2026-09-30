@@ -42,6 +42,11 @@ export type MirrorReason =
    * marque como perdido e informe o motivo (o banco recusa motivo que o agente invente).
    */
   | 'perda_sem_motivo'
+  /**
+   * O card está numa etapa com trava de saída (migration 0404). Warn-only: a
+   * regra funcionou e não há decisão a tomar — o card é permanente ali.
+   */
+  | 'etapa_travada'
   | 'crm_error'
   | 'crm_unavailable';
 
@@ -56,6 +61,7 @@ export type MirrorResult = { ok: true } | { ok: false; reason: MirrorReason; det
 export const MIRROR_WARN_ONLY: ReadonlySet<MirrorReason> = new Set<MirrorReason>([
   'not_configured',
   'human_conflict',
+  'etapa_travada',
 ]);
 
 /** O aviso que vai para a Central quando o espelho recusa — `null` = warn-only. */
@@ -252,6 +258,10 @@ export async function mirrorLeadStageToCrm(
       conflito_humano: {
         reason: 'human_conflict',
         detail: 'um humano moveu o card durante a operação — a decisão dele prevalece',
+      },
+      etapa_travada: {
+        reason: 'etapa_travada',
+        detail: 'o card está numa etapa permanente e não sai dela',
       },
       falha_de_escrita: {
         reason: 'crm_error',

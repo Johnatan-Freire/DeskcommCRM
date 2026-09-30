@@ -38,6 +38,7 @@ import {
   type UpdateDeMarcacao,
 } from "@/lib/leads/stage-editing";
 import { autoriaDaMudanca } from "@/lib/operacao/autoria";
+import { politicaAceitaDesfecho, type PoliticaDeEtapa } from "@/lib/leads/politica-de-etapa";
 
 type SB = SupabaseClient;
 
@@ -51,7 +52,7 @@ export interface DepsDeEtapa {
 
 /** As colunas que a tela e as regras usam. `position` entra: a reordenação calcula em cima dela. */
 const COLUNAS =
-  "id, name, slug, position, is_won, is_lost, is_archived, agent_stage_hint, last_change_actor_kind, last_change_at";
+  "id, name, slug, position, is_won, is_lost, is_archived, agent_stage_hint, last_change_actor_kind, last_change_at, service_policy, exit_locked";
 
 /** A etapa como sai para quem lê — inclui a autoria da última mudança de configuração. */
 export interface EtapaVisivel {
@@ -61,6 +62,10 @@ export interface EtapaVisivel {
   position: number;
   is_won: boolean;
   is_lost: boolean;
+  /** Quem pode atender contato nesta etapa (0404). */
+  service_policy?: string;
+  /** O card que entra não sai (0404). */
+  exit_locked?: boolean;
   /** `user` | `ai` | `system` — `null` nas etapas anteriores a esta coluna. */
   last_change_actor_kind: string | null;
   last_change_at: string | null;
@@ -119,6 +124,8 @@ export function corpo(etapas: EtapaLida[]): { etapas: EtapaVisivel[] } {
         position: e.position,
         is_won: e.is_won,
         is_lost: e.is_lost,
+        service_policy: e.service_policy ?? "comercial",
+        exit_locked: e.exit_locked ?? false,
         last_change_actor_kind: e.last_change_actor_kind ?? null,
         last_change_at: e.last_change_at ?? null,
       })),
@@ -283,6 +290,14 @@ export interface PedidoDeEdicao {
    * duas divergiriam no primeiro ajuste.
    */
   depois_de?: string | null;
+  /**
+   * Quem pode atender contato nesta etapa (0404). Configuração de ADMIN — quem
+   * chama confere o papel (a rota exige `admin` quando este campo ou
+   * `exit_locked` vem no pedido).
+   */
+  service_policy?: PoliticaDeEtapa;
+  /** Trava de saída (0404). Mesma exigência de papel de `service_policy`. */
+  exit_locked?: boolean;
 }
 
 export async function atualizarEtapa(
@@ -333,8 +348,31 @@ export async function atualizarEtapa(
     }
   }
 
-  const patchDoAlvo: PatchDeMarcacao & { name?: string; position?: number } = {};
+  // Etapa só-humana ou acadêmica não é desfecho comercial: entrar nela fecharia
+  // o lead como venda/perda. O CHECK `crm_stages_politica_sem_desfecho` recusa;
+  // aqui a recusa sai em português e com o nome da etapa.
+  const politicaFinal = pedido.service_policy ?? alvo.service_policy ?? "comercial";
+  const wonFinal = pedido.is_won ?? alvo.is_won;
+  const lostFinal = pedido.is_lost ?? alvo.is_lost;
+  if (!politicaAceitaDesfecho(politicaFinal) && (wonFinal || lostFinal)) {
+    throw new ApiError(
+      422,
+      "unprocessable_entity",
+      undefined,
+      deps.requestId,
+      `A etapa «${alvo.name}» é de atendimento só humano ou acadêmico e não pode ser etapa de ganho nem de perda.`,
+    );
+  }
+
+  const patchDoAlvo: PatchDeMarcacao & {
+    name?: string;
+    position?: number;
+    service_policy?: PoliticaDeEtapa;
+    exit_locked?: boolean;
+  } = {};
   if (pedido.name !== undefined) patchDoAlvo.name = pedido.name.trim();
+  if (pedido.service_policy !== undefined) patchDoAlvo.service_policy = pedido.service_policy;
+  if (pedido.exit_locked !== undefined) patchDoAlvo.exit_locked = pedido.exit_locked;
 
   if (pedido.depois_de !== undefined) {
     // Só as ativas compõem a régua: arquivada não ocupa lugar no quadro.

@@ -73,6 +73,12 @@ function setup(a: PublishedAgentConfig, b: PublishedAgentConfig, sticky: boolean
       corteConsultado.push(values[2] as string);
       return { rows: [{ motivo: corteResponde }] };
     }
+    // Política da etapa do contato (migration 0404): contato sem lead em etapa
+    // especial é comercial — a seleção testada aqui é a do roteador.
+    if (sql.includes('fn_politica_de_atendimento_do_contato')) {
+      expect(values).toEqual([ids.org, ids.contact]);
+      return { rows: [{ p: 'comercial' }] };
+    }
     // Contexto curto do classificador (id do signal + limite): não pesa na seleção testada aqui.
     if (sql.includes('id<>$3')) {
       expect(values.slice(0, 2)).toEqual([ids.org, ids.conversation]);
