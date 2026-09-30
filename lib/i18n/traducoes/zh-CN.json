@@ -3295,6 +3295,8 @@
   "Pediu ao agente para planejar os tempos de espera": "要求智能体规划等待时间",
   "Pediu ao agente para escrever a mensagem": "要求智能体撰写消息",
   "Pediu ao agente para interpretar a resposta": "要求智能体解读回复",
+  "Esperando a resposta do cliente": "正在等待客户回复",
+  "O cliente não respondeu dentro do prazo": "客户未在期限内回复",
   "Conferiu se a mensagem já tinha saído": "检查消息是否已发出",
   "Mensagem enviada": "消息已发送",
   "O agente interpretou a resposta": "智能体解读了回复",
