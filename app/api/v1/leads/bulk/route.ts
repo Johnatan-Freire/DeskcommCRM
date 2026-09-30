@@ -27,6 +27,7 @@ import { createClient } from "@/lib/supabase/server";
 import { observeServiceOrigin } from "@/lib/atendimento/origem";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { traduzir } from "@/lib/i18n/dicionario";
+import { ehRecusaDeEtapaTravada, FRASE_ETAPA_TRAVADA } from "@/lib/leads/politica-de-etapa";
 
 export const dynamic = "force-dynamic";
 
@@ -212,6 +213,9 @@ export async function POST(req: NextRequest): Promise<Response> {
         // Rede de segurança (#917): a recusa do banco por motivo da perda (o
         // motivo veio, mas não é do vocabulário deste funil) vira recusa de
         // negócio. Qualquer outro erro continua 500 com o texto do Postgres.
+        if (ehRecusaDeEtapaTravada(error)) {
+          return fail("state_conflict", FRASE_ETAPA_TRAVADA, 409, { requestId });
+        }
         const recusaDoBanco = recusaDeMotivoDaPerdaPeloBanco(error, user.idioma);
         if (recusaDoBanco) {
           return fail(recusaDoBanco.codigo, recusaDoBanco.mensagem, 422, { requestId });

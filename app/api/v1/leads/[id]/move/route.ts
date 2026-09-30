@@ -25,6 +25,7 @@ import {
 } from "@/lib/leads/motivo-da-perda";
 import { RECUSA_DE_TROCA_DE_FUNIL } from "@/lib/leads/clonar-para-funil";
 import { traduzir } from "@/lib/i18n/dicionario";
+import { ehRecusaDeEtapaTravada, FRASE_ETAPA_TRAVADA } from "@/lib/leads/politica-de-etapa";
 
 export const dynamic = "force-dynamic";
 
@@ -126,6 +127,11 @@ export async function POST(
     .maybeSingle();
 
   if (updErr) {
+    // Trava de saída (migration 0404): o card está numa etapa permanente. O banco
+    // recusa (PT423) venha de onde vier a escrita; aqui a recusa vira frase.
+    if (ehRecusaDeEtapaTravada(updErr)) {
+      return fail("state_conflict", t(FRASE_ETAPA_TRAVADA), 409, { requestId });
+    }
     // Rede de segurança (issue #917): se o banco recusar por motivo da perda mesmo
     // com a decisão acima, quem está na tela recebe a recusa de negócio. Sem isto,
     // qualquer caminho novo que escreva `stage_id` sem passar pela decisão volta a

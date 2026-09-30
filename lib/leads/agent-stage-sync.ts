@@ -129,6 +129,7 @@ import { registraFalhaDeAtividade } from "@/lib/leads/activity-write-failure";
 import { resolveActiveLeadForContact } from "@/lib/leads/active-lead";
 import { stageChangeReason } from "@/lib/leads/activity-emitter";
 import { podeOperarNoFunil } from "./escopo-de-funil";
+import { ehRecusaDeEtapaTravada, FRASE_ETAPA_TRAVADA } from "./politica-de-etapa";
 
 export interface ResultadoDaSincronizacao {
   moveu: boolean;
@@ -167,6 +168,12 @@ export interface ResultadoDaSincronizacao {
      * #917 era justamente o card NÃO andar em silêncio (ou estourar num 500).
      */
     | "perda_sem_motivo"
+    /**
+     * O card está numa etapa com trava de saída (migration 0404) — ex.: "Alunos
+     * e responsáveis". Estado legítimo do produto: a regra funcionou e o card
+     * fica onde está, qualquer que seja o passo que o agente declarou.
+     */
+    | "etapa_travada"
     | "falha_de_escrita"
     | "indisponivel";
   leadId?: string;
@@ -268,13 +275,21 @@ export async function sincronizaEstagioDoAgente(
     // `is_lost` entra porque a decisão de perda (#917) é sobre esta coluna: sem
     // ela, etapa de perda é indistinguível de etapa comum e o agente escreveria a
     // etapa que o banco recusa — recusa que chega ao worker como falha de escrita.
-    .select("id, name, agent_stage_hint, is_archived, is_lost")
+    .select("id, name, agent_stage_hint, is_archived, is_lost, exit_locked")
     .eq("pipeline_id", lead.pipeline_id);
   // Mesmo motivo do SELECT acima: sem esta linha, banco fora = pipeline sem
   // hint nenhum = "sem_mapeamento", e o incidente se disfarça de configuração.
   if (erroStages) {
     return { moveu: false, motivo: "indisponivel", leadId: lead.id, detalhe: erroStages.message };
   }
+
+  // Trava de saída (0404): quem entrou numa etapa travada não sai — nem pelo
+  // agente. Checado ANTES do destino para a resposta ser a regra, não um erro
+  // de escrita; o gatilho do banco recusa igual se esta linha faltar.
+  const atual = (stageRows ?? []).find((s) => (s as { id: string }).id === lead.stage_id) as
+    | { exit_locked?: boolean | null }
+    | undefined;
+  if (atual?.exit_locked) return { moveu: false, motivo: "etapa_travada", leadId: lead.id };
 
   const destino = resolveDestinoDoAgente(
     (stageRows ?? []) as EstagioCandidato[],
@@ -315,6 +330,9 @@ export async function sincronizaEstagioDoAgente(
     // lugar de uma recusa de negócio que o humano resolve em dois cliques. Cobre
     // o caminho que ainda não passa por `resolveDestinoDoAgente` (escrita futura,
     // motivo fora do vocabulário do funil) e mantém o rótulo honesto.
+    if (ehRecusaDeEtapaTravada(error)) {
+      return { moveu: false, motivo: "etapa_travada", leadId: lead.id, detalhe: FRASE_ETAPA_TRAVADA };
+    }
     const recusa = recusaDeMotivoDaPerdaPeloBanco(error);
     if (recusa) {
       return { moveu: false, motivo: "perda_sem_motivo", leadId: lead.id, detalhe: recusa.mensagem };

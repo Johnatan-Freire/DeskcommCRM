@@ -3,6 +3,7 @@ import { assertServiceBoundarySupabase, observeServiceOrigin } from "@/lib/atend
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { logger } from "@/lib/logger";
+import { ehRecusaDeEtapaTravada } from "@/lib/leads/politica-de-etapa";
 import { emitLeadActivity, stageChangeReason } from "@/lib/leads/activity-emitter";
 import { registraFalhaDeAtividade } from "@/lib/leads/activity-write-failure";
 
@@ -36,6 +37,12 @@ export interface ResultadoDoMovimentoDeHandoff {
     | "lead_nao_encontrado"
     | "lead_fechado"
     | "conflito_humano"
+    /**
+     * O card está numa etapa com trava de saída (migration 0404) — ex.: "Alunos e
+     * responsáveis". O handoff (pessoa assume a conversa) acontece igual; só o
+     * card não muda de coluna: passar para humano é atendimento, não funil.
+     */
+    | "etapa_travada"
     | "falha_de_escrita"
     | "indisponivel";
 }
@@ -126,13 +133,17 @@ export async function moverLeadParaEtapaDeHandoff(
     return { moveu: false, motivo: "ja_esta_la" };
   }
 
-  // Nome da origem só enfeita o texto da timeline — erro descartado de
-  // propósito, mesmo raciocínio de `agent-stage-sync.ts`.
+  // Nome da origem enfeita o texto da timeline — e `exit_locked` (0404) decide:
+  // card em etapa travada não sai, nem pelo handoff. O erro desta leitura segue
+  // descartado para o NOME; para a trava, o gatilho do banco é a rede.
   const { data: origem } = await admin
     .from("crm_stages")
-    .select("name")
+    .select("name, exit_locked")
     .eq("id", leadRow.stage_id)
     .maybeSingle();
+  if ((origem as { exit_locked?: boolean | null } | null)?.exit_locked) {
+    return { moveu: false, motivo: "etapa_travada" };
+  }
 
   if (input.serviceBoundary) {
     if (input.serviceBoundary.organization_id !== input.organizationId || input.serviceBoundary.contact_id !== leadRow.contact_id) throw new StaleServiceBoundaryError();
@@ -149,6 +160,9 @@ export async function moverLeadParaEtapaDeHandoff(
     // leitura e a escrita, a decisão dele vence.
     .eq("stage_id", leadRow.stage_id)
     .select("id");
+  if (erroUpdate && ehRecusaDeEtapaTravada(erroUpdate)) {
+    return { moveu: false, motivo: "etapa_travada" };
+  }
   if (erroUpdate) {
     logger.warn("[handoff-stage-move] update de stage_id falhou", {
       lead_id: leadRow.id,

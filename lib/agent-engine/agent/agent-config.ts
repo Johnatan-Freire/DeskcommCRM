@@ -60,6 +60,18 @@ export interface PublishedAgentConfig {
   /** Mesma proteção de `canMarkWon`, para `stage=lost`. */
   canMarkLost: boolean;
   /**
+   * Escopo de atendimento da versão (migration 0404): `comercial` atende etapas
+   * de política comercial; `academico` atende SÓ a etapa acadêmica. Quem decide
+   * se pode responder é `fn_ia_pode_responder_mensagem`; aqui ele serve ao
+   * roteamento e à recusa de `update_lead_state`.
+   */
+  serviceScope: 'comercial' | 'academico';
+  /**
+   * A tool `update_lead_state` é permitida (0404)? Agente acadêmico NUNCA move
+   * funil, qualquer que seja este valor — o escopo vence a capability.
+   */
+  canUpdateLeadState: boolean;
+  /**
    * Materiais que ESTE agente consulta (`ai_agent_versions.knowledge_source_ids`).
    * Vazio = NENHUM: a ferramenta de busca some do turno.
    */
@@ -132,6 +144,8 @@ interface Row {
   sistema_escolar_tool_ids: string[] | null;
   can_mark_won: boolean | null;
   can_mark_lost: boolean | null;
+  service_scope: string | null;
+  can_update_lead_state: boolean | null;
   active_kb_version_id: string | null;
   config: Record<string, unknown> | null;
   operator_enabled: boolean | null;
@@ -164,6 +178,8 @@ const SELECT_AGENT_CONFIG_COLUMNS = `a.operation_mode,a.paused_at,a.operation_re
             v.sistema_escolar_tool_ids,
             v.can_mark_won,
             v.can_mark_lost,
+            v.service_scope,
+            v.can_update_lead_state,
             a.active_kb_version_id,
             a.config,
             v.operator_enabled,
@@ -231,6 +247,10 @@ function mapAgentConfigRow(r: Row): PublishedAgentConfig {
     // `agentConfig` presente mas com a coluna faltando.
     canMarkWon: r.can_mark_won ?? false,
     canMarkLost: r.can_mark_lost ?? false,
+    // Clone sem a 0404: coluna ausente = comportamento de antes (comercial, e a
+    // tool disponível como sempre foi). O escopo acadêmico só existe por escolha.
+    serviceScope: r.service_scope === 'academico' ? 'academico' : 'comercial',
+    canUpdateLeadState: r.service_scope === 'academico' ? false : (r.can_update_lead_state ?? true),
     // `?? []` cobre o clone sem a 0181: sem a coluna, o agente cai no ponteiro
     // legado abaixo em vez de ficar sem material nenhum.
     knowledgeSourceIds: r.knowledge_source_ids ?? [],

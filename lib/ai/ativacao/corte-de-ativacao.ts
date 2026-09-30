@@ -35,7 +35,13 @@ export type MotivoDoCorteDeMensagem =
   | "agente_fora_do_ar"
   | "ativacao_desconhecida"
   | "anterior_a_ativacao"
-  | "nenhum_agente_no_ar";
+  | "nenhum_agente_no_ar"
+  /** Política da etapa do contato (0404): terminal — nenhuma IA. */
+  | "etapa_sem_ia"
+  /** Política da etapa do contato (0404): só humano atende. */
+  | "etapa_so_humano"
+  /** O agente resolvido não é do escopo que a etapa exige (comercial × acadêmico). */
+  | "agente_fora_do_escopo_da_etapa";
 
 /** Motivos de `fn_silencio_pode_reengajar` (inclui os do corte de mensagem). */
 export type MotivoDoSilencio =
@@ -49,7 +55,9 @@ export type MotivoDoSilencio =
   | "contato_aguardando_resposta"
   | "humano_falou_por_ultimo"
   | "contato_nunca_falou"
-  | "ja_reengajado_neste_silencio";
+  | "ja_reengajado_neste_silencio"
+  /** Follow-up é comercial (0404): etapa de outra política não é reengajada. */
+  | "etapa_fora_do_follow_up";
 
 /** Motivos de `fn_followup_pode_enviar`. */
 export type MotivoDoEnvioDeFollowup = MotivoDoSilencio | "inscricao_desconhecida" | "fluxo_desligado";

@@ -5180,8 +5180,11 @@ export const DICIONARIO: Traducoes = {
   "de fechamento": { es: "de cierre" },
   "é onde o negócio vira venda, e a": { es: "es donde el negocio se convierte en venta, y la" },
   "de perda": { es: "de pérdida" },
-  "é onde ele se perde. Cada funil precisa de uma de cada — por isso a marcação se muda de lugar, não se apaga.": {
-    es: "es donde se pierde. Cada embudo necesita una de cada — por eso la marca se cambia de lugar, no se borra.",
+  "é onde ele se perde. Todo funil precisa de uma etapa de perda; a de fechamento é opcional — um funil pode não ter coluna de venda. A marcação se muda de lugar, não se apaga.": {
+    es: "es donde se pierde. Todo embudo necesita una etapa de pérdida; la de cierre es opcional — un embudo puede no tener columna de venta. La marca se cambia de lugar, no se borra.",
+  },
+  "Este contato está numa etapa permanente e não pode ser movido para outra etapa do funil.": {
+    es: "Este contacto está en una etapa permanente y no puede moverse a otra etapa del embudo.",
   },
   Mover: { es: "Mover" },
   "uma coluna para trás": { es: "una columna hacia atrás" },

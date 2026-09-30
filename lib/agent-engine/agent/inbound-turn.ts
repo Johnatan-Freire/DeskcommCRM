@@ -81,6 +81,7 @@ import {
   applyLeadStateUpdate,
   getLeadState,
   verificarAutorizacaoTerminal,
+  verificarPermissaoDeMoverFunil,
   type LeadStage,
   type LeadStateRow,
 } from './lead-state';
@@ -3486,6 +3487,14 @@ async function executarTurnoDoAgente(
     update_lead_state: tool({
       ...AGENT_TOOL_DEFS.update_lead_state,
       execute: async (raw) => {
+        // Permissão de mover o funil (0404) — ANTES de tudo: agente acadêmico, ou
+        // versão sem `can_update_lead_state`, não move o contato em estágio nenhum.
+        const permissao = verificarPermissaoDeMoverFunil(
+          agentConfig === null
+            ? null
+            : { serviceScope: agentConfig.serviceScope, canUpdateLeadState: agentConfig.canUpdateLeadState },
+        );
+        if (!permissao.ok) return permissao;
         // Bloqueio terminal — ANTES de qualquer escrita (harness ou CRM). Fail-closed:
         // `agentConfig` null (sem agente publicado / fallback genérico) bloqueia as duas,
         // porque ausência de config não é autorização (ver verificarAutorizacaoTerminal).

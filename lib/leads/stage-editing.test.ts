@@ -96,16 +96,17 @@ describe('validarMarcacao', () => {
     expect(validarMarcacao(etapas, 'e1', { is_won: true, is_lost: true }).ok).toBe(false);
   });
 
-  it('recusa desmarcar o ganho da INSTALAÇÃO FRESCA, onde ninguém tem hint', () => {
-    // fn_seed_default_pipeline_for_org semeia "Pago" com is_won=true e
-    // agent_stage_hint=null; o backfill da 0084 só pegou o que já existia. Uma
-    // guarda chaveada no hint protegeria só bancos antigos — e o funil de toda
-    // org nova ficaria sem etapa de ganho, com /leads/[id]/win em 422.
+  it('ACEITA desmarcar o ganho quando nenhum passo do assistente depende dele (funil sem ganho, 0404)', () => {
+    // Antes esta linha RECUSAVA: "todo funil precisa de etapa de ganho". Uma
+    // escola que registra matrícula por outra via não tem coluna "vendido", e
+    // forçar uma etapa operacional a ser ganho faz entrar nela contar como venda
+    // (fn_crm_lead_close_on_stage). Sem etapa de ganho, /leads/[id]/win recusa
+    // com 422 — que é a resposta honesta para um funil que decidiu não ter.
     const fresco = [
       { ...etapas[0]!, id: 'p1', name: 'Aguardando pagamento', slug: 'aguardando_pagamento' },
       { ...etapas[0]!, id: 'p2', name: 'Pago', slug: 'pago', is_won: true, agent_stage_hint: null },
     ];
-    expect(validarMarcacao(fresco, 'p2', { is_won: false }).ok).toBe(false);
+    expect(validarMarcacao(fresco, 'p2', { is_won: false }).ok).toBe(true);
   });
 
   it('recusa desmarcar a etapa de PERDA — o lado espelho da regra de ganho', () => {

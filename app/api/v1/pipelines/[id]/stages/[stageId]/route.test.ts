@@ -230,9 +230,23 @@ describe("PATCH /api/v1/pipelines/[id]/stages/[stageId]", () => {
     ]);
   });
 
-  it("desmarcar o ganho sem substituta → 422, e nenhuma escrita", async () => {
+  it("desmarcar o ganho sem substituta → aceito: o funil pode não ter etapa de ganho (0404)", async () => {
     authOk();
     const db = makeDb({ stages: funil() });
+    const { PATCH } = await import("./route");
+    const res = await PATCH(reqPatch({ is_won: false }), ctx("e3"));
+
+    expect(res.status).toBe(200);
+    expect(db.escritas.map((e) => [e.filtros.find(([c]) => c === "id")?.[1], e.patch])).toEqual([
+      ["e3", comAutoria({ is_won: false })],
+    ]);
+  });
+
+  it("desmarcar o ganho de etapa que o assistente usa como «Ganho» → 422, e nenhuma escrita", async () => {
+    authOk();
+    const db = makeDb({
+      stages: funil().map((e) => (e.id === "e3" ? { ...e, agent_stage_hint: "won" } : e)),
+    });
     const { PATCH } = await import("./route");
     const res = await PATCH(reqPatch({ is_won: false }), ctx("e3"));
 

@@ -92,7 +92,13 @@ export interface TurnAgentResolution {
     | 'no_match'
     | 'classifier_failed'
     /** A conversa nasceu de uma campanha que declarou agente (migration 0267). */
-    | 'campanha';
+    | 'campanha'
+    /**
+     * A etapa do contato decidiu o agente (migration 0404): contato em etapa
+     * acadêmica vai ao agente de escopo acadêmico, qualquer que seja o palpite
+     * do classificador de texto.
+     */
+    | 'etapa_academica';
   /**
    * Fluxo de atendimento que o membro casado aponta (migration 0394; 0237 na branch do autor). O turno
    * começa o fluxo para o contato; `null` = nenhum. Só rótulos casados o trazem
@@ -109,6 +115,10 @@ export interface ResolveTurnAgentDeps {
   loadPublishedAgentConfigById?: typeof loadPublishedAgentConfigById;
   loadPublishedAgentConfig?: typeof loadPublishedAgentConfig;
   classifyIntent?: typeof classifyIntent;
+  /** Política da etapa do contato (0404) — injetável para o teste não precisar de banco. */
+  politicaDoContato?: (db: pg.Pool, tenantId: string, contactId: string) => Promise<string>;
+  /** O agente acadêmico do número (0404) — injetável pelo mesmo motivo. */
+  agenteAcademicoDoNumero?: (db: pg.Pool, tenantId: string, channelSessionId: string) => Promise<string | null>;
 }
 
 export async function resolveTurnAgent(
@@ -352,11 +362,96 @@ export async function resolveConversationTurn(
     recentMessages = contextRows.reverse();
   }
 
-  return resolveTurnAgent(db, llmCfg, {
+  const resolvido = await resolveTurnAgent(db, llmCfg, {
     ...input,
     signal,
     recentMessages,
     stickyAgentId: rows[0]?.active_ai_agent_id ?? null,
     stickyIntent: rows[0]?.active_intent ?? null,
   }, deps);
+  return aplicaEscopoDaEtapa(db, input, resolvido, deps);
+}
+
+/**
+ * A etapa do contato vence o palpite do classificador (migration 0404).
+ *
+ * Quem DECIDE se o agente pode responder é `fn_ia_pode_responder_mensagem`, no
+ * turno — este passo só evita que um roteamento errado vire silêncio:
+ *   - etapa acadêmica → o agente de escopo acadêmico que atende este número;
+ *     sem nenhum, `config: null` (e o turno não responde);
+ *   - etapa comercial com um agente acadêmico resolvido → o agente publicado da
+ *     sessão, se for comercial; senão ninguém.
+ * Etapa terminal/só-humana não muda nada aqui: a função SQL recusa qualquer agente.
+ */
+async function aplicaEscopoDaEtapa(
+  db: pg.Pool,
+  input: { tenantId: string; leadId: string; channelSessionId: string },
+  resolvido: TurnAgentResolution,
+  deps: ResolveTurnAgentDeps,
+): Promise<TurnAgentResolution> {
+  const _politica = deps.politicaDoContato ?? politicaDoContato;
+  const _academico = deps.agenteAcademicoDoNumero ?? agenteAcademicoDoNumero;
+  const _loadAgentById = deps.loadPublishedAgentConfigById ?? loadPublishedAgentConfigById;
+  const _loadAgentBySession = deps.loadPublishedAgentConfig ?? loadPublishedAgentConfig;
+
+  const politica = await _politica(db, input.tenantId, input.leadId);
+  if (politica === 'academico') {
+    if (resolvido.config?.serviceScope === 'academico') return resolvido;
+    const agentId = await _academico(db, input.tenantId, input.channelSessionId);
+    const config = agentId === null ? null : await _loadAgentById(db, input.tenantId, agentId);
+    if (config === null) {
+      deps.log.warn('resolve-turn-agent: contato em etapa acadêmica e nenhum agente acadêmico no ar', {
+        tenantId: input.tenantId,
+      });
+    }
+    return { config, routerId: resolvido.routerId, intentName: null, confidence: null, outcome: 'etapa_academica' };
+  }
+  if (politica === 'comercial' && resolvido.config?.serviceScope === 'academico') {
+    const daSessao = await _loadAgentBySession(db, input.tenantId, input.channelSessionId);
+    return {
+      ...resolvido,
+      config: daSessao?.serviceScope === 'comercial' ? daSessao : null,
+      outcome: 'no_match',
+      flowPointerId: null,
+    };
+  }
+  return resolvido;
+}
+
+/** `fn_politica_de_atendimento_do_contato` — a mesma régua das funções de decisão. */
+async function politicaDoContato(db: pg.Pool, tenantId: string, contactId: string): Promise<string> {
+  const { rows } = await db.query<{ p: string | null }>(
+    'select public.fn_politica_de_atendimento_do_contato($1,$2) as p',
+    [tenantId, contactId],
+  );
+  return rows[0]?.p ?? 'comercial';
+}
+
+/**
+ * O agente de escopo acadêmico no ar que atende este número: publicado na sessão
+ * ou alcançável pelo roteador ativo dela (mesmo universo de `fn_ia_pode_responder_mensagem`).
+ */
+async function agenteAcademicoDoNumero(
+  db: pg.Pool,
+  tenantId: string,
+  channelSessionId: string,
+): Promise<string | null> {
+  const { rows } = await db.query<{ id: string }>(
+    `select a.id
+       from ai_agents a
+       join ai_agent_versions v on v.id = a.published_version_id and v.organization_id = a.organization_id
+      where a.organization_id = $1
+        and a.paused_at is null and a.archived_at is null
+        and v.service_scope = 'academico'
+        and (v.channel_session_id = $2
+             or exists (select 1 from ai_routers r
+                         where r.organization_id = $1 and r.is_active and r.channel_session_id = $2
+                           and (r.fallback_agent_id = a.id
+                                or exists (select 1 from ai_router_members rm
+                                            where rm.router_id = r.id and rm.agent_id = a.id))))
+      order by a.created_at, a.id
+      limit 1`,
+    [tenantId, channelSessionId],
+  );
+  return rows[0]?.id ?? null;
 }

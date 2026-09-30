@@ -37,6 +37,8 @@ function fakeConfig(agentId: string): PublishedAgentConfig {
   sistemaEscolarToolIds: [],
   canMarkWon: false,
   canMarkLost: false,
+  serviceScope: "comercial",
+  canUpdateLeadState: true,
   };
 }
 

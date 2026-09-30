@@ -12,6 +12,7 @@ import { VALID_TOOL_IDS } from "@/lib/mcp/tools/catalog";
 import { TETO_TOOLS_POR_AGENTE } from "@/lib/mcp/tools/selecao-por-pacote";
 import { IDS_DE_PROVEDOR } from "@/lib/ai/pontos/provedores";
 import { SISTEMA_ESCOLAR_TOOL_IDS } from "@/lib/integracoes/sistema-escolar-tools";
+import { ESCOPOS_DE_AGENTE } from "@/lib/leads/politica-de-etapa";
 
 /**
  * Derivado de `lib/ai/pontos/provedores.ts` (a lista única desde a 0127). Como
@@ -234,6 +235,15 @@ const versionShapeSchema = z
      */
     can_mark_won: z.boolean().default(false),
     can_mark_lost: z.boolean().default(false),
+    /**
+     * Escopo de atendimento (migration 0404): `comercial` atende etapas de
+     * política comercial; `academico` atende SÓ a etapa acadêmica, e nunca move
+     * o funil (o escopo vence `can_update_lead_state`). Default `comercial` = o
+     * comportamento de todo agente que existia antes.
+     */
+    service_scope: z.enum(ESCOPOS_DE_AGENTE).default("comercial"),
+    /** A tool `update_lead_state` é permitida (0404)? */
+    can_update_lead_state: z.boolean().default(true),
   })
   .strict();
 
@@ -264,6 +274,8 @@ export const versionPatchSchema = versionShapeSchema
     sistema_escolar_tool_ids: versionShapeSchema.shape.sistema_escolar_tool_ids.removeDefault(),
     can_mark_won: versionShapeSchema.shape.can_mark_won.removeDefault(),
     can_mark_lost: versionShapeSchema.shape.can_mark_lost.removeDefault(),
+    service_scope: versionShapeSchema.shape.service_scope.removeDefault(),
+    can_update_lead_state: versionShapeSchema.shape.can_update_lead_state.removeDefault(),
   })
   .partial();
 

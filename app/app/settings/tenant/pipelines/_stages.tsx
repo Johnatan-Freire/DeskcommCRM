@@ -329,7 +329,7 @@ export function StagesSection({
           {t("Duas colunas têm papel especial: a")} <strong>{t("de fechamento")}</strong>{" "}
           {t("é onde o negócio vira venda, e a")} <strong>{t("de perda")}</strong>{" "}
           {t(
-            "é onde ele se perde. Cada funil precisa de uma de cada — por isso a marcação se muda de lugar, não se apaga.",
+            "é onde ele se perde. Todo funil precisa de uma etapa de perda; a de fechamento é opcional — um funil pode não ter coluna de venda. A marcação se muda de lugar, não se apaga.",
           )}
         </p>
       </div>
