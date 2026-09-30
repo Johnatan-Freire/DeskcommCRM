@@ -47,3 +47,34 @@ export async function assertAgentOperationSupabase(db: SupabaseClient, c: AgentO
   if (error) throw error;
   assert(data, c);
 }
+
+/**
+ * O escopo do agente ainda serve à etapa do contato (migration 0404)? Relido no
+ * `beforeSend`, o último instante antes do canal: o card pode ter mudado de etapa
+ * enquanto o modelo gerava (identidade escolar, humano arrastando). Etapa terminal
+ * ou só-humana, ou escopo diferente do que a etapa exige, derruba o envio com
+ * `StaleServiceBoundaryError` — o mesmo desfecho de pausar o agente em voo.
+ */
+export async function assertEscopoDaEtapaSupabase(
+  db: SupabaseClient,
+  c: Pick<AgentOperationContext, "organizationId" | "versionId">,
+  contactId: string | null | undefined,
+) {
+  if (!contactId) return;
+  const { data: politica, error: erroPolitica } = await db.rpc(
+    "fn_politica_de_atendimento_do_contato" as never,
+    { p_org: c.organizationId, p_contact: contactId } as never,
+  );
+  if (erroPolitica) throw erroPolitica;
+  if (politica === "terminal" || politica === "humano") throw new StaleServiceBoundaryError();
+  const { data: versao, error: erroVersao } = await db
+    .from("ai_agent_versions")
+    .select("service_scope")
+    .eq("organization_id", c.organizationId)
+    .eq("id", c.versionId)
+    .maybeSingle();
+  if (erroVersao) throw erroVersao;
+  const escopo = (versao as { service_scope?: string | null } | null)?.service_scope ?? "comercial";
+  const exigido = politica === "academico" ? "academico" : "comercial";
+  if (escopo !== exigido) throw new StaleServiceBoundaryError();
+}
