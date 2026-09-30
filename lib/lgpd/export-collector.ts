@@ -1200,44 +1200,58 @@ export async function collectExportData(args: CollectArgs): Promise<ExportPayloa
   const ai_agent_runs: NonNullable<ExportPayload["ai_agent_runs"]> = [];
   const lead_state: NonNullable<ExportPayload["lead_state"]> = [];
   if (contactId) {
-    const lePaginado = async (query: {
-      tabela: "lead_notes" | "ai_agent_runs" | "lead_state";
-      colunas: string;
-    }): Promise<Record<string, unknown>[]> => {
+    // A tabela entra por `.from("<nome>")` literal em quem chama, não por
+    // parâmetro: `tests/unit/lgpd-exporta-o-que-redige.test.ts` só reconhece a
+    // tabela exportada pelo literal, e um `.from(tabela)` a deixava invisível.
+    const lePaginado = async (
+      pagina: (
+        de: number,
+        ate: number,
+      ) => PromiseLike<{ data: unknown[] | null; error: unknown }>,
+    ): Promise<Record<string, unknown>[]> => {
       const linhas: Record<string, unknown>[] = [];
       for (let offset = 0; ; offset += 500) {
-        const { data, error } = await admin
-          .from(query.tabela)
-          .select(query.colunas)
-          .eq("organization_id", organizationId)
-          .eq("contact_id", contactId)
-          .order("id")
-          .range(offset, offset + 499);
+        const { data, error } = await pagina(offset, offset + 499);
         if (error) throw error;
         linhas.push(...((data ?? []) as unknown as Record<string, unknown>[]));
         if (!data || data.length < 500) break;
       }
       return linhas;
     };
-    for (const nota of await lePaginado({
-      tabela: "lead_notes",
-      colunas: "id, headline, body, created_at, updated_at",
-    })) {
+    for (const nota of await lePaginado((de, ate) =>
+      admin
+        .from("lead_notes")
+        .select("id, headline, body, created_at, updated_at")
+        .eq("organization_id", organizationId)
+        .eq("contact_id", contactId)
+        .order("id")
+        .range(de, ate),
+    )) {
       lead_notes.push(nota as NonNullable<ExportPayload["lead_notes"]>[number]);
     }
-    for (const run of await lePaginado({
-      tabela: "ai_agent_runs",
-      colunas: "id, tool_calls, created_at",
-    })) {
+    for (const run of await lePaginado((de, ate) =>
+      admin
+        .from("ai_agent_runs")
+        .select("id, tool_calls, created_at")
+        .eq("organization_id", organizationId)
+        .eq("contact_id", contactId)
+        .order("id")
+        .range(de, ate),
+    )) {
       ai_agent_runs.push({
         ...(run as NonNullable<ExportPayload["ai_agent_runs"]>[number]),
         tool_calls: toolCallsParaOTitular(run.tool_calls),
       });
     }
-    for (const estado of await lePaginado({
-      tabela: "lead_state",
-      colunas: "id, next_action, qualification, updated_at",
-    })) {
+    for (const estado of await lePaginado((de, ate) =>
+      admin
+        .from("lead_state")
+        .select("id, next_action, qualification, updated_at")
+        .eq("organization_id", organizationId)
+        .eq("contact_id", contactId)
+        .order("id")
+        .range(de, ate),
+    )) {
       lead_state.push(estado as NonNullable<ExportPayload["lead_state"]>[number]);
     }
   }
