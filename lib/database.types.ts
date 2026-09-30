@@ -1420,6 +1420,8 @@ export type Database = {
       }
       ai_agent_versions: {
         Row: {
+          service_scope: string
+          can_update_lead_state: boolean
           provisioning_origin: string | null
           agent_id: string
           cases_enabled: boolean
@@ -1457,6 +1459,8 @@ export type Database = {
           video_frames_enabled: boolean
         }
         Insert: {
+          service_scope?: string
+          can_update_lead_state?: boolean
           provisioning_origin?: string | null
           agent_id: string
           cases_enabled?: boolean
@@ -1494,6 +1498,8 @@ export type Database = {
           video_frames_enabled?: boolean
         }
         Update: {
+          service_scope?: string
+          can_update_lead_state?: boolean
           provisioning_origin?: string | null
           agent_id?: string
           cases_enabled?: boolean
@@ -4810,6 +4816,8 @@ export type Database = {
       }
       crm_stages: {
         Row: {
+          service_policy: string
+          exit_locked: boolean
           agent_stage_hint: string | null
           color: string | null
           created_at: string
@@ -4830,6 +4838,8 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          service_policy?: string
+          exit_locked?: boolean
           agent_stage_hint?: string | null
           color?: string | null
           created_at?: string
@@ -4850,6 +4860,8 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          service_policy?: string
+          exit_locked?: boolean
           agent_stage_hint?: string | null
           color?: string | null
           created_at?: string
@@ -9181,6 +9193,10 @@ export type Database = {
         Returns: string
       }
       fn_followup_pode_enviar: { Args: { p_org: string; p_enrollment: string }; Returns: string }
+      fn_politica_de_atendimento_do_contato: {
+        Args: { p_org: string; p_contact: string }
+        Returns: string
+      }
       fn_service_lock: {
         Args: { p_contact: string; p_org: string }
         Returns: undefined
