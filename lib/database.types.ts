@@ -1436,6 +1436,7 @@ export type Database = {
           history_message_window: number
           history_token_window: number
           id: string
+          inbound_debounce_ms: number | null
           knowledge_source_ids: string[]
           max_steps: number
           model: string
@@ -1475,6 +1476,7 @@ export type Database = {
           history_message_window?: number
           history_token_window?: number
           id?: string
+          inbound_debounce_ms?: number | null
           knowledge_source_ids?: string[]
           max_steps?: number
           model: string
@@ -1514,6 +1516,7 @@ export type Database = {
           history_message_window?: number
           history_token_window?: number
           id?: string
+          inbound_debounce_ms?: number | null
           knowledge_source_ids?: string[]
           max_steps?: number
           model?: string

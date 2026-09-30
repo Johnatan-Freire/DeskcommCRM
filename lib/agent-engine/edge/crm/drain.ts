@@ -15,10 +15,11 @@
 import { z } from 'zod';
 import type pg from 'pg';
 
+import { loadConversationAgentConfig } from '../../agent/agent-config';
 import { insertInboxItem } from '../../db/repository';
 import type { Logger } from '../../obs/logger';
 import { enqueueJob } from '../../queue/queue';
-import { decidirRajada } from './debounce';
+import { decidirRajada, debounceEfetivo } from './debounce';
 import { avisoDeEventoMorto, IA_QUE_NAO_RESPONDEU } from '@/lib/event-log/aviso-de-evento-morto';
 import { TIPOS_DERIVAVEIS, DERIVACAO_TERMINADA } from '@/lib/messaging/media/derivable';
 import { decidirElegibilidadeDaConversa } from '@/lib/ai/elegibilidade/consulta-pg';
@@ -197,6 +198,45 @@ const ESPERA_DERIVACAO_MS = 4_000;
 const TETO_ESPERA_DERIVACAO_MS = 120_000;
 
 type DesfechoEvento = 'processado' | 'adiar';
+
+/**
+ * Janela de rajada EFETIVA para o evento: a configurada na versão do agente
+ * desta conversa (#1856), com o `INBOUND_DEBOUNCE_MS` da instalação como
+ * default e clamp no teto de 60s (`debounceEfetivo`).
+ *
+ * A resolução é a de `loadConversationAgentConfig` — o `active_ai_agent_id` da
+ * conversa quando há dono explícito, senão o agente publicado da sessão. NÃO é
+ * a resolução completa do turno (`resolveTurnAgent`: router, classificador,
+ * campanha): numa conversa que o turno entregaria a outro agente sem torná-lo
+ * dono, vale a janela do agente da sessão (ou a env). Com o campo vazio
+ * (default de toda instalação) o valor vira o da env — regressão zero.
+ *
+ * Falha da consulta NÃO derruba o evento: degrada para a env, como a checagem
+ * de elegibilidade acima. A janela é afinação, não motivo para retry.
+ */
+async function debounceDoEvento(
+  pool: pg.Pool,
+  event: EventRow,
+  p: { conversation_id: string; channel_session_id: string },
+  padraoInstalacao: number,
+  log: Logger,
+): Promise<number> {
+  try {
+    const agentConfig = await loadConversationAgentConfig(
+      pool,
+      event.organization_id,
+      p.conversation_id,
+      p.channel_session_id,
+    );
+    return debounceEfetivo(agentConfig?.inboundDebounceMs ?? null, padraoInstalacao);
+  } catch (err) {
+    log.warn('drain: janela de rajada do agente não resolveu — usando a da instalação', {
+      event_id: event.id,
+      error: (err instanceof Error ? err.message : String(err)).slice(0, 160),
+    });
+    return padraoInstalacao;
+  }
+}
 
 async function processEvent(
   pool: pg.Pool,
@@ -521,7 +561,7 @@ async function processEvent(
   const rajada = await decidirRajada(
     pool,
     { organizationId: event.organization_id, contactId: p.contact_id },
-    knobs.debounceMs,
+    await debounceDoEvento(pool, event, p, knobs.debounceMs, log),
   );
   if (rajada.tipo === 'coalescido') {
     log.info('drain: rajada coalescida em job pendente', {

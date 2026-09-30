@@ -41468,3 +41468,22 @@ update public.agent_inbox_items i
 create unique index if not exists agent_inbox_event_dead_aberto_unico
   on public.agent_inbox_items (organization_id, kind, title)
   where status = 'open' and kind = 'event_dead';
+
+-- ---- janela de rajada configurável por agente (migration 0498) ----
+-- 0498 (#1856, de @webtecnica): a janela que junta mensagens do MESMO contato
+-- numa resposta sai da env global `INBOUND_DEBOUNCE_MS` e vira campo da versão
+-- do agente. NULL = usa a env da instalação (quem só atualiza não muda nada);
+-- 0 desliga; teto 60s. Par drop/add da CHECK para o `update.sh` reaplicar sem
+-- 'already exists'. Sem função nova (nada a revogar de anon).
+alter table public.ai_agent_versions
+  drop constraint if exists ai_agent_versions_inbound_debounce_ms_check;
+
+alter table public.ai_agent_versions
+  add column if not exists inbound_debounce_ms integer;
+
+comment on column public.ai_agent_versions.inbound_debounce_ms is
+  'Janela de coalescência de rajada inbound em ms para ESTE agente. NULL = usa o INBOUND_DEBOUNCE_MS da instalação; 0 = desliga a coalescência; teto 60s.';
+
+alter table public.ai_agent_versions
+  add constraint ai_agent_versions_inbound_debounce_ms_check
+  check (inbound_debounce_ms is null or (inbound_debounce_ms >= 0 and inbound_debounce_ms <= 60000));

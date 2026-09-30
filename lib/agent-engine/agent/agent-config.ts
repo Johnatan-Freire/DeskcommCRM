@@ -35,6 +35,8 @@ export interface PublishedAgentConfig {
   handoffToolEnabled: boolean;
   splitMessages: boolean;
   splitMaxChars: number;
+  /** Janela de rajada inbound (ms) configurada na versão. `null` = usa a env. */
+  inboundDebounceMs: number | null;
   /** input multimodal (imagem/áudio/pdf) habilitado no turno (Onda 3). */
   multimodalInput: boolean;
   /** tools open_human_case/provide_case_update habilitadas no turno (spec 15). */
@@ -140,6 +142,7 @@ interface Row {
   handoff_tool_enabled: boolean;
   split_messages: boolean;
   split_max_chars: number;
+  inbound_debounce_ms: number | null;
   multimodal_input: boolean;
   cases_enabled: boolean;
   followup: unknown;
@@ -175,6 +178,7 @@ const SELECT_AGENT_CONFIG_COLUMNS = `a.operation_mode,a.paused_at,a.operation_re
             v.handoff_tool_enabled,
             v.split_messages,
             v.split_max_chars,
+            v.inbound_debounce_ms,
             v.multimodal_input,
             v.cases_enabled,
             v.followup,
@@ -236,6 +240,7 @@ function mapAgentConfigRow(r: Row): PublishedAgentConfig {
     handoffToolEnabled: r.handoff_tool_enabled,
     splitMessages: r.split_messages,
     splitMaxChars: r.split_max_chars,
+    inboundDebounceMs: r.inbound_debounce_ms ?? null,
     multimodalInput: r.multimodal_input,
     casesEnabled: r.cases_enabled,
     followup: r.followup,
