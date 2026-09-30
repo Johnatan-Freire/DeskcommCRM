@@ -40721,6 +40721,69 @@ forçado. Inventar é pior do que demorar um instante a mais para responder.
 end
 $pub$;
 
+-- ---- janela de RESPOSTA separada da janela de DISPARO (migration 0495) ----
+-- O agente passa a poder responder a quem escreveu fora do horário comercial sem
+-- abrir junto o disparo em massa, a prospecção e a retomada de conversa parada.
+-- As duas coisas eram regidas por UM par (`window_start_hour`/`window_end_hour`).
+--
+-- Colunas soltas, não jsonb: `window_*_hour` é coluna desde a 0010 e a tela de
+-- Conexões já os edita; um `resposta_knobs` jsonb nasceria sem CHECK forte e
+-- divergiria do vizinho na mesma tabela.
+--
+-- ⚠️ Sem DEFAULT: NULL = a resposta herda a janela de disparo, coluna a coluna,
+-- que é o comportamento de antes. Quem só atualiza não muda de operação.
+
+-- A primeira versão desta migration (PR #1983, fechado sem merge) chamava as
+-- colunas `reengajar_*`. Quem já a aplicou tem os dados lá: renomeia em vez de
+-- criar coluna nova ao lado, e a constraint de nome velho sai junto.
+do $renomear_reengajar$
+begin
+  if exists (select 1 from information_schema.columns
+              where table_schema = 'public' and table_name = 'channel_knobs'
+                and column_name = 'reengajar_start_hour')
+     and not exists (select 1 from information_schema.columns
+              where table_schema = 'public' and table_name = 'channel_knobs'
+                and column_name = 'resposta_start_hour') then
+    alter table public.channel_knobs rename column reengajar_start_hour to resposta_start_hour;
+  end if;
+  if exists (select 1 from information_schema.columns
+              where table_schema = 'public' and table_name = 'channel_knobs'
+                and column_name = 'reengajar_end_hour')
+     and not exists (select 1 from information_schema.columns
+              where table_schema = 'public' and table_name = 'channel_knobs'
+                and column_name = 'resposta_end_hour') then
+    alter table public.channel_knobs rename column reengajar_end_hour to resposta_end_hour;
+  end if;
+end
+$renomear_reengajar$;
+
+alter table public.channel_knobs
+  drop constraint if exists channel_knobs_reengajar_horas_validas;
+
+alter table public.channel_knobs
+  add column if not exists resposta_start_hour smallint,
+  add column if not exists resposta_end_hour smallint;
+
+comment on column public.channel_knobs.resposta_start_hour is
+  'Início da janela de RESPOSTA do agente (h, hora local da org). NULL = usa window_start_hour (comportamento anterior).';
+comment on column public.channel_knobs.resposta_end_hour is
+  'Fim da janela de RESPOSTA do agente (h, exclusivo; 24 = meia-noite). NULL = usa window_end_hour.';
+
+-- 0..24. `end` pode ser 24 (meia-noite seguinte) porque `insideWindow` compara
+-- `wall.h < windowEndHour` e a hora local nunca passa de 23.
+-- ⚠️ O `drop … if exists` ANTES do `add` é o que torna isto reaplicável: o
+-- `update.sh` roda o apêndice inteiro em toda atualização, e `add constraint`
+-- sem guarda quebra com 'already exists' no segundo clone que atualizar. É o
+-- gate `tests/unit/baseline-reaplicavel.test.ts` que cobra esta forma.
+alter table public.channel_knobs
+  drop constraint if exists channel_knobs_resposta_horas_validas;
+alter table public.channel_knobs
+  add constraint channel_knobs_resposta_horas_validas
+  check (
+    (resposta_start_hour is null or resposta_start_hour between 0 and 23)
+    and (resposta_end_hour is null or resposta_end_hour between 1 and 24)
+  );
+
 -- ---- dedupe de event_dead atômico: índice único parcial (migration 0491) ----
 -- 0491 — o aviso `event_dead` não abre em dobro com dois drenos concorrentes
 -- (issue #880). O dedupe era uma pergunta seguida de uma escrita: `lib/event-log/

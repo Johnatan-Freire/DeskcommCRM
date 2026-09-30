@@ -137,6 +137,20 @@ export interface GateContext {
     state: PacingState;
     crmDailyLimit: number | null;
     rng?: () => number;
+    /**
+     * Este envio é RESPOSTA a uma mensagem recebida, ou disparo/retomada?
+     *
+     * ⚠️ OMITIDO = disparo (janela `window*`, 7h-22h). É o default que mantém
+     * todo chamador que não conhece a 0495 no comportamento antigo, e é a
+     * direção segura: quem esquece o campo continua preso ao horário comercial
+     * em vez de abrir o número às 3h.
+     *
+     * O `inbound_turn` (cliente escreveu) e o `case_reply_turn` passam `true` e leem
+     * `resposta*`. O disparo em massa NÃO passa por este gate — ele usa
+     * `decidePacing` direto (`lib/prospecting/worker.ts`) — então o valor aqui
+     * só distingue resposta de retomada por follow-up.
+     */
+    resposta?: boolean;
   };
   spinning: {
     knobs: SpinningKnobs;
@@ -716,6 +730,7 @@ export const pacingGate: Gate = {
       state: ctx.pacing.state,
       crmDailyLimit: ctx.pacing.crmDailyLimit,
       banRisk,
+      resposta: ctx.pacing.resposta,
       rng: ctx.pacing.rng,
     });
     if (!decision.allow) {
@@ -921,6 +936,12 @@ export interface RunBeforeSendArgs {
    * o cap. Ponto de injeção: quando o drain expuser o limite da sessão, passar aqui.
    */
   crmDailyLimit: number | null;
+  /**
+   * Este envio é RESPOSTA a uma mensagem recebida (janela `resposta*`, 0495) ou
+   * disparo/retomada (janela `window*`)? OMITIDO = disparo — o default que deixa
+   * todo chamador anterior à 0495 no comportamento antigo.
+   */
+  resposta?: boolean;
   now: Date;
   /** injeções de teste (jitter determinístico + espera sem relógio real). */
   rng?: () => number;
@@ -1235,6 +1256,7 @@ export async function runBeforeSend(args: RunBeforeSendArgs): Promise<BeforeSend
         state: pacingState,
         crmDailyLimit: args.crmDailyLimit,
         rng: args.rng,
+        ...(args.resposta !== undefined ? { resposta: args.resposta } : {}),
       },
       spinning: { knobs: spinningKnobs, window },
       ...(args.enforceSpinning === false ? { spinningEnforced: false as const } : {}),

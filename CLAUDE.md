@@ -144,7 +144,7 @@ DeskcommCRM é um sistema operacional de vendas open source com agentes de IA na
 - Engine NOWEB default; WEBJS apenas se precisar stickers animados / botões
 - Auth: env do WAHA recebe **hash SHA512 hex** da api key; cliente envia plaintext em `X-Api-Key`
 - Webhooks: HMAC SHA512 com `crypto.timingSafeEqual`
-- Anti-banimento: throttle 1 msg/1.2s + jitter ≤800ms. Campanha 1 msg/5s. Warm-up 7-14d. Spinning de copy. Janela 7h-22h (domingo LIBERADO por default desde 2026-08-20; a janela é knob por canal)
+- Anti-banimento: throttle 1 msg/1.2s + jitter ≤800ms. Campanha 1 msg/5s. Warm-up 7-14d. Spinning de copy. Janela de disparo 7h-22h (domingo LIBERADO por default desde 2026-08-20; a janela é knob por canal). Janela de RESPOSTA por canal (0495, `channel_knobs.resposta_*`), que herda a de disparo quando vazia — só `inbound_turn`/`case_reply_turn` a leem
 - STOP detection: a regra mora em `lib/opt-out/deteccao.ts` e é a MESMA nos dois lados —
   a ingestão (que grava `is_blocked=true`) e o runtime do agente. **Não é mais a palavra
   solta:** só bloqueia palavra ISOLADA (mensagem inteira = a palavra) ou verbo de cessação
