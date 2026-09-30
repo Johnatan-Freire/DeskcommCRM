@@ -29,6 +29,7 @@ import type pg from 'pg';
 
 import { parseWahaMessageId, wahaEchoExternalIds } from '@/lib/waha/message-id';
 import { lerNumerosDeTeste, numeroPodeTestar, preGoLiveAtivo } from '@/lib/ai/elegibilidade/pre-go-live';
+import { CODIGO_ENVIO_DESLIGADO, envioDeConversaLigado, FRASE_ENVIO_DESLIGADO } from '@/lib/channels/envio-de-saida';
 
 import type { Logger } from '../../obs/logger';
 
@@ -395,6 +396,19 @@ export async function redriveQueued(
       );
       const atual = acesso[0];
       if (!atual) continue;
+      // TRAVA GLOBAL (`lib/channels/envio-de-saida.ts`). Este resgate fala HTTP
+      // direto com o transporte, fora do seam — então pergunta por conta própria,
+      // e ANTES de qualquer outra régua. `failed` e não `queued`: represada, ela
+      // sairia no primeiro tique depois de alguém ligar o envio, fora de contexto.
+      if (!envioDeConversaLigado()) {
+        await pool.query(
+          `update messages set status = 'failed', error_code = $3, error_message = $4
+           where id = $1 and organization_id = $2 and status = 'queued'`,
+          [m.id, m.organization_id, CODIGO_ENVIO_DESLIGADO, FRASE_ENVIO_DESLIGADO],
+        );
+        log.info('watchdog: envio desligado na instalação — queued não reenviada', { message_id: m.id });
+        continue;
+      }
       // A FILA TEM VALIDADE. Mensagem automática represada (número caído) que
       // passou do teto deixa de ser resposta e vira disparo fora de contexto: a
       // conversa seguiu, o humano pode ter assumido, o fluxo pode ter sido

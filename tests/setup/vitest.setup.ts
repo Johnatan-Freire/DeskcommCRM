@@ -23,6 +23,13 @@ function stripQuotes(value: string): string {
   return value;
 }
 
+// Trava global de envio (lib/channels/envio-de-saida.ts): fail-closed fora do
+// literal `enabled`. A suíte exercita o caminho de envio com adapters dublês, então
+// liga aqui; quem prova a trava FECHADA (tests/unit/trava-global-de-envio.test.ts)
+// passa o ambiente explicitamente. Antes do .env para que um `.env.local` de quem
+// testa não mude, em silêncio, o que a suíte mede.
+process.env.OUTBOUND_MESSAGING = "enabled";
+
 // Load .env and .env.local before importing any app code that validates env vars
 for (const envFile of [".env", ".env.local"]) {
   try {

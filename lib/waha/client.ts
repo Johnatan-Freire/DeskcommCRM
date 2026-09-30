@@ -6,6 +6,7 @@
  * Auth: o contêiner recebe SHA512 hex; X-Api-Key recebe a chave plaintext.
  */
 import { z } from "zod";
+import { exigirEnvioDeConversaLigado } from "@/lib/channels/envio-de-saida";
 import { describeWahaServer, type WahaServerCapabilities } from "@/lib/channels/waha-server";
 
 import { logger } from "@/lib/logger";
@@ -498,6 +499,8 @@ export class WahaClient {
     text: string,
     replyTo?: string | null,
   ): Promise<unknown> {
+    // Trava global de envio (`lib/channels/envio-de-saida.ts`), no último passo antes do fio.
+    exigirEnvioDeConversaLigado();
     const res = await this.fetchComTeto(`${this.baseUrl}/api/sendText`, {
       method: "POST",
       headers: {
@@ -588,6 +591,8 @@ export class WahaClient {
       vcard: string;
     }>,
   ): Promise<unknown> {
+    // Trava global de envio (`lib/channels/envio-de-saida.ts`), no último passo antes do fio.
+    exigirEnvioDeConversaLigado();
     const res = await this.fetchComTeto(`${this.baseUrl}/api/sendContactVcard`, {
       method: "POST",
       headers: {
@@ -607,6 +612,8 @@ export class WahaClient {
     chatId: string,
     plan: { endpoint: string; payload: Record<string, unknown> },
   ): Promise<unknown> {
+    // Trava global de envio (`lib/channels/envio-de-saida.ts`), no último passo antes do fio.
+    exigirEnvioDeConversaLigado();
     // Teto MAIOR aqui: `media-send.ts` manda `convert: true` em vídeo e áudio, e
     // o WAHA roda ffmpeg e baixa a URL do Storage antes de responder. Com o teto
     // de texto, o envio de áudio legítimo seria cortado — o conserto do timeout
