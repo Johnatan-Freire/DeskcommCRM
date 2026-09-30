@@ -2659,7 +2659,7 @@
   "de fechamento": "成交列",
   "é onde o negócio vira venda, e a": "是商机转化为销售的地方，而",
   "de perda": "丢单列",
-  "é onde ele se perde. Cada funil precisa de uma de cada — por isso a marcação se muda de lugar, não se apaga.": "是商机流失的地方。每个销售漏斗都需要各有一个——因此标记会移动位置，而不是被删除。",
+  "é onde ele se perde. Todo funil precisa de uma etapa de perda; a de fechamento é opcional — um funil pode não ter coluna de venda. A marcação se muda de lugar, não se apaga.": "是商机流失的地方。每个销售漏斗都必须有一个丢单列；成交列是可选的——漏斗可以没有销售列。标记会移动位置，而不是被删除。",
   "Mover": "移动",
   "uma coluna para trás": "将列向后移动",
   "uma coluna para frente": "将列向前移动",
