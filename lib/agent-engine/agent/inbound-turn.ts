@@ -3949,7 +3949,11 @@ async function executarTurnoDoAgente(
         }
         const mcp = await buildMcpTurnTools(
           deps.crmCfg,
-          { organizationId: tenantId, jobId: preview?.runId ?? liveJob().id },
+          {
+            organizationId: tenantId,
+            jobId: preview?.runId ?? liveJob().id,
+            ...(leadId ? { contactId: leadId } : {}),
+          },
           configDoTurno,
           runLog,
           preview ? { readOnly: true } : undefined,

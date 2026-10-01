@@ -301,7 +301,7 @@ describe('o eco que entra ENTRE a limpeza e o carimbo do id (#1855)', () => {
    * exatamente a ordem que a corrida produz.
    */
   function ecoEntraDepoisDaLimpeza(
-    supabase: ReturnType<typeof dubleCom>['supabase'],
+    supabase: ReturnType<typeof makeSupabase>['supabase'],
     messages: Row[],
     eco: Row,
   ) {
@@ -330,7 +330,7 @@ describe('o eco que entra ENTRE a limpeza e o carimbo do id (#1855)', () => {
 
   it('o envio fica `sent` com o id, e a frase aparece uma vez só', async () => {
     wahaRespondendo(BARE);
-    const { supabase, messages } = dubleCom();
+    const { supabase, messages } = makeSupabase();
     ecoEntraDepoisDaLimpeza(supabase, messages, ecoDoWebhook({ external_id: BARE }));
 
     await sendMessageHandler(supabase, ctx, input);
@@ -346,7 +346,7 @@ describe('o eco que entra ENTRE a limpeza e o carimbo do id (#1855)', () => {
     // limpeza é a conversa). O unique recusa de novo; a mensagem já saiu, então
     // o desfecho é o do watchdog: `sent`, sem o id.
     wahaRespondendo(BARE);
-    const { supabase, messages } = dubleCom([
+    const { supabase, messages } = makeSupabase([
       ecoDoWebhook({ id: 'outro-1', conversation_id: OUTRA_CONV, external_id: BARE }),
     ]);
 

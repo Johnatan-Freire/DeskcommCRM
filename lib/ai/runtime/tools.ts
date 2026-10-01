@@ -56,6 +56,13 @@ export interface PickToolsInput {
   modulosLigados?: readonly ModuloOpcional[];
   /** Mutable signal — runtime checks after each step. */
   handoffSignal: RuntimeHandoffSignal;
+  /**
+   * O CONTATO que este turno atende, quando o turno é de uma conversa. No motor
+   * do agente, "lead" é o CONTATO (`job.contact_id`); as ferramentas do catálogo
+   * chamam de `lead_id` o NEGÓCIO. Com o contato à mão, a ESCRITA só mira negócio
+   * dele (`negocioDaEscritaDoTurno`, upstream #1874).
+   */
+  contatoDoTurno?: string;
 }
 
 /**
