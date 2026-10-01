@@ -126,6 +126,8 @@ export interface ResolveTurnAgentDeps {
   ) => Promise<unknown>;
   /** O agente acadêmico do número (0404) — injetável pelo mesmo motivo. */
   agenteAcademicoDoNumero?: (db: pg.Pool, tenantId: string, channelSessionId: string) => Promise<string | null>;
+  /** O agente comercial do número — o par do acima, para o desvio inverso. */
+  agenteComercialDoNumero?: (db: pg.Pool, tenantId: string, channelSessionId: string) => Promise<string | null>;
 }
 
 export async function resolveTurnAgent(
@@ -398,8 +400,12 @@ export async function resolveConversationTurn(
  * turno — este passo só evita que um roteamento errado vire silêncio:
  *   - etapa acadêmica → o agente de escopo acadêmico que atende este número;
  *     sem nenhum, `config: null` (e o turno não responde);
- *   - etapa comercial com um agente acadêmico resolvido → o agente publicado da
- *     sessão, se for comercial; senão ninguém.
+ *   - etapa comercial com um agente acadêmico resolvido → o agente COMERCIAL que
+ *     atende este número; sem nenhum, ninguém.
+ *     Era "o agente publicado da sessão", que é o de maior prioridade: com o
+ *     acadêmico acima do comercial (prioridade é campo da tela), ele voltava a ser
+ *     o escolhido, era recusado, e todo contato de etapa comercial ficava sem
+ *     resposta. Medido em `tests/invariants/agentes-escola-configurados.test.ts`.
  * Etapa terminal/só-humana não muda nada aqui: a função SQL recusa qualquer agente.
  */
 async function aplicaEscopoDaEtapa(
@@ -410,8 +416,8 @@ async function aplicaEscopoDaEtapa(
 ): Promise<TurnAgentResolution> {
   const _politica = deps.politicaDoContato ?? politicaDoContato;
   const _academico = deps.agenteAcademicoDoNumero ?? agenteAcademicoDoNumero;
+  const _comercial = deps.agenteComercialDoNumero ?? agenteComercialDoNumero;
   const _loadAgentById = deps.loadPublishedAgentConfigById ?? loadPublishedAgentConfigById;
-  const _loadAgentBySession = deps.loadPublishedAgentConfig ?? loadPublishedAgentConfig;
 
   const politica = await _politica(db, input.tenantId, input.leadId);
   if (politica === 'academico') {
@@ -426,10 +432,11 @@ async function aplicaEscopoDaEtapa(
     return { config, routerId: resolvido.routerId, intentName: null, confidence: null, outcome: 'etapa_academica' };
   }
   if (politica === 'comercial' && resolvido.config?.serviceScope === 'academico') {
-    const daSessao = await _loadAgentBySession(db, input.tenantId, input.channelSessionId);
+    const agentId = await _comercial(db, input.tenantId, input.channelSessionId);
+    const config = agentId === null ? null : await _loadAgentById(db, input.tenantId, agentId);
     return {
       ...resolvido,
-      config: daSessao?.serviceScope === 'comercial' ? daSessao : null,
+      config: config?.serviceScope === 'comercial' ? config : null,
       outcome: 'no_match',
       flowPointerId: null,
     };
@@ -447,13 +454,21 @@ async function politicaDoContato(db: pg.Pool, tenantId: string, contactId: strin
 }
 
 /**
- * O agente de escopo acadêmico no ar que atende este número: publicado na sessão
- * ou alcançável pelo roteador ativo dela (mesmo universo de `fn_ia_pode_responder_mensagem`).
+ * O agente de um escopo no ar que atende este número: publicado na sessão ou
+ * alcançável pelo roteador ativo dela (mesmo universo de `fn_ia_pode_responder_mensagem`).
+ * Entre vários, o mesmo desempate de `loadPublishedAgentConfig` (prioridade, idade).
  */
-async function agenteAcademicoDoNumero(
+function agenteAcademicoDoNumero(db: pg.Pool, tenantId: string, channelSessionId: string) {
+  return agenteDoEscopoNoNumero(db, tenantId, channelSessionId, 'academico');
+}
+function agenteComercialDoNumero(db: pg.Pool, tenantId: string, channelSessionId: string) {
+  return agenteDoEscopoNoNumero(db, tenantId, channelSessionId, 'comercial');
+}
+async function agenteDoEscopoNoNumero(
   db: pg.Pool,
   tenantId: string,
   channelSessionId: string,
+  escopo: 'comercial' | 'academico',
 ): Promise<string | null> {
   const { rows } = await db.query<{ id: string }>(
     `select a.id
@@ -461,16 +476,16 @@ async function agenteAcademicoDoNumero(
        join ai_agent_versions v on v.id = a.published_version_id and v.organization_id = a.organization_id
       where a.organization_id = $1
         and a.paused_at is null and a.archived_at is null
-        and v.service_scope = 'academico'
+        and coalesce(v.service_scope, 'comercial') = $3
         and (v.channel_session_id = $2
              or exists (select 1 from ai_routers r
                          where r.organization_id = $1 and r.is_active and r.channel_session_id = $2
                            and (r.fallback_agent_id = a.id
                                 or exists (select 1 from ai_router_members rm
                                             where rm.router_id = r.id and rm.agent_id = a.id))))
-      order by a.created_at, a.id
+      order by a.priority desc, a.created_at, a.id
       limit 1`,
-    [tenantId, channelSessionId],
+    [tenantId, channelSessionId, escopo],
   );
   return rows[0]?.id ?? null;
 }
