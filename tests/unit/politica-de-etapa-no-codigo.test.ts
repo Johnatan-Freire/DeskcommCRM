@@ -66,7 +66,12 @@ function dbFalso(body: string) {
     }),
   } as unknown as pg.Pool;
 }
-function deps(politica: string, agenteDaSessao: PublishedAgentConfig | null, academicoNoAr: string | null) {
+function deps(
+  politica: string,
+  agenteDaSessao: PublishedAgentConfig | null,
+  academicoNoAr: string | null,
+  comercialNoAr: string | null = null,
+) {
   const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
   return {
     log,
@@ -79,6 +84,7 @@ function deps(politica: string, agenteDaSessao: PublishedAgentConfig | null, aca
     classifyIntent: vi.fn(),
     politicaDoContato: vi.fn(async () => politica),
     agenteAcademicoDoNumero: vi.fn(async () => academicoNoAr),
+    agenteComercialDoNumero: vi.fn(async () => comercialNoAr),
   };
 }
 const turno = (body: string, d: ReturnType<typeof deps>) =>
@@ -114,6 +120,11 @@ describe("G/H/M — a etapa do contato decide o agente", () => {
   it("etapa comercial com o ACADÊMICO resolvido → não é ele quem atende", async () => {
     const r = await turno("quanto custa?", deps("comercial", ACADEMICO, "academico"));
     expect(r.config).toBeNull();
+  });
+
+  it("etapa comercial com o ACADÊMICO acima na prioridade → o comercial do número atende (não o silêncio)", async () => {
+    const r = await turno("quanto custa?", deps("comercial", ACADEMICO, "academico", "comercial"));
+    expect(r.config?.agentId).toBe("comercial");
   });
 });
 
