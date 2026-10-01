@@ -4892,9 +4892,17 @@ export async function inboundMessageSuperseded(
   jobCreatedAt: Date,
 ): Promise<InboundSupersededResult | null> {
   const { rows } = await pool.query<{ sent_at: Date; newer_count: string }>(
+    // Conta o que RESOLVEU a conversa por outro caminho: uma pessoa respondeu
+    // (outbound não-IA) ou o cliente escreveu de novo (inbound — esse tem turno
+    // próprio, que lê a conversa inteira). A resposta da PRÓPRIA IA não conta:
+    // ela pode ter respondido só ao que leu antes desta mensagem chegar, e quem
+    // decide se esta já foi respondida é a régua do turno anterior
+    // (`ultimaInboundJaRespondida`, upstream #1609) — contar aqui deixava a
+    // pergunta do cliente sem resposta nenhuma.
     `select m.sent_at,
             (select count(*) from messages n
-              where n.conversation_id = m.conversation_id and n.sent_at > m.sent_at) as newer_count
+              where n.conversation_id = m.conversation_id and n.sent_at > m.sent_at
+                and not (n.direction = 'outbound' and n.sent_via = 'ai')) as newer_count
      from messages m
      where m.id = $1 and m.organization_id = $2 and m.conversation_id = $3`,
     [inboundMessageId, organizationId, conversationId],

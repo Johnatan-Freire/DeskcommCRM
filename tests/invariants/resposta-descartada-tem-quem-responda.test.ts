@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { publicarAgenteNaSessao } from "./agente-no-ar";
 import pg from "pg";
 
 import type * as InboundTurn from "@/lib/agent-engine/agent/inbound-turn";
@@ -104,6 +105,17 @@ async function despacharPeloDrain(msgId: string): Promise<void> {
     [versao, ORG, agente, SESSION],
   );
   await pool.query(`update ai_agents set published_version_id = $1 where id = $2`, [versao, agente]);
+  // Capital Code (migration 0403): publicar carimba a ativação AGORA, depois da
+  // mensagem do teste. O cenário presume um agente que já atendia este número.
+  const c = await pool.connect();
+  try {
+    await c.query("begin");
+    await c.query("set local session_replication_role = replica");
+    await c.query("update ai_agents set service_enabled_at = '2026-01-01T00:00:00Z' where id = $1", [agente]);
+    await c.query("commit");
+  } finally {
+    c.release();
+  }
   await pool.query(
     `insert into event_log (organization_id, event_type, entity_kind, entity_id, payload, status)
      values ($1::uuid, 'ai_agent.dispatch_requested', 'message', $2::uuid,
@@ -265,6 +277,22 @@ beforeAll(async () => {
      values ($1,$2,'resposta-descartada-session','WORKING','\\x00'::bytea) on conflict (id) do nothing`,
     [SESSION, ORG],
   );
+  // Capital Code (migrations 0398/0403): a IA só responde mensagem posterior à
+  // 1ª conexão do número E à ativação de um agente no ar. O upstream ainda
+  // responde pelo turno "genérico" (sem agente) — aqui o cenário precisa de um
+  // agente que já atendia o número, e de um número conectado antes das mensagens.
+  {
+    const c = await pool.connect();
+    try {
+      await c.query("begin");
+      await c.query("set local session_replication_role = replica");
+      await c.query("update channel_sessions set first_connected_at = '2026-01-01T00:00:00Z' where id = $1", [SESSION]);
+      await c.query("commit");
+    } finally {
+      c.release();
+    }
+  }
+  await publicarAgenteNaSessao(pool, ORG, SESSION, { ativoDesde: "2026-01-01T00:00:00Z" });
   await pool.query(
     `with v as (
        insert into playbook_versions (organization_id, layer, content)

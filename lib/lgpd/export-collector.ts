@@ -1583,7 +1583,17 @@ export async function collectExportData(args: CollectArgs): Promise<ExportPayloa
       },
     ];
     for (const { tabela, consulta } of leituras) {
-      const { data, error } = await consulta();
+      // Módulo ausente pode voltar como `error` (PostgREST) ou como exceção
+      // (cliente direto ao banco): os dois caminhos viram aviso, nunca falha do export.
+      let resultado: { data: unknown[] | null; error: { message: string } | null };
+      try {
+        resultado = await consulta();
+      } catch (err) {
+        resultado = { data: null, error: { message: err instanceof Error ? err.message : String(err) } };
+      }
+      const { data, error } = resultado;
+      // Módulo não instalado é o estado NORMAL desta instalação: sem aviso.
+      if (error && /does not exist|PGRST205|Could not find the table/i.test(error.message)) continue;
       if (error) {
         logger.warn("[lgpd-export-worker] módulo opcional ausente ou ilegível", {
           request_id: requestId,

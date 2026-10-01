@@ -1,4 +1,5 @@
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { publicarAgenteNaSessao } from "./agente-no-ar";
 import pg from "pg";
 
 import type * as InboundTurn from "@/lib/agent-engine/agent/inbound-turn";
@@ -220,6 +221,26 @@ beforeAll(async () => {
             ($3,$2,'turno-duplicado-outra','WORKING','\\x00'::bytea) on conflict (id) do nothing`,
     [SESSION, ORG, OUTRA_SESSION],
   );
+  // Capital Code (migration 0403): a IA só responde mensagem que aconteceu DEPOIS
+  // de um agente ser ligado no número. O upstream ainda responde pelo turno
+  // "genérico", sem agente; aqui o teste precisa do estado que presume.
+  // Capital Code (migration 0398): a sessão nasce WORKING e o gatilho carimba a
+  // 1ª conexão AGORA — as mensagens deste arquivo são de 24/09, então ficariam
+  // "anteriores à conexão" (histórico sincronizado, que a IA não responde).
+  // O cenário presume um número conectado bem antes delas.
+  {
+    const c = await pool.connect();
+    try {
+      await c.query("begin");
+      await c.query("set local session_replication_role = replica");
+      await c.query("update channel_sessions set first_connected_at = '2026-01-01T00:00:00Z' where id = any($1)", [[SESSION, OUTRA_SESSION]]);
+      await c.query("commit");
+    } finally {
+      c.release();
+    }
+  }
+  await publicarAgenteNaSessao(pool, ORG, SESSION, { ativoDesde: "2026-01-01T00:00:00Z" });
+  await publicarAgenteNaSessao(pool, ORG, OUTRA_SESSION, { ativoDesde: "2026-01-01T00:00:00Z" });
   await pool.query(
     `with v as (
        insert into playbook_versions (organization_id, layer, content)

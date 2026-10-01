@@ -1,4 +1,5 @@
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { publicarAgenteNaSessao } from "./agente-no-ar";
 import pg from "pg";
 
 import type * as InboundTurn from "@/lib/agent-engine/agent/inbound-turn";
@@ -198,6 +199,10 @@ beforeAll(async () => {
      values ($1,$2,'janela-resposta-session','WORKING','\\x00'::bytea) on conflict (id) do nothing`,
     [SESSION, ORG],
   );
+  // Capital Code (migration 0403): a IA só responde mensagem que aconteceu DEPOIS
+  // de um agente ser ligado no número. O upstream ainda responde pelo turno
+  // "genérico", sem agente; aqui o teste precisa do estado que presume.
+  await publicarAgenteNaSessao(pool, ORG, SESSION, { ativoDesde: "2026-01-01T00:00:00Z" });
   await pool.query(
     `insert into conversations (id, organization_id, contact_id, channel_session_id, status, is_group)
      values ($1,$2,$3,$4,'ai_handling',false) on conflict (id) do nothing`,
