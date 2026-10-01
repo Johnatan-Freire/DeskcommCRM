@@ -200,6 +200,12 @@ insert into public.ai_models
   (provider, model_id, display_name, input_price_per_million_cents, output_price_per_million_cents)
 values ('openrouter', 'openai/gpt-4o-mini', 'GPT-4o mini (OpenRouter)', 14, 60)
 on conflict (provider, model_id) do nothing;
+-- Este fork não instala o catálogo da Requesty (0410, não portado), então o
+-- segundo provedor do caso é plantado aqui, igual ao que o upstream tem.
+insert into public.ai_models
+  (provider, model_id, display_name, input_price_per_million_cents, output_price_per_million_cents)
+values ('requesty', 'openai/gpt-4o-mini', 'GPT-4o mini (Requesty)', 15, 60)
+on conflict (provider, model_id) do nothing;
 SQL
 linhas=$(docker exec "$CONTAINER" psql -U postgres -d postgres -tAc "
   select (select count(*) from public.organizations)
