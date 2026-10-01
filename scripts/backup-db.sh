@@ -9,12 +9,18 @@ DIR="${1:-./backups}"
 RETENTION_DAYS="${RETENTION_DAYS:-14}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
+# Leitura do .env sem `source` (que executaria o arquivo) e sem `grep | cut`
+# (que trazia as aspas junto — `"postgres://…"` não é URL para o pg_dump, que
+# então tentava o socket local e falhava). Ver scripts/lib/env-seguro.sh.
+# shellcheck source=lib/env-seguro.sh
+. "$ROOT/scripts/lib/env-seguro.sh"
+
 URL="${SUPABASE_DB_ADMIN_URL:-${SUPABASE_DB_URL:-}}"
 if [ -z "$URL" ]; then
   for f in "$ROOT/.env.local" "$ROOT/.env"; do
     if [ -f "$f" ]; then
-      URL=$(grep -E '^SUPABASE_DB_ADMIN_URL=' "$f" | head -1 | cut -d= -f2- || true)
-      if [ -z "$URL" ]; then URL=$(grep -E '^SUPABASE_DB_URL=' "$f" | head -1 | cut -d= -f2- || true); fi
+      URL=$(ler_valor_env "$f" SUPABASE_DB_ADMIN_URL || true)
+      if [ -z "$URL" ]; then URL=$(ler_valor_env "$f" SUPABASE_DB_URL || true); fi
       [ -n "$URL" ] && break
     fi
   done
