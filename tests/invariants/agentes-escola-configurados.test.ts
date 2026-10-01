@@ -242,6 +242,95 @@ describe("A–I · quem atende cada etapa (seleção real, mesmo número, sem ro
   });
 });
 
+describe("a prioridade nunca vence o escopo: matriz de prioridade × quem está no ar", () => {
+  /** Monta o cenário, roda, e devolve tudo ao arranjo de produção (10/0, os dois no ar). */
+  async function comArranjo(
+    o: { comercial: number; academico: number; noAr: Array<"comercial" | "academico"> },
+    corpo: () => Promise<void>,
+  ) {
+    await q("update ai_agents set priority=$2 where id=$1", [COMERCIAL.agent, o.comercial]);
+    await q("update ai_agents set priority=$2 where id=$1", [ACADEMICO.agent, o.academico]);
+    for (const [nome, a] of [["comercial", COMERCIAL], ["academico", ACADEMICO]] as const) {
+      await q("update ai_agents set published_version_id=$2 where id=$1", [a.agent, o.noAr.includes(nome) ? a.version : null]);
+    }
+    try {
+      await corpo();
+    } finally {
+      await q("update ai_agents set priority=10, published_version_id=$2 where id=$1", [COMERCIAL.agent, COMERCIAL.version]);
+      await q("update ai_agents set priority=0, published_version_id=$2 where id=$1", [ACADEMICO.agent, ACADEMICO.version]);
+    }
+  }
+  const comerciais = ["novo", "interessado", "fechando"] as const;
+
+  it.each([
+    ["comercial 10 / acadêmico 0", 10, 0],
+    ["comercial 0 / acadêmico 10", 0, 10],
+    ["prioridades iguais", 5, 5],
+  ] as const)("%s → etapa comercial = comercial; Alunos = acadêmico", async (_c, pc, pa) => {
+    await comArranjo({ comercial: pc, academico: pa, noAr: ["comercial", "academico"] }, async () => {
+      for (const etapa of comerciais) {
+        const c = await contatoNaEtapa(E[etapa]);
+        expect(await quemAtende(c), `${etapa}`).toBe(COMERCIAL.agent);
+        expect(await pode(c.inbound, null)).toBe("autorizado");
+      }
+      const aluno = await contatoNaEtapa(E.alunos);
+      expect(await quemAtende(aluno)).toBe(ACADEMICO.agent);
+      expect(await pode(aluno.inbound, ACADEMICO.agent)).toBe("autorizado");
+    });
+  });
+
+  it("só o comercial no ar → etapa comercial atende; Alunos fica sem IA (o comercial não substitui)", async () => {
+    await comArranjo({ comercial: 0, academico: 10, noAr: ["comercial"] }, async () => {
+      const novo = await contatoNaEtapa(E.novo);
+      expect(await quemAtende(novo)).toBe(COMERCIAL.agent);
+      const aluno = await contatoNaEtapa(E.alunos);
+      expect(await quemAtende(aluno)).toBeNull();
+      expect(await pode(aluno.inbound, null)).toBe("nenhum_agente_no_ar");
+      expect(await pode(aluno.inbound, COMERCIAL.agent)).toBe("agente_fora_do_escopo_da_etapa");
+    });
+  });
+
+  it("só o acadêmico no ar (e acima) → Alunos atende; etapa comercial fica sem IA (o acadêmico não vende)", async () => {
+    await comArranjo({ comercial: 0, academico: 10, noAr: ["academico"] }, async () => {
+      const aluno = await contatoNaEtapa(E.alunos);
+      expect(await quemAtende(aluno)).toBe(ACADEMICO.agent);
+      for (const etapa of comerciais) {
+        const c = await contatoNaEtapa(E[etapa]);
+        expect(await quemAtende(c), `${etapa}`).toBeNull();
+        expect(await pode(c.inbound, ACADEMICO.agent)).toBe("agente_fora_do_escopo_da_etapa");
+      }
+    });
+  });
+
+  it("nenhum no ar → ninguém, em etapa comercial e em Alunos", async () => {
+    await comArranjo({ comercial: 10, academico: 0, noAr: [] }, async () => {
+      for (const etapa of ["novo", "alunos"] as const) {
+        const c = await contatoNaEtapa(E[etapa]);
+        expect(await quemAtende(c), etapa).toBeNull();
+        expect(await pode(c.inbound, null), etapa).toBe("nenhum_agente_no_ar");
+      }
+    });
+  });
+
+  it.each([
+    ["Equipe (humano)", "equipe", "open", "etapa_so_humano"],
+    ["Desistiu (terminal)", "desistiu", "lost", "etapa_sem_ia"],
+    ["Desqualificado (terminal)", "desqualificado", "open", "etapa_sem_ia"],
+  ] as const)("%s → nenhuma IA, com qualquer prioridade", async (_c, etapa, status, motivo) => {
+    for (const [pc, pa] of [[10, 0], [0, 10], [5, 5]] as const) {
+      await comArranjo({ comercial: pc, academico: pa, noAr: ["comercial", "academico"] }, async () => {
+        const c = await contatoNaEtapa(E[etapa], { status });
+        // Quem quer que o seletor devolva, a régua do turno recusa todos.
+        const escolhido = await quemAtende(c);
+        expect(await pode(c.inbound, escolhido), `${pc}/${pa}`).toBe(motivo);
+        expect(await pode(c.inbound, COMERCIAL.agent)).toBe(motivo);
+        expect(await pode(c.inbound, ACADEMICO.agent)).toBe(motivo);
+        expect(await pode(c.inbound, null)).toBe(motivo);
+      });
+    }
+  });
+});
+
 describe("J · ferramentas e executor, sobre a config montada do banco", () => {
   it("acadêmico: update_lead_state e schedule_followup fora do turno; executor recusa", async () => {
     const cfg = await loadPublishedAgentConfigById(pool, ORG, ACADEMICO.agent);
