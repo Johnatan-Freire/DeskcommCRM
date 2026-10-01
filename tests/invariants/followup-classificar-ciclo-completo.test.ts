@@ -198,6 +198,21 @@ async function tick(): Promise<void> {
 
 /** Espelho de `createSupabaseReactivityClient` em pg (mesmas colunas, `updated_at` inclusive). */
 const reatividade: ReactivityAdminClient = {
+  // Migration 0398 (este fork): mesma régua de `lib/channels/corte-de-conexao.ts`,
+  // em SQL direto — o mesmo join do espelho em followup-reactivity.test.ts.
+  async mensagemAnteriorAConexao(orgId, messageId) {
+    if (!messageId) return false;
+    const { rows } = await pool.query<{ sent_at: string; first_connected_at: string | null }>(
+      `select m.sent_at, cs.first_connected_at
+       from messages m
+       join channel_sessions cs on cs.id = m.channel_session_id
+       where m.organization_id = $1 and m.id = $2`,
+      [orgId, messageId],
+    );
+    const row = rows[0];
+    if (!row || row.first_connected_at === null) return false;
+    return new Date(row.sent_at).getTime() < new Date(row.first_connected_at).getTime();
+  },
   async loadConversationContactId(orgId, conversationId) {
     const { rows } = await pool.query(`select contact_id from conversations where id = $1 and organization_id = $2`, [
       conversationId,
