@@ -52,23 +52,30 @@ escolar primeiro; com o CRM novo e a API antiga, o agente passa tudo para a equi
 
 ## Ferramentas (menor privilégio)
 
-Na aba do agente, marque **só**:
+O perfil completo das DUAS versões (comercial e acadêmica) — escopo, capacidades, tools, palavras
+de passagem e prompt — está em `lib/ai/agents/modelos-escola.ts`, validado pelo mesmo schema da
+tela. Na aba do agente acadêmico, marque **só**:
 
 - **Consultar aluno no sistema escolar** — a fonte de todo dado pessoal.
 - Passagem para uma pessoa — é nativa, não precisa marcar.
+- **Escopo: acadêmico** e **sem permissão de mover o funil**. Com isso o motor esconde do turno a
+  tool de mover o funil e a de agendar retorno, e recusa as duas mesmo se chegarem por outro
+  caminho.
 
 Em **palavras que chamam uma pessoa**, cole (a regra padrão já cobre "falar com um atendente",
 "atendimento humano", "me passa pra uma pessoa", mas NÃO "falar com alguém" nem "secretaria";
 a comparação não ignora acento, por isso as duas grafias):
 
-`falar com alguém`, `falar com alguem`, `falar com a secretaria`, `falar com a coordenação`,
-`falar com a coordenacao`, `falar com o professor`, `falar com a professora`
+`falar com alguém`, `falar com alguem`, `falar com a secretaria`, `secretaria`, `coordenação`,
+`coordenacao`, `professor`, `professora`, `atendimento humano`, `falar com atendente`
+
+São amplas de propósito: "secretaria" e "professor" soltos também passam para uma pessoa quem só
+pergunta sobre eles ("a secretaria abre que horas?"). Uma passagem a mais é o custo aceito.
 
 Deixe **desmarcados**: catálogo de cursos, base de conhecimento comercial (playbook, apostila de
 preços), agenda, marcar ganho/perda no funil, e **nenhum fluxo de follow-up** na aba de
-follow-up. O fluxo "lead sem resposta" cobra silêncio de negociação — pergunta de nota
-respondida não é negociação. Desde que a varredura passou a exigir que a última fala da IA seja
-de um agente que habilita o fluxo, um agente sem fluxo marcado nunca gera reengajamento.
+follow-up. Follow-up é comercial: a etapa acadêmica o recusa por regra do banco, qualquer que seja
+o fluxo.
 
 ## Prompt (cole em "Instruções" e preencha as chaves)
 
@@ -140,79 +147,42 @@ nem ofereça outros cursos. Uma frase curta basta: "Posso ajudar em mais alguma 
 máximo.
 ```
 
-## Roteador (enquanto não há resolvedor de identidade)
-
-O roteador de hoje escolhe o agente **só pelo texto** da mensagem — não consulta o sistema
-escolar antes. Configuração recomendada para o número:
-
-- intenção **"Aluno ou responsável"** → este agente. Descrição: *dúvida sobre nota, falta,
-  frequência, turma, horário de aula, matrícula já feita, situação financeira, prova*. Exemplos:
-  "qual minha nota", "quantas faltas meu filho tem", "que horas é minha aula", "posso refazer a
-  prova", "tô matriculado em qual turma".
-- intenção **"Interessado"** → agente comercial. Exemplos: "quanto custa", "quais cursos vocês
-  têm", "quero me matricular".
-- **Fixo na conversa** ligado (a classificação roda a cada mensagem e troca quando o assunto
-  muda — o aluno que pergunta preço vai para o comercial).
-- **Reserva**: o agente comercial. Consequência conhecida: mensagem acadêmica classificada com
-  baixa confiança cai no comercial. É isso que o resolvedor de identidade (abaixo) fecha.
-
-## O que falta para identidade antes do agente (proposta, não implementado)
+## Identidade antes do agente (implementado)
 
 ```
 mensagem chega
-  → Identidade: consulta o sistema escolar pelo telefone (mesma ferramenta, fora do modelo)
-        encontrado (1+) → "relacionado a aluno"   |   não encontrado → "desconhecido"
-        falha/timeout   → "desconhecido", sem bloquear o turno
-  → Intenção: o classificador de hoje, recebendo a identidade como insumo
-  → Destino:
-        relacionado a aluno + intenção acadêmica  → atendimento ao aluno
-        relacionado a aluno + intenção comercial  → comercial (sabendo que o número está ligado a um cadastro)
-        desconhecido + intenção acadêmica         → atendimento ao aluno (que dirá "não localizei"
-                                                     e passa para a equipe) — nunca o comercial
-        desconhecido + intenção comercial         → comercial
+  → Identidade (lib/agent-engine/agent/identidade-do-contato.ts), antes da escolha do agente:
+        só para contato em etapa COMERCIAL, com integração ativa e funil com etapa acadêmica
+        encontrado + match_type "exact" + 1 ou mais alunos → "relacionado a aluno"
+        qualquer outra resposta, erro ou timeout            → "desconhecido" (fail-closed)
+  → relacionado a aluno: o card vai para a etapa de política ACADÊMICA ("Alunos e
+    responsáveis"), que é travada — o contato não sai mais dela pelo fluxo normal
+  → Política da etapa decide quem atende; o roteador escolhe dentro do que ela permite
 ```
 
-Peças que faltam: (1) um passo de identidade no resolvedor do turno
-(`lib/agent-engine/agent/resolve-turn-agent.ts`), antes da classificação, com cache curto por
-conversa; (2) o classificador passar a receber essa identidade; (3) regra de destino por
-identidade × intenção configurável por roteador. **Não** faz parte: campo de telefone do
-responsável ou renomear o "telefone 2" — a relação da pessoa com o aluno, se um dia precisar ser
-registrada (ex.: um `tipo_contato` com próprio aluno / responsável / familiar / outro), é outro
-projeto.
+O contrato é só `relacionado_a_aluno | desconhecido`. O papel da pessoa (aluno, responsável,
+familiar) nunca é inferido: `matched_contact_field` diz qual telefone do cadastro coincidiu, e
+nada mais. Nada da resposta do sistema escolar é gravado no CRM — só o movimento do card.
 
-### Contrato que o resolvedor de identidade consumiria
+### A etapa decide, não a pergunta
 
-Só o que sabemos de verdade. O telefone liga uma pessoa a um CADASTRO de aluno, e nada diz qual
-é o papel dela — então não há tipo `aluno`, `responsavel` nem `lead`:
-
-```ts
-type Identidade =
-  | {
-      tipo: "relacionado_a_aluno";
-      /** ids do sistema escolar, só em memória do turno: nunca gravados no CRM, nunca ao modelo */
-      aluno_ids: string[];
-      /** qual telefone do cadastro coincidiu — sem significado de parentesco */
-      campos: ("numero_contato" | "numero_contato2")[];
-    }
-  | { tipo: "desconhecido"; motivo: "nao_encontrado" | "nao_confirmado" | "falha_na_consulta" };
-```
-
-- `relacionado_a_aluno` exige `match_type: "exact"`; qualquer outra resposta é `desconhecido`.
-- Um papel (aluno, responsável, familiar) só entra no contrato quando o sistema escolar tiver um
-  campo com essa semântica — outro projeto, não este.
-- Nada disso é gravado no CRM hoje (sem coluna, sem migration): é o contrato do próximo passo.
-
-### Identidade não é intenção
-
-A identidade diz a quem o número está ligado; a intenção diz o que a pessoa quer AGORA. As duas
-são avaliadas a cada mensagem, e estar cadastrado não prende ninguém no atendimento acadêmico:
-
-| Identidade | Mensagem | Destino |
+| Situação | Mensagem | Quem atende |
 |---|---|---|
-| relacionado a aluno | "qual minha nota?" | atendimento ao aluno |
-| relacionado a aluno | "quanto custa o curso de programação?" | comercial |
+| relacionado a aluno (card em "Alunos e responsáveis") | "qual minha nota?" | agente acadêmico |
+| relacionado a aluno (card em "Alunos e responsáveis") | "quanto custa o curso de programação?" | agente acadêmico, que diz que vai passar para a equipe e passa para uma pessoa — o card continua acadêmico |
 | desconhecido | "quanto custa Excel?" | comercial |
-| desconhecido | "qual minha nota?" | atendimento ao aluno, que tenta a identificação segura e, sem cadastro, passa para uma pessoa — nunca o comercial |
+| desconhecido | "qual minha nota?" | comercial, que não tem acesso a dado escolar: diz que a equipe ajuda e oferece uma pessoa |
+
+## Roteador
+
+Com a identidade resolvida antes do agente, o roteador só precisa separar o que a POLÍTICA da
+etapa já não separa. Contato em "Alunos e responsáveis" vai ao agente acadêmico qualquer que seja
+o palpite do classificador; contato em etapa comercial nunca vai ao acadêmico. Na prática, os dois
+agentes publicados no mesmo número dispensam intenção de roteador para esta divisão.
+
+**Publique os dois juntos.** A identidade roda dentro do turno, e o turno só é enfileirado se
+houver agente no ar para a etapa ATUAL do contato. Com só o acadêmico publicado, o aluno que chega
+novo (etapa comercial) nem gera turno — e nunca é identificado.
 
 ## Teste antes de publicar (botão Testar, número de teste)
 
@@ -229,5 +199,5 @@ Frases, e o que tem de acontecer — o conjunto completo está em
 | "posso refazer a prova?" | passa para a equipe |
 | "quero parcelar minha mensalidade atrasada" | passa para a equipe, sem valores |
 | "quanto custa o curso de programação?" | diz que passa ao comercial; não cota |
-| número não cadastrado: "qual minha nota?" | "não localizei cadastro ligado a este número" + equipe |
+| número não cadastrado: "qual minha nota?" | quem responde é o comercial (o contato não é aluno para o sistema): sem dado escolar, oferece a equipe |
 | "quero falar com alguém" | passa para uma pessoa |

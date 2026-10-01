@@ -139,6 +139,7 @@ import {
   selecionarAluno,
 } from '@/lib/integracoes/sistema-escolar';
 import { toolsDoSistemaEscolarNoTurno } from './sistema-escolar-gate';
+import { ferramentasOcultasPeloEscopo } from './ferramentas-por-escopo';
 import { matchesHandoffKeyword } from './agent-config';
 import { garantirPerguntaDoRoteiro, prepararRoteiroDoTurno } from './roteiro-no-turno';
 import { validarRespostaDoFluxo } from './flow-validate';
@@ -3785,6 +3786,15 @@ async function executarTurnoDoAgente(
   if (agentConfig !== null && !agentConfig.handoffToolEnabled) {
     delete rawTools.request_human_handoff;
   }
+  // 0404: o escopo do agente esconde as tools que ele não pode usar (mover funil,
+  // agendar follow-up). A recusa no executor segue como segunda camada.
+  for (const nome of ferramentasOcultasPeloEscopo(
+    agentConfig === null
+      ? null
+      : { serviceScope: agentConfig.serviceScope, canUpdateLeadState: agentConfig.canUpdateLeadState },
+  )) {
+    delete rawTools[nome];
+  }
 
   // Spec 15: snapshot mínimo do contexto disponível pro humano que for atender o
   // caso — campo de CONVENIÊNCIA pra UI, não load-bearing (nada aqui é relido pelo
@@ -4080,7 +4090,10 @@ async function executarTurnoDoAgente(
     // guardrail depende de ordem entre os dois, e o `jailbreak` segue sem vetar
     // o inbound — só flagra o turno no trace.
     const [stageResultado, jailbreakVerdict] = await Promise.all([
-      deps.knobs.stageClassifier !== undefined
+      // Sem `update_lead_state` no turno (agente acadêmico, ou sem permissão de
+      // mover o funil — 0404) o classificador de estágio não roda: a dica dele
+      // manda "confirmar com update_lead_state", uma tool que o agente não tem.
+      deps.knobs.stageClassifier !== undefined && 'update_lead_state' in rawTools
         ? classifyStage(
             pool,
             deps.llmCfg,
