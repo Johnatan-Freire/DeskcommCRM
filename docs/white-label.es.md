@@ -1,4 +1,4 @@
-<!-- traduzido-de: docs/white-label.md@6a25e768d53e -->
+<!-- traduzido-de: docs/white-label.md@fd7e1c127512 -->
 
 [🇧🇷 Português](white-label.md) · [🇺🇸 English](white-label.en.md) · 🇪🇸 Español
 
@@ -167,7 +167,9 @@ Si tu cliente pregunta "¿dónde quedan mis datos?", la instalación dedicada ti
 
 La **Resolución CD/ANPD nº 19/2024** volvió obligatorias las cláusulas contractuales estándar para la **transferencia internacional de datos personales**, con el plazo de adecuación cerrado el **23 de agosto de 2025**.
 
-Todo cliente tuyo que use un CRM extranjero realiza esa transferencia y necesita el artefacto contractual. Alojando en una VPS en Brasil, **no hay transferencia internacional** — y la obligación no se aplica.
+Todo cliente tuyo que use un CRM extranjero realiza esa transferencia y necesita el artefacto contractual. Alojando en una VPS en Brasil, **el CRM en sí no transfiere datos fuera del país** — y, para él, la obligación no se aplica.
+
+⚠️ **La salvedad es la IA, y vale para casi toda instalación.** La frase de arriba solo es completa mientras ningún proveedor de IA extranjero esté activado. La atención automática envía la conversación al proveedor que el cliente conectó (Anthropic, OpenAI, Google, DeepSeek u OpenRouter, todos fuera de Brasil). En ese flujo hay transferencia internacional, y las cláusulas estándar valen para él.
 
 ⚠️ **No lo vendas como "servidor en Brasil = conformidad con la LGPD".** Eso es falso y un abogado lo desmonta en la primera pregunta: la conformidad depende de base legal, finalidad, seguridad y derechos del titular. El argumento correcto y defendible es el de arriba: sin transferencia internacional, no hay exigencia de cláusulas estándar.
 

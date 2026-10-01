@@ -125,6 +125,9 @@ const inbound = {
   organization_id: ids.org,
   contact_id: ids.contact,
   kind: 'inbound_turn',
+  // Todo job real tem `created_at`: a guarda de mensagem represada deste fork
+  // mede a idade pelo JOB (não pela mensagem). Agora = job fresco.
+  created_at: new Date(),
   payload: {
     conversation_id: ids.conversation,
     contact_id: ids.contact,
@@ -139,6 +142,7 @@ const followup = {
   organization_id: ids.org,
   contact_id: ids.contact,
   kind: 'followup_turn',
+  created_at: new Date(),
   payload: { conversation_id: ids.conversation, contact_id: ids.contact },
 };
 
@@ -171,6 +175,8 @@ function pool() {
       // `select * from lead_checkpoints` e um row de conversa viraria um
       // checkpoint sem `rolling_summary` (TypeError em quem monta o briefing).
       if (typeof sql === 'string' && sql.includes('lead_checkpoints')) return { rows: [] };
+      // Corte de ativação deste fork (migration 0403): agente no ar, mensagem depois dele.
+      if (typeof sql === 'string' && sql.includes('fn_ia_pode_responder_mensagem')) return { rows: [{ motivo: 'autorizado' }] };
       return { rows: [{ active_ai_agent_id: null, active_intent: null, body: 'oi' }] };
     }),
   };
@@ -273,6 +279,7 @@ describe('modo assistido: as detecções determinísticas rodam antes do rascunh
     const p = pool();
     p.query.mockImplementation(async (sql: string) => {
       if (sql.includes('lead_checkpoints')) return { rows: [] };
+      if (sql.includes('fn_ia_pode_responder_mensagem')) return { rows: [{ motivo: 'autorizado' }] };
       if (sql.includes('from messages') && sql.includes('and id = $3')) {
         return { rows: [{ active_ai_agent_id: null, active_intent: null, body: 'SAIR' }] };
       }

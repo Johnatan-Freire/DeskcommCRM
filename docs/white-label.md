@@ -165,7 +165,9 @@ Se o seu cliente pergunta "onde ficam meus dados?", a instalação dedicada tem 
 
 A **Resolução CD/ANPD nº 19/2024** tornou obrigatórias as cláusulas-padrão contratuais para **transferência internacional de dados pessoais**, com o prazo de adequação encerrado em **23 de agosto de 2025**.
 
-Todo cliente seu que usa um CRM estrangeiro realiza essa transferência e precisa do artefato contratual. Hospedando em VPS no Brasil, **não há transferência internacional** — e a obrigação não se aplica.
+Todo cliente seu que usa um CRM estrangeiro realiza essa transferência e precisa do artefato contratual. Hospedando em VPS no Brasil, **o CRM em si não transfere dados para fora do país** — e, para ele, a obrigação não se aplica.
+
+⚠️ **A ressalva é a IA, e ela vale para quase toda instalação.** A frase acima só é inteira enquanto nenhum provedor de IA estrangeiro estiver ligado. O atendimento automático manda a conversa ao provedor que o cliente conectou (Anthropic, OpenAI, Google, DeepSeek ou OpenRouter, todos fora do Brasil). Nesse fluxo há transferência internacional, e as cláusulas-padrão valem para ele.
 
 ⚠️ **Não venda como "servidor no Brasil = conformidade com a LGPD".** Isso é falso e um advogado desmonta na primeira pergunta: conformidade depende de base legal, finalidade, segurança e direitos do titular. O argumento correto e defensável é o de cima: sem transferência internacional, não há exigência de cláusulas-padrão.
 

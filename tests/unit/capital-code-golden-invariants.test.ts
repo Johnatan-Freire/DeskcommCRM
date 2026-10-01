@@ -125,6 +125,11 @@ describe("janela de envio deste fork: pode cruzar a meia-noite", () => {
     expect(janelaDeEnvioAberta(em("2026-10-07T06:00:00Z"), k)).toBe(true); // 3h BRT
     expect(janelaDeEnvioAberta(em("2026-10-07T15:00:00Z"), k)).toBe(false); // 12h BRT
   });
+  it("a janela de RESPOSTA (0495) segue a mesma regra: 22h–7h responde de madrugada", () => {
+    const r = { ...k, windowStartHour: 7, windowEndHour: 22, respostaStartHour: 22, respostaEndHour: 7 };
+    expect(janelaDeEnvioAberta(em("2026-10-07T06:00:00Z"), r, true)).toBe(true); // 3h BRT, resposta
+    expect(janelaDeEnvioAberta(em("2026-10-07T06:00:00Z"), r, false)).toBe(false); // 3h BRT, disparo
+  });
   it("fora dela, a próxima abertura é às 22h do mesmo dia", () => {
     const prox = proximaAberturaDaJanela(em("2026-10-07T15:00:00Z"), { ...k, jitterMaxMs: 0 }, false, () => 0);
     expect(prox.toISOString()).toBe("2026-10-08T01:00:00.000Z"); // 22h BRT

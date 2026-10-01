@@ -307,13 +307,26 @@ describe("PUT /api/v1/ai/pacing — janela de resposta (0495)", () => {
     expect(db.knobs).toMatchObject({ resposta_start_hour: 0, resposta_end_hour: 24 });
   });
 
-  it("janela de resposta invertida é recusada com 422 e nada é gravado", async () => {
+  // Regra Capital Code (vence o upstream): janela com início MAIOR que o fim
+  // cruza a meia-noite (22h-7h = responder de madrugada) — o motor deste fork a
+  // lê assim (`insideWindow`), igual à janela de disparo. O que não tem sentido
+  // é início IGUAL ao fim: essa continua recusada, e nada é gravado.
+  it("janela de resposta invertida é aceita: cruza a meia-noite", async () => {
     authOk();
     const db = makeDb(null);
     const { PUT } = await import("@/app/api/v1/ai/pacing/route");
     const res = await PUT(put(corpoDaTela({ resposta_start_hour: 22, resposta_end_hour: 7 })));
 
-    // 22h-7h o motor lê como "nunca responde"; a tela tem de recusar na hora.
+    expect(res.status).toBe(200);
+    expect(db.knobs).toMatchObject({ resposta_start_hour: 22, resposta_end_hour: 7 });
+  });
+
+  it("janela de resposta de comprimento zero (início = fim) é recusada com 422 e nada é gravado", async () => {
+    authOk();
+    const db = makeDb(null);
+    const { PUT } = await import("@/app/api/v1/ai/pacing/route");
+    const res = await PUT(put(corpoDaTela({ resposta_start_hour: 9, resposta_end_hour: 9 })));
+
     expect(res.status).toBe(422);
     expect(db.upserts).toHaveLength(0);
   });

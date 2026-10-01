@@ -945,12 +945,6 @@ const DADO_DO_OPERADOR_CONGELADO: { arquivo: string; expressao: string; motivo: 
       "rótulo de opção de ALVOS_DA_CLASSIFICACAO, tabela fechada do módulo, iterada via opcoes() na linha 125",
   },
   {
-    arquivo: "app/app/ai/followups/[id]/_components/forms/CollectForm.tsx",
-    expressao: "rotulo",
-    motivo:
-      "rótulo de opção de TIPOS_DE_CAMPO, tabela fechada do módulo, iterada via opcoes() na linha 127",
-  },
-  {
     arquivo: "app/app/ai/followups/[id]/_components/forms/ConditionForm.tsx",
     expressao: "rotulo",
     motivo:
@@ -990,13 +984,6 @@ const DADO_DO_OPERADOR_CONGELADO: { arquivo: string; expressao: string; motivo: 
     arquivo: "app/app/prospecting/_client.tsx",
     expressao: "label",
     motivo: "par do array as const literal declarado nas linhas 636-639",
-  },
-  {
-    arquivo: "app/app/settings/conversoes/_linksRastreaveis.tsx",
-    expressao: "h",
-    motivo:
-      "cabeçalho de tabela: o array já sai traduzido na linha 138 e o t(h) é a segunda passagem pelo " +
-      "dicionário sobre o mesmo valor",
   },
   {
     arquivo: "app/app/settings/tenant/financeiro/_client.tsx",
