@@ -149,10 +149,17 @@ describe("passagem para uma pessoa", () => {
       "quero falar com alguem",
       "Preciso falar com a secretaria",
       "quero falar com a coordenação",
+      "quero falar com a coordenacao",
+      "preciso falar com o professor",
+      "cadê a professora?",
+      "quero falar com atendente",
+      // Amplas de propósito (decisão do dono, 2026-09-30): citar a secretaria já
+      // passa para uma pessoa — uma passagem a mais é o custo aceito.
+      "a secretaria abre que horas?",
     ]) {
       expect(pede(frase), frase).toBe(true);
     }
-    for (const frase of ["qual minha nota?", "a secretaria abre que horas?", "tem aula hoje?"]) {
+    for (const frase of ["qual minha nota?", "tem aula hoje?", "quanto custa o curso de Excel?"]) {
       expect(pede(frase), frase).toBe(false);
     }
   });

@@ -8,6 +8,7 @@
  *
  * Dados de aluno aqui são FICTÍCIOS — nenhum dado real de aluno entra no repositório.
  */
+import { PALAVRAS_DE_PASSAGEM_ESCOLA } from "@/lib/ai/agents/modelos-escola";
 import type { CenarioCanonico } from "./capital-code-agent-scenarios-matrix";
 
 // ─── Respostas simuladas de GET /api/deskcomm/aluno?telefone= (contrato real) ─────────
@@ -81,15 +82,7 @@ export const API_NAO_ENCONTRADO = { encontrado: false, match_type: "exact", alun
  * "falar com alguém" nem "secretaria"; este agente as acrescenta sem mudar a regra dos
  * outros. A comparação é substring em minúsculas SEM tirar acento — por isso as duas grafias.
  */
-export const PALAVRAS_DE_PASSAGEM_DO_ALUNO = [
-  "falar com alguém",
-  "falar com alguem",
-  "falar com a secretaria",
-  "falar com a coordenação",
-  "falar com a coordenacao",
-  "falar com o professor",
-  "falar com a professora",
-];
+export const PALAVRAS_DE_PASSAGEM_DO_ALUNO: readonly string[] = PALAVRAS_DE_PASSAGEM_ESCOLA;
 
 // ─── Matriz T01–T25 ─────────────────────────────────────────────────────────────────
 
