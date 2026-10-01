@@ -93,7 +93,8 @@ beforeAll(async () => {
     [JA_ANONIMIZADO, ORG],
   );
   await q(
-    "insert into contacts(id,organization_id,name,display_name,kind,source,source_metadata) values($1,$2,'Grupo','Grupo','whatsapp_group','whatsapp_group',jsonb_build_object('group_chat_id','120363000000000497@g.us'))",
+    // Capital Code: sem o módulo de grupos (0482), o placeholder do grupo é um contato comum.
+    "insert into contacts(id,organization_id,name,display_name) values($1,$2,'Grupo','Grupo')",
     [GRUPO, ORG],
   );
   for (const contato of [ALVO, PELO_PEDIDO, VIZINHO, JA_ANONIMIZADO, GRUPO]) {

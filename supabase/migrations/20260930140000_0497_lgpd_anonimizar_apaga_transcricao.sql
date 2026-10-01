@@ -344,38 +344,43 @@ begin
   get diagnostics v_count = row_count;
   v_counts := v_counts || jsonb_build_object('orders', v_count);
 
-  -- 6b. crm_proposals (migration 0477, #1504) — PRESERVA número, valores,
-  -- itens, datas e status; redige só o que identifica a PESSOA. Ver o
-  -- cabeçalho desta migration para o porquê de cada coluna.
-  -- O PDF que o cliente recebeu (bucket `propostas`, `<org>/<proposta>.pdf`)
-  -- tem o nome dele impresso: redigir as colunas e deixar o arquivo seria
-  -- anonimizar a linha e manter o documento. Vai para a mesma fila de expurgo
-  -- da mídia (passo 7), com o bucket CERTO — a mensagem que levou o PDF
-  -- aponta para o mesmo caminho, mas o passo 7 só enfileira `whatsapp-media`.
-  -- Lido ANTES de o passo seguinte zerar `pdf_path`.
-  insert into storage_redaction_queue (organization_id, request_id, bucket, object_path)
-  select p_organization_id, p_request_id, 'propostas', pdf_path
-    from crm_proposals
-   where organization_id = p_organization_id
-     and contact_id = p_contact_id
-     and pdf_path is not null and length(pdf_path) > 0
-     -- só arquivo DESTA organização: o expurgo nunca alcança o PDF de outra
-     and pdf_path like p_organization_id::text || '/%'
-  on conflict (bucket, object_path) do nothing;
-  update crm_proposals set
-    destinatario_nome = v_anon_label,
-    briefing_json = '{}'::jsonb,
-    resumo_comercial = null,
-    -- o texto do documento como foi montado e como foi editado à mão: é o
-    -- conteúdo do PDF, com o mesmo nome dentro.
-    rendered_snapshot = null,
-    secoes_editadas = null,
-    pdf_path = null,
-    updated_at = now()
-  where organization_id = p_organization_id
-    and contact_id = p_contact_id;
-  get diagnostics v_count = row_count;
-  v_counts := v_counts || jsonb_build_object('crm_proposals', v_count);
+  -- Capital Code: o módulo de propostas (0464/0477) não foi portado. A seção
+  -- só roda se a tabela existir — PL/pgSQL só prepara o comando ao executá-lo,
+  -- então o ramo não executado não falha por relação inexistente.
+  if to_regclass('public.crm_proposals') is not null then
+    -- 6b. crm_proposals (migration 0477, #1504) — PRESERVA número, valores,
+    -- itens, datas e status; redige só o que identifica a PESSOA. Ver o
+    -- cabeçalho desta migration para o porquê de cada coluna.
+    -- O PDF que o cliente recebeu (bucket `propostas`, `<org>/<proposta>.pdf`)
+    -- tem o nome dele impresso: redigir as colunas e deixar o arquivo seria
+    -- anonimizar a linha e manter o documento. Vai para a mesma fila de expurgo
+    -- da mídia (passo 7), com o bucket CERTO — a mensagem que levou o PDF
+    -- aponta para o mesmo caminho, mas o passo 7 só enfileira `whatsapp-media`.
+    -- Lido ANTES de o passo seguinte zerar `pdf_path`.
+    insert into storage_redaction_queue (organization_id, request_id, bucket, object_path)
+    select p_organization_id, p_request_id, 'propostas', pdf_path
+      from crm_proposals
+     where organization_id = p_organization_id
+       and contact_id = p_contact_id
+       and pdf_path is not null and length(pdf_path) > 0
+       -- só arquivo DESTA organização: o expurgo nunca alcança o PDF de outra
+       and pdf_path like p_organization_id::text || '/%'
+    on conflict (bucket, object_path) do nothing;
+    update crm_proposals set
+      destinatario_nome = v_anon_label,
+      briefing_json = '{}'::jsonb,
+      resumo_comercial = null,
+      -- o texto do documento como foi montado e como foi editado à mão: é o
+      -- conteúdo do PDF, com o mesmo nome dentro.
+      rendered_snapshot = null,
+      secoes_editadas = null,
+      pdf_path = null,
+      updated_at = now()
+    where organization_id = p_organization_id
+      and contact_id = p_contact_id;
+    get diagnostics v_count = row_count;
+    v_counts := v_counts || jsonb_build_object('crm_proposals', v_count);
+  end if;
 
   -- CAMPANHAS: o que foi DITO à pessoa e o endereço para onde foi.
   update campaign_recipients set
@@ -411,39 +416,55 @@ begin
   get diagnostics v_count = row_count;
   v_counts := v_counts || jsonb_build_object('sales', v_count);
 
-  -- 6d. conversation_notes (migration 0483, F3 da #1863) — a nota interna é
-  -- texto escrito SOBRE a pessoa durante o atendimento, e o anexo dela é mídia
-  -- ancorada na conversa: os dois entram no alcance do titular. A 0477 já
-  -- mostrou o desenho (arquivo vai para a fila ANTES de a coluna ser zerada).
-  -- O bucket é `internal-media`, e não o do passo 7: a nota nunca sobe no
-  -- `whatsapp-media` (é o bucket do canal do CLIENTE), e enfileirar o caminho
-  -- num bucket onde ele não está deixaria a remoção apontando para o nada —
-  -- a mesma falha de não ter anonimizado, um endereço mais para a direita.
-  -- Por isso os caminhos de nota também NÃO entram em `v_media_paths`: essa
-  -- lista só existe para o passo 7, que enfileira `whatsapp-media`.
-  insert into storage_redaction_queue (organization_id, request_id, bucket, object_path)
-  select p_organization_id, p_request_id, 'internal-media', n.media_storage_path
-    from conversation_notes n
-   where n.organization_id = p_organization_id
-     and n.conversation_id in (
-       select id from conversations
-        where contact_id = p_contact_id and organization_id = p_organization_id
-     )
-     and n.media_storage_path is not null and length(n.media_storage_path) > 0
-     and n.media_storage_path like p_organization_id::text || '/%'
-  on conflict (bucket, object_path) do nothing;
-  update conversation_notes set
-    body = '[nota interna anonimizada]',
-    media_storage_path = null,
-    media_mime = null,
-    media_size_bytes = null
-  where organization_id = p_organization_id
-    and conversation_id in (
-      select id from conversations
-       where contact_id = p_contact_id and organization_id = p_organization_id
-    );
-  get diagnostics v_count = row_count;
-  v_counts := v_counts || jsonb_build_object('conversation_notes', v_count);
+  -- Capital Code: o anexo da nota interna (0483) não foi portado — sem a coluna,
+  -- só o TEXTO da nota é redigido (que é dado sobre o titular do mesmo jeito).
+  if exists (select 1 from information_schema.columns
+              where table_schema = 'public' and table_name = 'conversation_notes'
+                and column_name = 'media_storage_path') then
+    -- 6d. conversation_notes (migration 0483, F3 da #1863) — a nota interna é
+    -- texto escrito SOBRE a pessoa durante o atendimento, e o anexo dela é mídia
+    -- ancorada na conversa: os dois entram no alcance do titular. A 0477 já
+    -- mostrou o desenho (arquivo vai para a fila ANTES de a coluna ser zerada).
+    -- O bucket é `internal-media`, e não o do passo 7: a nota nunca sobe no
+    -- `whatsapp-media` (é o bucket do canal do CLIENTE), e enfileirar o caminho
+    -- num bucket onde ele não está deixaria a remoção apontando para o nada —
+    -- a mesma falha de não ter anonimizado, um endereço mais para a direita.
+    -- Por isso os caminhos de nota também NÃO entram em `v_media_paths`: essa
+    -- lista só existe para o passo 7, que enfileira `whatsapp-media`.
+    insert into storage_redaction_queue (organization_id, request_id, bucket, object_path)
+    select p_organization_id, p_request_id, 'internal-media', n.media_storage_path
+      from conversation_notes n
+     where n.organization_id = p_organization_id
+       and n.conversation_id in (
+         select id from conversations
+          where contact_id = p_contact_id and organization_id = p_organization_id
+       )
+       and n.media_storage_path is not null and length(n.media_storage_path) > 0
+       and n.media_storage_path like p_organization_id::text || '/%'
+    on conflict (bucket, object_path) do nothing;
+    update conversation_notes set
+      body = '[nota interna anonimizada]',
+      media_storage_path = null,
+      media_mime = null,
+      media_size_bytes = null
+    where organization_id = p_organization_id
+      and conversation_id in (
+        select id from conversations
+         where contact_id = p_contact_id and organization_id = p_organization_id
+      );
+    get diagnostics v_count = row_count;
+    v_counts := v_counts || jsonb_build_object('conversation_notes', v_count);
+  else
+    update conversation_notes set
+      body = '[nota interna anonimizada]'
+    where organization_id = p_organization_id
+      and conversation_id in (
+        select id from conversations
+         where contact_id = p_contact_id and organization_id = p_organization_id
+      );
+    get diagnostics v_count = row_count;
+    v_counts := v_counts || jsonb_build_object('conversation_notes', v_count);
+  end if;
 
   -- 7. enqueue media for async deletion (idempotent via unique (bucket, object_path))
   if array_length(v_media_paths, 1) > 0 then
@@ -589,17 +610,20 @@ begin
   get diagnostics v_count = row_count;
   v_counts := v_counts || jsonb_build_object('entregas_de_aviso_de_caso', v_count);
 
-  -- channel_session_groups.subject — o NOME do grupo, e a FK contact_id aponta
-  -- para o placeholder do grupo (contacts.kind = 'whatsapp_group'), nunca para
-  -- o titular real sendo anonimizado neste caminho — mas a FK para contacts e o
-  -- nome da coluna casam o padrão automático do escopo (migration 0482), e
-  -- nulificar não perde nada operacional: número, conversa e liga/desliga ficam.
-  update public.channel_session_groups set
-    subject = null
-  where organization_id = p_organization_id
-    and contact_id = p_contact_id;
-  get diagnostics v_count = row_count;
-  v_counts := v_counts || jsonb_build_object('channel_session_groups', v_count);
+  -- Capital Code: grupos na inbox (0482) não foi portado — só se a tabela existe.
+  if to_regclass('public.channel_session_groups') is not null then
+    -- channel_session_groups.subject — o NOME do grupo, e a FK contact_id aponta
+    -- para o placeholder do grupo (contacts.kind = 'whatsapp_group'), nunca para
+    -- o titular real sendo anonimizado neste caminho — mas a FK para contacts e o
+    -- nome da coluna casam o padrão automático do escopo (migration 0482), e
+    -- nulificar não perde nada operacional: número, conversa e liga/desliga ficam.
+    update public.channel_session_groups set
+      subject = null
+    where organization_id = p_organization_id
+      and contact_id = p_contact_id;
+    get diagnostics v_count = row_count;
+    v_counts := v_counts || jsonb_build_object('channel_session_groups', v_count);
+  end if;
 
   -- 8. dense audit row
   insert into api_audit_log (organization_id, action, actor_user_id, resource_type, resource_id, metadata, bypassed_rls)

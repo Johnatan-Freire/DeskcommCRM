@@ -510,6 +510,25 @@ export interface ExportPayload {
   passagens: PassagemDeAtendimentoRow[];
   avisos_de_caso: AvisoDeCasoEntregaRow[];
   /**
+   * Notas internas das conversas do titular — o texto que a equipe escreveu
+   * SOBRE ele. A cascata de anonimização redige `body`; o que se apaga a pedido
+   * dele é o que se entrega a pedido dele (Art. 18 II). Sem FK para `contacts`,
+   * o escopo sai das conversas dele. Opcional: o tipo é montado à mão nos testes.
+   */
+  conversation_notes?: Array<{
+    id: string;
+    conversation_id: string;
+    body: string;
+    created_by_name: string | null;
+    created_at: string;
+  }>;
+  /**
+   * Linhas de MÓDULOS que este fork não instala (propostas — 0464; grupos na
+   * inbox — 0482). A cascata as alcança atrás de `to_regclass`; aqui a leitura
+   * tolera a ausência da tabela. Instalado o módulo, o titular recebe as linhas.
+   */
+  modulos_opcionais?: Record<string, unknown[]>;
+  /**
    * Campanhas que falaram com o titular (migration 0375).
    *
    * Entra pelo mesmo motivo de `voice_calls`: o trigger
@@ -1268,6 +1287,8 @@ export async function collectExportData(args: CollectArgs): Promise<ExportPayloa
   const case_chat_messages: CaseChatMessageRow[] = [];
   const passagens: PassagemDeAtendimentoRow[] = [];
   const avisos_de_caso: AvisoDeCasoEntregaRow[] = [];
+  const conversation_notes: NonNullable<ExportPayload["conversation_notes"]> = [];
+  const modulos_opcionais: Record<string, unknown[]> = {};
   if (contactId) {
     const pageSize = 500;
     const refBatchSize = 100; // Mantém o filtro IN abaixo dos limites de URL dos proxies.
@@ -1309,6 +1330,23 @@ export async function collectExportData(args: CollectArgs): Promise<ExportPayloa
           break;
         }
         cases.push(...(data ?? []));
+        if (!data || data.length < pageSize) break;
+      }
+    }
+    // As NOTAS INTERNAS das conversas do titular: `conversation_notes` não tem FK
+    // para `contacts`, então o escopo sai dos ids das conversas dele. A cascata
+    // redige `body`; sem este bloco o Art. 18 II omitiria o que a equipe anotou.
+    for (let batch = 0; batch < conversationIds.length; batch += refBatchSize) {
+      for (let offset = 0; ; offset += pageSize) {
+        const { data, error } = await admin
+          .from("conversation_notes")
+          .select("id, conversation_id, body, created_by_name, created_at")
+          .eq("organization_id", organizationId)
+          .in("conversation_id", conversationIds.slice(batch, batch + refBatchSize))
+          .order("id")
+          .range(offset, offset + pageSize - 1);
+        if (error) throw error;
+        conversation_notes.push(...(data ?? []));
         if (!data || data.length < pageSize) break;
       }
     }
@@ -1518,6 +1556,46 @@ export async function collectExportData(args: CollectArgs): Promise<ExportPayloa
     }
   }
 
+  // Módulos que esta instalação pode não ter (propostas, grupos na inbox). A
+  // cascata os alcança atrás de `to_regclass`; aqui a ausência da tabela vira
+  // aviso no log, e a presença vira linha no relatório do titular.
+  if (contactId) {
+    const leituras = [
+      {
+        tabela: "crm_proposals",
+        consulta: () =>
+          admin
+            .from("crm_proposals")
+            .select("id, numero, ano, titulo, status, destinatario_nome, resumo_comercial, created_at")
+            .eq("organization_id", organizationId)
+            .eq("contact_id", contactId)
+            .limit(500),
+      },
+      {
+        tabela: "channel_session_groups",
+        consulta: () =>
+          admin
+            .from("channel_session_groups")
+            .select("id, group_chat_id, subject, created_at")
+            .eq("organization_id", organizationId)
+            .eq("contact_id", contactId)
+            .limit(500),
+      },
+    ];
+    for (const { tabela, consulta } of leituras) {
+      const { data, error } = await consulta();
+      if (error) {
+        logger.warn("[lgpd-export-worker] módulo opcional ausente ou ilegível", {
+          request_id: requestId,
+          tabela,
+          error: error.message,
+        });
+        continue;
+      }
+      if (data && data.length > 0) modulos_opcionais[tabela] = data;
+    }
+  }
+
   const perfil = perfilDoPais(controlador.country);
 
   return {
@@ -1564,6 +1642,8 @@ export async function collectExportData(args: CollectArgs): Promise<ExportPayloa
     lead_notes,
     ai_agent_runs,
     lead_state,
+    conversation_notes,
+    modulos_opcionais,
   };
 }
 

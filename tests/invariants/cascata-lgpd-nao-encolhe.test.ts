@@ -92,6 +92,16 @@ const TABELAS_NA_CASCATA = [
   // `lgpd-alcanca-prospeccao-de-quem-ja-era-contato.test.ts`.
   "prospecting_candidates",
   "voice_calls", //        0235 — o telefone de quem falou ao telefone
+  // 0483 (upstream) — a nota interna da conversa: `body` é texto escrito SOBRE a
+  // pessoa. Neste fork o anexo da nota (0483) não foi portado, então a cascata
+  // redige o TEXTO sempre e o anexo só se a coluna existir. Sem FK para
+  // `contacts`, é esta catraca que segura o passo 6d de não sumir.
+  "conversation_notes",
+  // 0477 / 0482 (upstream) — propostas e grupos na inbox NÃO foram portados para
+  // este fork. Os passos ficam no corpo da cascata atrás de `to_regclass(...)`:
+  // sem a tabela, o ramo não executa; se o módulo vier, a cascata já o alcança.
+  "crm_proposals",
+  "channel_session_groups",
 ] as const;
 
 /**
