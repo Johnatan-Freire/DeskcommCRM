@@ -45,6 +45,13 @@ export interface NavMetadata {
   sidebar?: boolean;
   healthDot?: boolean;
   /**
+   * Contador de pendências ao lado do rótulo. `casos`: casos em que a IA espera
+   * uma pessoa (`awaiting_human`) — quem desenha é `ContadorDeCasos`. `fila`:
+   * conversas que esperam uma pessoa (a aba Fila do Inbox) — `ContadorDaFila`.
+   * Zero não desenha nada: número que nunca some ensina a ignorar o número.
+   */
+  contador?: "casos" | "fila";
+  /**
    * A porta de um MÓDULO OPCIONAL da instalação (`lib/instalacao/modulos.ts`).
    * Com o módulo desligado ela some do menu, do hub e do ⌘K — para todo papel.
    * É apresentação, como o resto deste arquivo: quem recusa é a tela e a rota.
@@ -139,6 +146,8 @@ export const NAV_CATALOG = [
     icon: "Inbox",
     group: "atendimento",
     sidebar: true,
+    // Quantas conversas a IA passou para a equipe e esperam uma pessoa (aba Fila).
+    contador: "fila",
   },
   {
     href: "/app/radar",
@@ -442,7 +451,9 @@ export const NAV_CATALOG = [
     group: "ia",
     section: "Montar o agente",
     minRole: "manager",
-    sidebar: true,
+    // Saiu do sidebar para dar lugar a Casos: roteador se configura poucas
+    // vezes, e o caso pede resposta no mesmo dia. A troca é um-por-um porque o
+    // menu inteiro tem de caber em 900px (e2e `navegacao.spec.ts`).
   },
   {
     href: "/app/ai/credentials",
@@ -511,6 +522,11 @@ export const NAV_CATALOG = [
     group: "ia",
     section: "Acompanhar o agente",
     minRole: "agent",
+    // Uso diário: a IA abre caso quando precisa de uma pessoa e segue
+    // atendendo enquanto espera. Escondido no hub, o caso só era visto por quem
+    // fosse procurar — medido numa loja que vende pelo WhatsApp.
+    sidebar: true,
+    contador: "casos",
   },
   {
     href: "/app/ai/inbox",

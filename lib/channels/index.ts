@@ -40,6 +40,22 @@ function atrasDaTravaDeSaida(adapter: ChannelAdapter): ChannelAdapter {
       return sendTemplate.call(adapter, input);
     };
   }
+  // Editar e apagar uma mensagem já entregue também mexem no WhatsApp do
+  // cliente: são saída, e ficam atrás da mesma trava que o envio.
+  const editMessage = adapter.editMessage;
+  if (editMessage) {
+    travado.editMessage = async (input) => {
+      exigirEnvioDeConversaLigado();
+      return editMessage.call(adapter, input);
+    };
+  }
+  const revokeMessage = adapter.revokeMessage;
+  if (revokeMessage) {
+    travado.revokeMessage = async (input) => {
+      exigirEnvioDeConversaLigado();
+      return revokeMessage.call(adapter, input);
+    };
+  }
   return travado;
 }
 

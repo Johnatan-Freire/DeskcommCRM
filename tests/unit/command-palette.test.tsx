@@ -97,4 +97,26 @@ describe("CommandPalette", () => {
     expect(screen.queryAllByRole("option")).toHaveLength(0);
     expect(screen.getByText(/Nada encontrado/i)).toBeTruthy();
   });
+
+  it("permite filtrar por categorias através dos botões", async () => {
+    const user = userEvent.setup();
+    abrir();
+    const btnAtendimento = screen.getByRole("button", { name: /Atendimento/i });
+    expect(btnAtendimento).toBeTruthy();
+    await user.click(btnAtendimento);
+    // Ao filtrar por Atendimento, itens de CRM ou Funcionários não devem aparecer
+    expect(screen.getByRole("option", { name: /Inbox/ })).toBeTruthy();
+    expect(screen.queryByRole("option", { name: /Contatos/ })).toBeNull();
+  });
+
+  it("no catálogo, abre em Atendimento e a seta segue a ordem da tela", async () => {
+    const user = userEvent.setup();
+    abrir();
+    // O catálogo começa por Prospecção (CRM): agrupar pela 1ª aparição punha
+    // CRM no topo, e a seta andava pela lista plana, pulando de seção.
+    const opcoes = screen.getAllByRole("option");
+    expect(opcoes[0]?.getAttribute("data-href")).toBe("/app/inbox");
+    await user.keyboard("{ArrowDown}{Enter}");
+    expect(push).toHaveBeenCalledWith(opcoes[1]?.getAttribute("data-href"));
+  });
 });

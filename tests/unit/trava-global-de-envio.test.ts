@@ -231,6 +231,24 @@ describe("getAdapter — send/sendTemplate de TODO provider lançam com a trava 
     expect(espiaoCru).toHaveBeenCalledTimes(1);
   });
 
+  it.each(PROVIDERS_DE_MENSAGEM)("%s: editar e apagar mensagem entregue também ficam atrás da trava", async (provider) => {
+    travaFechada();
+    const fio = espiarFio();
+    const adapter = getAdapter(provider);
+    const cru = Object.getPrototypeOf(adapter) as { editMessage?: (...a: unknown[]) => unknown; revokeMessage?: (...a: unknown[]) => unknown };
+    const espioes = (["editMessage", "revokeMessage"] as const)
+      .filter((m) => typeof cru[m] === "function")
+      .map((m) => vi.spyOn(cru as Record<string, (...a: unknown[]) => unknown>, m));
+    if (adapter.editMessage) {
+      await expect(adapter.editMessage({ text: "novo" } as never)).rejects.toBeInstanceOf(EnvioDeSaidaDesligadoError);
+    }
+    if (adapter.revokeMessage) {
+      await expect(adapter.revokeMessage({} as never)).rejects.toBeInstanceOf(EnvioDeSaidaDesligadoError);
+    }
+    for (const e of espioes) expect(e).not.toHaveBeenCalled();
+    expect(fio).not.toHaveBeenCalled();
+  });
+
   it("o resto do adapter segue intacto (codes, resolveRecipient)", () => {
     const adapter = getAdapter("waha");
     expect(adapter.codes.sendFailed).toBeTruthy();
@@ -252,13 +270,15 @@ describe("caminhos que falam com a plataforma sem o adapter", () => {
     expect(fio).not.toHaveBeenCalled();
   });
 
-  it("J · o cliente do transporte recusa texto, mídia e cartão de contato no último passo", async () => {
+  it("J · o cliente do transporte recusa texto, mídia, cartão de contato, edição e remoção no último passo", async () => {
     travaFechada();
     const fio = espiarFio();
     const client = new WahaClient(WAHA_BASE, "k");
     await expect(client.sendMessage("default", "5531@c.us", "oi")).rejects.toBeInstanceOf(EnvioDeSaidaDesligadoError);
     await expect(client.sendMedia("default", "5531@c.us", { endpoint: "/api/sendImage", payload: {} })).rejects.toBeInstanceOf(EnvioDeSaidaDesligadoError);
     await expect(client.sendContactVcard("default", "5531@c.us", [])).rejects.toBeInstanceOf(EnvioDeSaidaDesligadoError);
+    await expect(client.editMessage("default", "5531@c.us", "true_5531@c.us_ABC", "novo")).rejects.toBeInstanceOf(EnvioDeSaidaDesligadoError);
+    await expect(client.deleteMessage("default", "5531@c.us", "true_5531@c.us_ABC")).rejects.toBeInstanceOf(EnvioDeSaidaDesligadoError);
     expect(fio).not.toHaveBeenCalled();
   });
 });
@@ -337,6 +357,7 @@ describe("cerca — o mapa emissor → porta travada vale no código", () => {
       "lib/campanhas/rodada.ts", // J · campanha
       "lib/prospecting/worker.ts", // J · prospecção
       "app/api/v1/cron/agenda-reminder/route.ts", // J · lembrete de agenda
+      "app/api/v1/messages/[id]/route.ts", // K · editar/apagar mensagem enviada (upstream #1626)
     ];
     for (const f of EMISSORES) expect(ler(f), f).toMatch(PORTAS);
   });
@@ -346,7 +367,10 @@ describe("cerca — o mapa emissor → porta travada vale no código", () => {
     expect(ler("lib/channels/index.ts")).toMatch(/atrasDaTravaDeSaida\(adapter\)/);
     expect(ler("lib/channels/meta/send-template-for-session.ts")).toMatch(/exigirEnvioDeConversaLigado\(\)/);
     expect(ler("lib/agent-engine/edge/crm/session-reconciler.ts")).toMatch(/if \(!envioDeConversaLigado\(\)\)/);
-    expect(ler("lib/waha/client.ts").match(/exigirEnvioDeConversaLigado\(\)/g)?.length).toBe(3);
+    // texto, mídia, cartão de contato, edição e remoção (as duas do upstream #1626)
+    expect(ler("lib/waha/client.ts").match(/exigirEnvioDeConversaLigado\(\)/g)?.length).toBe(5);
+    // o embrulho do seam cobre editar e apagar, não só send/sendTemplate
+    expect(ler("lib/channels/index.ts").match(/exigirEnvioDeConversaLigado\(\)/g)?.length).toBe(4);
   });
 
   it("ninguém importa um adapter cru fora do próprio seam", async () => {

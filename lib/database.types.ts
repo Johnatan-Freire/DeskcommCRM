@@ -1436,6 +1436,7 @@ export type Database = {
           history_message_window: number
           history_token_window: number
           id: string
+          inbound_debounce_ms: number | null
           knowledge_source_ids: string[]
           max_steps: number
           model: string
@@ -1475,6 +1476,7 @@ export type Database = {
           history_message_window?: number
           history_token_window?: number
           id?: string
+          inbound_debounce_ms?: number | null
           knowledge_source_ids?: string[]
           max_steps?: number
           model: string
@@ -1514,6 +1516,7 @@ export type Database = {
           history_message_window?: number
           history_token_window?: number
           id?: string
+          inbound_debounce_ms?: number | null
           knowledge_source_ids?: string[]
           max_steps?: number
           model?: string
@@ -1939,6 +1942,7 @@ export type Database = {
           active_kb_version_id: string | null
           agent_id: string | null
           chunks_count: number
+          content_hash: string | null
           created_at: string
           id: string
           ingested_at: string | null
@@ -1957,6 +1961,7 @@ export type Database = {
           active_kb_version_id?: string | null
           agent_id?: string | null
           chunks_count?: number
+          content_hash?: string | null
           created_at?: string
           id?: string
           ingested_at?: string | null
@@ -1975,6 +1980,7 @@ export type Database = {
           active_kb_version_id?: string | null
           agent_id?: string | null
           chunks_count?: number
+          content_hash?: string | null
           created_at?: string
           id?: string
           ingested_at?: string | null
@@ -3569,6 +3575,10 @@ export type Database = {
           warmup_daily_caps: Json | null
           window_end_hour: number | null
           window_start_hour: number | null
+          atraso_notar_ms: number | null
+          ms_por_caractere: number | null
+          atraso_minimo_ms: number | null
+          atraso_maximo_ms: number | null
         }
         Insert: {
           allow_sunday?: boolean | null
@@ -3585,6 +3595,10 @@ export type Database = {
           warmup_daily_caps?: Json | null
           window_end_hour?: number | null
           window_start_hour?: number | null
+          atraso_notar_ms?: number | null
+          ms_por_caractere?: number | null
+          atraso_minimo_ms?: number | null
+          atraso_maximo_ms?: number | null
         }
         Update: {
           allow_sunday?: boolean | null
@@ -3601,6 +3615,10 @@ export type Database = {
           warmup_daily_caps?: Json | null
           window_end_hour?: number | null
           window_start_hour?: number | null
+          atraso_notar_ms?: number | null
+          ms_por_caractere?: number | null
+          atraso_minimo_ms?: number | null
+          atraso_maximo_ms?: number | null
         }
         Relationships: [
           {
@@ -4643,13 +4661,16 @@ export type Database = {
           external_id: string | null
           id: string
           last_activity_at: string | null
+          lost_from_stage_id: string | null
           lost_reason: string | null
+          won_reason: string | null
           organization_id: string
           owner_agent_id: string | null
           owner_kind: string | null
           owner_user_id: string | null
           pipeline_id: string
           position_in_stage: number
+          retomado_de_lead_id: string | null
           source: string
           source_metadata: Json
           stage_changed_at: string | null
@@ -4674,12 +4695,15 @@ export type Database = {
           id?: string
           last_activity_at?: string | null
           lost_reason?: string | null
+          won_reason?: string | null
           organization_id: string
           owner_agent_id?: string | null
           owner_kind?: string | null
           owner_user_id?: string | null
           pipeline_id: string
           position_in_stage?: number
+          retomado_de_lead_id?: string | null
+          lost_from_stage_id?: string | null
           source?: string
           source_metadata?: Json
           stage_changed_at?: string | null
@@ -4704,12 +4728,15 @@ export type Database = {
           id?: string
           last_activity_at?: string | null
           lost_reason?: string | null
+          won_reason?: string | null
           organization_id?: string
           owner_agent_id?: string | null
           owner_kind?: string | null
           owner_user_id?: string | null
           pipeline_id?: string
           position_in_stage?: number
+          retomado_de_lead_id?: string | null
+          lost_from_stage_id?: string | null
           source?: string
           source_metadata?: Json
           stage_changed_at?: string | null
@@ -4752,6 +4779,13 @@ export type Database = {
           {
             foreignKeyName: "crm_leads_stage_id_fkey"
             columns: ["stage_id"]
+            isOneToOne: false
+            referencedRelation: "crm_stages"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "fk_crm_leads_lost_from_stage"
+            columns: ["lost_from_stage_id"]
             isOneToOne: false
             referencedRelation: "crm_stages"
             referencedColumns: ["id"]
@@ -4836,6 +4870,7 @@ export type Database = {
           requires_human: boolean
           slug: string
           updated_at: string
+          win_probability: number | null
         }
         Insert: {
           service_policy?: string
@@ -4858,6 +4893,7 @@ export type Database = {
           requires_human?: boolean
           slug: string
           updated_at?: string
+          win_probability?: number | null
         }
         Update: {
           service_policy?: string
@@ -4880,6 +4916,7 @@ export type Database = {
           requires_human?: boolean
           slug?: string
           updated_at?: string
+          win_probability?: number | null
         }
         Relationships: [
           {
@@ -6653,6 +6690,7 @@ export type Database = {
           revoked_at: string | null
           sent_at: string
           sent_by_user_id: string | null
+          sent_on_behalf_of_user_id: string | null
           sent_via: string
           service_revision: number | null
           status: string
@@ -6691,6 +6729,7 @@ export type Database = {
           revoked_at?: string | null
           sent_at?: string
           sent_by_user_id?: string | null
+          sent_on_behalf_of_user_id?: string | null
           sent_via?: string
           service_revision?: number | null
           status?: string
@@ -6729,6 +6768,7 @@ export type Database = {
           revoked_at?: string | null
           sent_at?: string
           sent_by_user_id?: string | null
+          sent_on_behalf_of_user_id?: string | null
           sent_via?: string
           service_revision?: number | null
           status?: string

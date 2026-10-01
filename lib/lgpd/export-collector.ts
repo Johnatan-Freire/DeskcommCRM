@@ -510,6 +510,25 @@ export interface ExportPayload {
   passagens: PassagemDeAtendimentoRow[];
   avisos_de_caso: AvisoDeCasoEntregaRow[];
   /**
+   * Notas internas das conversas do titular — o texto que a equipe escreveu
+   * SOBRE ele. A cascata de anonimização redige `body`; o que se apaga a pedido
+   * dele é o que se entrega a pedido dele (Art. 18 II). Sem FK para `contacts`,
+   * o escopo sai das conversas dele. Opcional: o tipo é montado à mão nos testes.
+   */
+  conversation_notes?: Array<{
+    id: string;
+    conversation_id: string;
+    body: string;
+    created_by_name: string | null;
+    created_at: string;
+  }>;
+  /**
+   * Linhas de MÓDULOS que este fork não instala (propostas — 0464; grupos na
+   * inbox — 0482). A cascata as alcança atrás de `to_regclass`; aqui a leitura
+   * tolera a ausência da tabela. Instalado o módulo, o titular recebe as linhas.
+   */
+  modulos_opcionais?: Record<string, unknown[]>;
+  /**
    * Campanhas que falaram com o titular (migration 0375).
    *
    * Entra pelo mesmo motivo de `voice_calls`: o trigger
@@ -528,6 +547,42 @@ export interface ExportPayload {
    * se entrega a pedido dele (Art. 18 II).
    */
   campaign_suppressions: CampaignSuppressionRow[];
+  /**
+   * Memória da IA sobre o titular (#1957): `lead_notes` guarda `headline` +
+   * `body` — o nome e trechos do que a pessoa escreveu. A cascata redige os
+   * dois quando ele pede anonimização; o que se apaga a pedido dele é o que se
+   * entrega a pedido dele (Art. 18 II). Mesmo escopo da cascata: org + contato.
+   */
+  lead_notes?: Array<{
+    id: string;
+    headline: string | null;
+    body: string | null;
+    created_at: string | null;
+    updated_at: string | null;
+  }>;
+  /**
+   * Registro de execução da IA (#1957): de `ai_agent_runs.tool_calls` (jsonb)
+   * saem só o nome e os argumentos de cada ferramenta — nome do titular e
+   * trechos do que escreveu. O `result` e o texto do passo ficam de fora
+   * (podem trazer dado de OUTROS contatos; ver `toolCallsParaOTitular`).
+   * Redigido na cascata; entregue no acesso. Org + contato.
+   */
+  ai_agent_runs?: Array<{
+    id: string;
+    tool_calls: unknown;
+    created_at: string | null;
+  }>;
+  /**
+   * Estado da lead (#1957): `lead_state.next_action` (texto) e `qualification`
+   * (jsonb) descrevem o titular por máquina. Redigidos na cascata; entregues
+   * no acesso. Org + contato.
+   */
+  lead_state?: Array<{
+    id: string;
+    next_action: string | null;
+    qualification: unknown;
+    updated_at: string | null;
+  }>;
   reply_drafts?: Array<{
     id: string;
     status: string;
@@ -617,6 +672,41 @@ async function lerControlador(
     dpo_email: data.dpo_email?.trim() || dpoDaInstalacao,
     country: (data as { country?: string | null }).country ?? null,
   };
+}
+
+/**
+ * O que o titular recebe de `ai_agent_runs.tool_calls` (#1965): por passo, o
+ * nome e os argumentos de cada ferramenta — o que o agente fez com o que a
+ * pessoa escreveu. Saem o `result` de cada chamada e o `text` do passo (forma
+ * em `lib/ai/runtime/serialize.ts`): o `result` de `crm_search_contacts` traz
+ * nome, telefone e e-mail de até 50 OUTROS contatos, e o de
+ * `crm_list_appointments` a agenda da organização — entregá-los seria dar ao
+ * titular A o dado do titular B. O texto do modelo pode repetir esse resultado.
+ * Passo já redigido pela cascata (`redacted: true`, sem `args`) sai como está.
+ */
+export function toolCallsParaOTitular(toolCalls: unknown): unknown[] {
+  const passos = Array.isArray(toolCalls) ? (toolCalls as unknown[]) : [];
+  return passos.map((p) => {
+    const passo = (p ?? {}) as {
+      step?: unknown;
+      tool_name?: unknown;
+      redacted?: unknown;
+      tool_calls?: unknown;
+    };
+    const chamadas = Array.isArray(passo.tool_calls) ? (passo.tool_calls as unknown[]) : [];
+    return {
+      ...(passo.step !== undefined ? { step: passo.step } : {}),
+      ...(typeof passo.tool_name === "string" ? { tool_name: passo.tool_name } : {}),
+      ...(passo.redacted === true ? { redacted: true } : {}),
+      tool_calls: chamadas.map((c) => {
+        const chamada = (c ?? {}) as { tool_name?: unknown; args?: unknown };
+        return {
+          tool_name: typeof chamada.tool_name === "string" ? chamada.tool_name : "unknown",
+          ...(chamada.args !== undefined ? { args: chamada.args } : {}),
+        };
+      }),
+    };
+  });
 }
 
 export async function collectExportData(args: CollectArgs): Promise<ExportPayload> {
@@ -1117,6 +1207,73 @@ export async function collectExportData(args: CollectArgs): Promise<ExportPayloa
       if (!data || data.length < 500) break;
     }
   }
+  // Memória da IA, registros de execução e estado da lead — o que a cascata
+  // (#1957) redige a pedido de eliminação, e que o acesso entrega de volta.
+  //
+  // as três têm `contact_id` + `organization_id` na própria linha, então o
+  // escopo sai do mesmo `eq` que a cascata usa — sem depender de derivação
+  // por conversa ou lead. `lead_state.qualification` sai íntegro; de
+  // `ai_agent_runs.tool_calls` saem os argumentos, não o resultado das
+  // ferramentas, que pode trazer dado de outras pessoas (`toolCallsParaOTitular`).
+  const lead_notes: NonNullable<ExportPayload["lead_notes"]> = [];
+  const ai_agent_runs: NonNullable<ExportPayload["ai_agent_runs"]> = [];
+  const lead_state: NonNullable<ExportPayload["lead_state"]> = [];
+  if (contactId) {
+    // A tabela entra por `.from("<nome>")` literal em quem chama, não por
+    // parâmetro: `tests/unit/lgpd-exporta-o-que-redige.test.ts` só reconhece a
+    // tabela exportada pelo literal, e um `.from(tabela)` a deixava invisível.
+    const lePaginado = async (
+      pagina: (
+        de: number,
+        ate: number,
+      ) => PromiseLike<{ data: unknown[] | null; error: unknown }>,
+    ): Promise<Record<string, unknown>[]> => {
+      const linhas: Record<string, unknown>[] = [];
+      for (let offset = 0; ; offset += 500) {
+        const { data, error } = await pagina(offset, offset + 499);
+        if (error) throw error;
+        linhas.push(...((data ?? []) as unknown as Record<string, unknown>[]));
+        if (!data || data.length < 500) break;
+      }
+      return linhas;
+    };
+    for (const nota of await lePaginado((de, ate) =>
+      admin
+        .from("lead_notes")
+        .select("id, headline, body, created_at, updated_at")
+        .eq("organization_id", organizationId)
+        .eq("contact_id", contactId)
+        .order("id")
+        .range(de, ate),
+    )) {
+      lead_notes.push(nota as NonNullable<ExportPayload["lead_notes"]>[number]);
+    }
+    for (const run of await lePaginado((de, ate) =>
+      admin
+        .from("ai_agent_runs")
+        .select("id, tool_calls, created_at")
+        .eq("organization_id", organizationId)
+        .eq("contact_id", contactId)
+        .order("id")
+        .range(de, ate),
+    )) {
+      ai_agent_runs.push({
+        ...(run as NonNullable<ExportPayload["ai_agent_runs"]>[number]),
+        tool_calls: toolCallsParaOTitular(run.tool_calls),
+      });
+    }
+    for (const estado of await lePaginado((de, ate) =>
+      admin
+        .from("lead_state")
+        .select("id, next_action, qualification, updated_at")
+        .eq("organization_id", organizationId)
+        .eq("contact_id", contactId)
+        .order("id")
+        .range(de, ate),
+    )) {
+      lead_state.push(estado as NonNullable<ExportPayload["lead_state"]>[number]);
+    }
+  }
   // Casos, linha do tempo do caso e demandas — o que a 0280 pôs na cascata.
   //
   // O escopo do CASO é a CONVERSA do titular: `agent_cases` não tem FK para
@@ -1130,6 +1287,8 @@ export async function collectExportData(args: CollectArgs): Promise<ExportPayloa
   const case_chat_messages: CaseChatMessageRow[] = [];
   const passagens: PassagemDeAtendimentoRow[] = [];
   const avisos_de_caso: AvisoDeCasoEntregaRow[] = [];
+  const conversation_notes: NonNullable<ExportPayload["conversation_notes"]> = [];
+  const modulos_opcionais: Record<string, unknown[]> = {};
   if (contactId) {
     const pageSize = 500;
     const refBatchSize = 100; // Mantém o filtro IN abaixo dos limites de URL dos proxies.
@@ -1171,6 +1330,23 @@ export async function collectExportData(args: CollectArgs): Promise<ExportPayloa
           break;
         }
         cases.push(...(data ?? []));
+        if (!data || data.length < pageSize) break;
+      }
+    }
+    // As NOTAS INTERNAS das conversas do titular: `conversation_notes` não tem FK
+    // para `contacts`, então o escopo sai dos ids das conversas dele. A cascata
+    // redige `body`; sem este bloco o Art. 18 II omitiria o que a equipe anotou.
+    for (let batch = 0; batch < conversationIds.length; batch += refBatchSize) {
+      for (let offset = 0; ; offset += pageSize) {
+        const { data, error } = await admin
+          .from("conversation_notes")
+          .select("id, conversation_id, body, created_by_name, created_at")
+          .eq("organization_id", organizationId)
+          .in("conversation_id", conversationIds.slice(batch, batch + refBatchSize))
+          .order("id")
+          .range(offset, offset + pageSize - 1);
+        if (error) throw error;
+        conversation_notes.push(...(data ?? []));
         if (!data || data.length < pageSize) break;
       }
     }
@@ -1380,6 +1556,56 @@ export async function collectExportData(args: CollectArgs): Promise<ExportPayloa
     }
   }
 
+  // Módulos que esta instalação pode não ter (propostas, grupos na inbox). A
+  // cascata os alcança atrás de `to_regclass`; aqui a ausência da tabela vira
+  // aviso no log, e a presença vira linha no relatório do titular.
+  if (contactId) {
+    const leituras = [
+      {
+        tabela: "crm_proposals",
+        consulta: () =>
+          admin
+            .from("crm_proposals")
+            .select("id, numero, ano, titulo, status, destinatario_nome, resumo_comercial, created_at")
+            .eq("organization_id", organizationId)
+            .eq("contact_id", contactId)
+            .limit(500),
+      },
+      {
+        tabela: "channel_session_groups",
+        consulta: () =>
+          admin
+            .from("channel_session_groups")
+            .select("id, group_chat_id, subject, created_at")
+            .eq("organization_id", organizationId)
+            .eq("contact_id", contactId)
+            .limit(500),
+      },
+    ];
+    for (const { tabela, consulta } of leituras) {
+      // Módulo ausente pode voltar como `error` (PostgREST) ou como exceção
+      // (cliente direto ao banco): os dois caminhos viram aviso, nunca falha do export.
+      let resultado: { data: unknown[] | null; error: { message: string } | null };
+      try {
+        resultado = await consulta();
+      } catch (err) {
+        resultado = { data: null, error: { message: err instanceof Error ? err.message : String(err) } };
+      }
+      const { data, error } = resultado;
+      // Módulo não instalado é o estado NORMAL desta instalação: sem aviso.
+      if (error && /does not exist|PGRST205|Could not find the table/i.test(error.message)) continue;
+      if (error) {
+        logger.warn("[lgpd-export-worker] módulo opcional ausente ou ilegível", {
+          request_id: requestId,
+          tabela,
+          error: error.message,
+        });
+        continue;
+      }
+      if (data && data.length > 0) modulos_opcionais[tabela] = data;
+    }
+  }
+
   const perfil = perfilDoPais(controlador.country);
 
   return {
@@ -1423,6 +1649,11 @@ export async function collectExportData(args: CollectArgs): Promise<ExportPayloa
     avisos_de_caso,
     campaign_recipients,
     campaign_suppressions,
+    lead_notes,
+    ai_agent_runs,
+    lead_state,
+    conversation_notes,
+    modulos_opcionais,
   };
 }
 
@@ -1467,5 +1698,8 @@ function emptyPayload(
     avisos_de_caso: [],
     campaign_recipients: [],
     campaign_suppressions: [],
+    lead_notes: [],
+    ai_agent_runs: [],
+    lead_state: [],
   };
 }

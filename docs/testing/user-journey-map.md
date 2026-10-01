@@ -65,6 +65,7 @@ fonte só (`lib/onboarding/passos.ts`) — eram três listas que discordavam. Ga
 | J1.33 | A verificação em duas etapas deixa de ser imposta | MEDIDO percorrendo o wizard: "Começar a usar" entregava o dono num bloqueador de tela cheia pedindo um aplicativo autenticador — um sétimo passo que a barra de progresso nunca anunciou, e que TODA instalação self-host recebia, porque o `install.sh` cria o dono como platform admin. Agora é escolha: `platform_admins.mfa_required` (que existia e **nunca era lido** — controle decorativo) e `organizations.settings.security.mfa_required`, ambos com padrão não-exigir · **PASS** (`tests/e2e/mfa-opcional.spec.ts`, `lib/auth/politica-mfa.test.ts`) |
 | J1.34 | Ligar e desligar a verificação, pela tela | o único ponto de cadastro do produto era o próprio bloqueador — sem um botão em Configurações › Segurança, tornar o cadastro opcional deixaria a proteção INALCANÇÁVEL. E desligar não existia em lugar nenhum: `enrollMfa` só apaga fator não verificado. Desligar o próprio fator exige sessão `aal2`, senão uma sessão roubada desliga a proteção com um clique · **PASS** (`tests/e2e/mfa-opcional.spec.ts`) |
 | J1.35 | Cadastrar e PROVAR são perguntas diferentes | `mfaEmDivida()` começava consultando a política, então quem ativasse a verificação por vontade própria teria o fator ignorado na sessão — o mesmo que não ter. Com o cadastro opcional isso viraria o buraco central da mudança. Agora quem TEM fator prova, sempre, qualquer que seja o papel · **PASS** (`tests/unit/require-role-mfa.test.ts` — o caso do manager INVERTEU, e a inversão aperta) |
+| J1.36 | A prova de crédito não reprova chave boa por causa do modelo de raciocínio | MEDIDO numa instalação fresca (2026-09-26, `baseline.sql` + `bootstrap-owner.ts`) com chave OpenAI válida e **com crédito**: o modelo curado padrão gasta o único token pensando e a API responde 400 "max_tokens or model output limit was reached" — que é a prova DANDO CERTO, porque chave recusada é 401 e modelo inexistente é 404. Lido como falha, a tela dizia que o teste não passou, com o **corpo cru do provedor** e a sugestão falsa de falta de crédito (a publicação do atendente não depende desta prova: ela exige WhatsApp conectado, `first-publication.ts:114`). Agora esse 400 conta como sucesso, e a tela diz em português o que fazer, por balde de erro · **PASS** (`lib/instalacao/prova-de-credito.test.ts`); a prova pela TELA não foi feita — exigiria chave real de um modelo de raciocínio, e é o que falta para fechar o caso. Evidência do #1697 (mesmo classificador, superado por este): `provarSaldo("openai", <chave real>, "gpt-5.6-terra")` → `{ ok: true }`, e a tela numa instalação fresca mostrou "Testei agora: a chave respondeu e tem crédito." — o caminho de SUCESSO; as frases novas de falha seguem sem prova em tela |
 
 > **Cobertura em camadas (J1.22/J1.23):** a decisão de *não provisionar* é provada por unitário, porque é uma função pura e roda no gate obrigatório. O caso de tela cobre o caminho visível (CTA → signup com o token → campos certos). O que **não** está coberto ponta a ponta é a volta do link de confirmação de e-mail: exigiria caixa de e-mail no e2e, e a spec que faria isso é a de instalação fresca, que está fora do CI.
 
@@ -180,6 +181,30 @@ fonte só (`lib/onboarding/passos.ts`) — eram três listas que discordavam. Ga
 | J5.13 | Admin **reenvia** um convite | `POST /api/v1/team/invites/[id]/resend` re-assina o mesmo `invite_id`, renova 24h, audita `member.invited`; reconvidar o mesmo e-mail pendente pela tela de convite RENOVA a linha (índice único parcial) |
 | J5.14 | Manager vê a lista, mas não as ações | leitura é `team_invites_select` (manager+); reenviar/revogar são admin-only (403) |
 
+### J5.15 `[P0]` — Convite SMTP em Docker com hostname curto
+
+Falha observada na release 1.48.0: conexão e autenticação SMTP passavam, mas seis
+convites aceitos pelo servidor foram classificados como `filtered` pelo router
+HostGator `fightspamHG`. O Nodemailer, sem `name` explícito e com hostname Docker
+curto, usava EHLO `[127.0.0.1]`. `email_dispatched=true` atesta aceitação SMTP,
+não entrega na caixa de entrada.
+
+Correção: `lib/email/smtp.ts` identifica envio e verificação com o hostname de
+`env.NEXT_PUBLIC_APP_URL`, já configurado pelo instalador. A opção é lida do
+ambiente validado em runtime; não exige novo campo nem ajuste de compose.
+`tests/unit/smtp-identifica-a-instalacao.test.ts` usa Nodemailer real e receptor
+TCP local: mede EHLO, envio de mensagem, verificação sem envio, URL com porta/caminho,
+literais IPv4/IPv6, fallback local, cache e ausência de configuração.
+
+**Evidência externa em 25/09/2026:** teste controlado com FQDN recebeu `success` no
+rastreamento do provedor e confirmação de recebimento pelo destinatário. Após o
+workaround equivalente de hostname no contêiner da instalação, quatro convites
+reenviados pelo endpoint oficial tiveram `success` no gateway. Isso valida o
+mecanismo; o patch de código deste PR foi exercitado no receptor local. **Não medido:**
+entrega desses quatro convites nas caixas finais, todos os provedores e uma nova
+jornada Playwright em instalação fresca. Nenhum endereço ou token real é necessário
+para reproduzir o teste local.
+
 ## J6 — Webhooks: receber, automatizar, provar `[P0]`
 
 | # | Caso | Expectativa |
@@ -276,7 +301,13 @@ Provado por sabotagem em `evidence/handoff-avisa-antes/sabotagem-ordem-invertida
 
 Guardas: `tests/invariants/handoff-avisa-o-lead.test.ts` (turno real contra
 Postgres do baseline), `tests/unit/handoff-avisa-o-lead.test.ts` (varredura AST
-dos dois motores) e `tests/unit/aviso-ao-lead.test.ts` (o texto).
+dos dois motores), `tests/unit/aviso-ao-lead.test.ts` (o texto) e
+`tests/unit/aviso-so-quando-a-ia-falou.test.ts` (as duas guardas do lado do CRM:
+sem fala prévia da IA na conversa o aviso não sai — numa instalação real, o
+sentimento disparou a passagem numa organização sem agente publicado e o cliente
+recebeu "já acionei o time" do nada; a exceção é a passagem pedida por agente
+externo via MCP, cujas falas são gravadas como `system` —, e no máximo um aviso
+por conversa a cada 24 h, contado no banco, sem contar aviso `failed`).
 
 ---
 
@@ -446,6 +477,7 @@ ao cliente dele, e a tela de acesso é a primeira coisa que qualquer usuário v�
 | J10.6 | O instalador pergunta a cor da marca | `APP_ACCENT_HEX` no `install.sh`, com validação — o revendedor não recebe o verde do produto | PASS (`tests/shell/`) |
 | J10.7 | Nome com apóstrofo (`Sant'Ana Odontologia`) | o `.env` sobrevive: 18/18 nos três consumidores de compose | PASS |
 | J10.8 | Cor escura de marca não quebra o contraste | o anel de foco respeita o piso de 3:1 em ambos os temas | PASS (unit) |
+| J10.9 | Dois logos, um por tema, com remoção independente | arte escura sem moldura na prévia, menu e login; remover apenas a escura preserva o padrão com a proteção anterior | `tests/e2e/logo-moldura-no-tema-escuro.spec.ts`, caso (7); ver evidência da execução no PR |
 
 **Bug de produto achado ao executar (2026-08-14), e é o que justifica esta jornada
 existir.** O caso J10.1 reprovou no CI, e não por defeito do teste: quem sobe o
@@ -1581,6 +1613,24 @@ grampeado no `clientHeight`, então "excesso 0" e "sobra 200px" dão o MESMO nú
 Quem quiser saber quanta folga restou tem de medir o `bottom` do último filho
 contra a caixa de conteúdo da `<nav>` — foi assim que os 19px saíram.
 
+## Os contadores do menu: Casos e a Fila (2026-09-27)
+
+Origem: numa loja que vende pelo WhatsApp, a IA abriu um caso e passou duas
+conversas para a equipe numa manhã, e o dono só soube abrindo cada tela e
+procurando. «Casos» sobe para o menu da IA com o número de casos em
+`awaiting_human`, e «Inbox» ganha o número da aba Fila. Para o menu seguir
+cabendo em 1280×900 — a folga medida acima é de 19px, menos de uma linha —,
+«Roteadores» sai do menu no mesmo passo e fica no hub «Ver tudo em IA».
+
+| caso | prioridade | estado |
+|---|---|---|
+| O número de Casos é o da lista de Casos (itens «Aguardando você»), sobe com um caso novo e desce quando ele fecha | `[P1]` | **PASS** (2026-09-27), `tests/e2e/contadores-do-menu.spec.ts` — semeia o próprio caso. Medido: 1 → 2 com o caso, de volta a 1 ao fechar. Evidência: `evidence/contadores-no-menu/01-casos-com-contador.png`, `evidence/contadores-no-menu/02-casos-depois-de-fechar.png` e `evidence/contadores-no-menu/medidas-casos.json` |
+| O número de Inbox é o da aba Fila e desce quando a conversa sai dela | `[P1]` | **PASS** (2026-09-27), mesma spec: 3 na aba e no menu, 2 depois. Evidência: `evidence/contadores-no-menu/03-inbox-com-contador-da-fila.png`, `evidence/contadores-no-menu/04-inbox-depois-de-sair-da-fila.png` e `evidence/contadores-no-menu/medidas-fila.json` |
+| Zero não desenha nada | `[P1]` | `tests/unit/contador-de-casos.test.tsx` e `tests/unit/contador-da-fila.test.tsx`; na spec, quando a organização fica sem pendência |
+| O selo mora dentro do item e não quebra a linha | `[P1]` | **PASS**, medido por `getBoundingClientRect` na spec: selo contido no item, altura do item **28px** = a do vizinho sem selo |
+| O menu continua cabendo em 900px com Casos no lugar de Roteadores | `[P1]` | **PASS**, `tests/e2e/navegacao.spec.ts` (o caso da dobra); a folga medida pela spec nova segue **19px**, sem rolar |
+| Roteadores continua tendo porta (DoD 14) | `[P1]` | `tests/unit/navegacao-completude.test.ts` e o hub «Ver tudo em IA» |
+
 ## O inbox em tempo real — o defeito que veio de fora (2026-08-24)
 
 **Sintoma relatado pelo dono:** *"Recebemos mensagem e só reflete no inbox (na
@@ -2706,8 +2756,7 @@ mensagens e notas por timestamp e o auto-scroll traz o fim para a viewport — e
 passagem CALA a IA, ela é quase sempre o último evento quando a pessoa chega.
 
 **Achado desta onda, e não é do produto:** `docs/architecture/escalacao-ciclo-humano.architecture.json`
-estava na `main` da branch **com marcadores de conflito de merge commitados** (`<<<<<<< HEAD`
-nas linhas 422 e 910, do merge `f7523adc5`). O arquivo não era JSON válido e
+estava na `main` da branch **com marcadores de conflito de merge commitados** (`nas linhas 422 e 910, do merge `f7523adc5`). O arquivo não era JSON válido e
 `tests/unit/mapas-de-arquitetura.test.ts` estava **vermelho em 5 casos** desde então.
 Resolvido pela UNIÃO dos dois lados, com as arestas do lado `feat/casos-vivos` renumeradas
 (`e75`–`e83` → `e81`–`e89`) porque os ids colidiam. 121/121 depois.
@@ -2854,3 +2903,122 @@ que dirige o browser resolviam `E2E_PORT` para valores **diferentes** — servid
 `page.goto` em outra, e `ERR_CONNECTION_REFUSED` com um servidor saudável no ar. O CI nunca
 pisou nisso porque o gerador não escreve `E2E_PORT`; quem monta bancada em porta própria,
 sim. Consertado pela ordem: publicar primeiro, decidir a porta depois.
+
+
+## Avisos que pedem gente — a etapa que avisa na Central `[P1]` (2026-09-27)
+
+Migration 0440. Spec: `tests/e2e/etapa-avisa-na-central.spec.ts` (job e2e, parte 2). Organização, administrador, funil e negócio criados pela service role no Supabase local; o movimento do card pela rota do quadro com a sessão do usuário; o dreno do `event_log` chamado pela rota do cron.
+
+| Caso | Esperado |
+|---|---|
+| AV.1 | Em Configurações › Funis, cada etapa mostra «Avisar a equipe na Central quando um negócio entrar aqui», desligada |
+| AV.2 | Ligar a chave numa etapa grava só ela: recarregar a tela mostra a mesma coisa, e a etapa vizinha segue desligada |
+| AV.3 | O negócio que entra na etapa marcada abre na Central «Negócio entrou em «<etapa>»», sem o nome do cliente |
+| AV.4 | O negócio que entra numa etapa SEM a marca não abre aviso |
+| AV.5 | «Abrir negócio» leva ao negócio dentro do funil (`/app/pipelines/<funil>?lead=<id>`) |
+
+**NÃO coberto por esta spec:** o movimento pelo assistente de IA (o mesmo evento `lead.stage_changed`, emitido por `agent-stage-sync.ts`) e o arrasto do card com o mouse — os dois têm spec própria e chegam ao mesmo handler.
+
+Evidência: `evidence/etapa-avisa-na-central/01-chave-ligada-na-etapa.png` (a chave ligada na etapa), `evidence/etapa-avisa-na-central/02-aviso-na-central.png` (o aviso na Central, sem o nome do cliente) e `evidence/etapa-avisa-na-central/03-abrir-negocio.png` (o negócio aberto pelo botão).
+
+### Os sons dos avisos `[P1]` (2026-09-27)
+
+Migration 0441. Spec: `tests/e2e/sons-dos-avisos.spec.ts` (job e2e, parte 1). O som é medido trocando, antes de a página carregar, `HTMLMediaElement.prototype.play` e `AudioContext.prototype.createOscillator` por versões que anotam a chamada — a decisão de tocar, qual som e quando são do produto.
+
+| Caso | Esperado |
+|---|---|
+| AV.6 | A gestora vê «Sons dos avisos» em Configurações › Notificações, com «Etapa que avisa» e «Precisa de uma pessoa» no som do sistema |
+| AV.7 | Um arquivo de texto com nome `.mp3` é recusado («O som precisa ser MP3, OGG ou WAV.») e nada muda no banco |
+| AV.8 | Um WAV entra: a tela diz «Som personalizado», o caminho fica em `settings.sons_de_aviso` sob a pasta da organização e o arquivo está no bucket `org-sounds` |
+| AV.9 | «Usar o do sistema» tira a chave e apaga o arquivo |
+| AV.10 | A visualizadora vê o som que vale e o botão «Ouvir», mas não vê «Trocar som» nem «Usar o do sistema» |
+| AV.11 | Com o site aberto, o aviso antigo não toca; a passagem NOVA toca o arquivo da organização (URL assinada); a etapa que avisa NOVA, sem arquivo, toca o bipe do produto |
+
+**NÃO coberto por esta spec:** o som saindo de um alto-falante de verdade, e o navegador que recusa áudio antes de a pessoa interagir (o hook cai no bipe e, se nem isso, o aviso segue visível).
+
+Evidência: `evidence/sons-dos-avisos/01-som-personalizado.png` (a gestora com o som escolhido para «Precisa de uma pessoa») e `evidence/sons-dos-avisos/02-visualizadora.png` (a visualizadora, sem o botão de trocar).
+
+### O push dos avisos no celular `[P1]` (2026-09-27)
+
+Migration 0442. **Sem spec de tela, e é declarado:** o que muda é o que chega a um celular com o CRM fechado, e o CI não tem aparelho nem serviço de push de navegador. A regra (quais avisos, texto no idioma da organização, sem dado do cliente, destino da Central) está em `tests/unit/push-dos-avisos.test.ts`; o anúncio do aviso no barramento, contra Postgres, em `tests/invariants/aviso-da-central-no-barramento.test.ts`.
+
+**NÃO coberto:** a notificação aparecendo num celular de verdade (Android/iPhone), com o par VAPID configurado.
+
+### Continuação de conversões: links nomeados (27/09/2026)
+
+- [P1] Configurações → Conversões → Links rastreáveis: criar, recarregar, editar/desativar, copiar link/script e verificar instalação.
+- Unidade: `tests/unit/links-rastreaveis.test.ts`, `tests/unit/links-rastreaveis-action.test.ts`, `tests/unit/script-do-site.test.ts` cobrem captura, fallback, tenant, MFA e compatibilidade.
+- Banco: `tests/invariants/links-rastreaveis-isolados.test.ts` cobre ACL e FK composta; execução local pendente por ausência de Docker.
+- Prova visual em ambiente fresco e envio real ao Google/Meta ainda pendentes; unitários não substituem estes aceites.
+
+## J34 — Achar uma mensagem dentro da conversa aberta `[P1]` (2026-09-27)
+
+Busca nas mensagens já carregadas (#1795, extraída do #1793 de @gustavorodcruz96).
+Spec: `tests/e2e/busca-na-conversa.spec.ts` (job e2e, parte 3; seed próprio: um
+canal e duas conversas, a B também contém o termo para o "não vaza" não passar por
+falta do que marcar). Evidência: `evidence/busca-na-conversa/` (gerada no job;
+o CI só publica artefato em falha). Medido no run 36309605444, parte 3, head
+`5ece7265f`: `✓ busca-na-conversa.spec.ts (8.8s)`, parte `90 passed`.
+
+| # | Caso | Expectativa | Resultado |
+|---|------|-------------|-----------|
+| J34.1 | A lupa não faz a barra de ações quebrar | `aria-expanded="false"`; fileiras da barra com a lupa = sem ela (1280px, `getBoundingClientRect`, filhos sem caixa fora da conta) | PASS — a lupa não acrescenta fileira: 2 com ela e 2 sem ela (contrafactual `display:none`); a barra já quebrava em 2 nesse estado (Arquivar desce) |
+| J34.2 | Clicar abre o campo com o foco | `searchbox` "Buscar nas mensagens carregadas" focado | PASS |
+| J34.3 | Termo em 2 de 4 mensagens (uma em maiúsculas) | contador "Resultados nas mensagens carregadas: 2"; as 2 bolhas com o anel no `box-shadow` COMPUTADO (`0 0 0 4px`, cor ≠ fundo), uma enviada e uma recebida; as outras 2 sem anel | PASS — anel `rgb(28, 26, 22) 0 0 0 4px` sobre recebida `rgb(245, 243, 238)` e enviada `rgb(80, 109, 72)`; sem anel nas outras |
+| J34.4 | Esc fecha | campo, contador e marcas somem; o foco volta à lupa | PASS |
+| J34.5 | Trocar de conversa pela lista, sem recarregar | a conversa B (que tem o termo) abre sem campo, sem contador e sem marca; abrir a busca nela começa vazia | PASS |
+
+## J38 — Enviar e classificar a resposta: o cliente tem o prazo inteiro `[P1]` (2026-09-26)
+
+O fluxo mais natural do construtor: uma mensagem e, logo depois, o passo
+"Classificar resposta" com um prazo de espera. A tela promete que o cliente tem
+esse prazo para responder; só depois dele o fluxo segue por "Sem resposta".
+
+**Achado de origem (medido na `main` 610142d21):** o turno de classificar rodava
+segundos depois do envio, não via resposta e concluía `no_reply` sozinho — o
+fluxo saía por "Sem resposta" sem o prazo correr. Consertado em
+`lib/agent-engine/agent/followup-turn.ts`; a verificação cética do conserto
+achou três defeitos irmãos, consertados na mesma branch:
+
+1. **O desfecho sumia.** Com a saída "sem resposta" acontecendo só pela carência
+   vencida (tick do motor), o evento era `node_advanced` sem classe, e a
+   condição "Desfecho do passo anterior" (#527) lia `null` — o mesmo grafo e o
+   mesmo lead iam para `e_sim` na `main` e para `e_nao` depois do 1º conserto.
+   Agora o avanço grava `class: "no_reply"` e `ultimoDesfechoDe` o lê.
+2. **A resposta sumia quando o agente respondia primeiro.** O candidato era "a
+   última inbound depois do último outbound de QUALQUER um". Numa organização
+   com agente ativo, o agente responde na hora e o job de classificar sai no
+   tick seguinte: nenhum candidato, carência recomeçando, saída por "Sem
+   resposta" com o cliente tendo respondido. Agora é a resposta do lead ao
+   ENVIO DO FLUXO (o último outbound até o `action_sent`), pela posição no
+   histórico.
+3. **A espera parecia travamento.** O dossiê mostrava "Pediu ao agente para
+   interpretar a resposta" e mais nada por até o prazo inteiro. Agora o turno
+   que espera grava `classify_waiting`, lido como "Esperando a resposta do
+   cliente — se ele não responder até <hora>, o fluxo segue sem a resposta"; e a
+   saída pelo prazo vencido é lida como "O cliente não respondeu dentro do prazo".
+
+| # | Caso | Esperado | Resultado |
+|---|------|----------|-----------|
+| J38.1 | Sem resposta, o 1º job roda | o enrollment segue no classificar, em `waiting_reply`, com o prazo inteiro; job `done` em 1 tentativa; uma linha "Esperando a resposta do cliente" no dossiê | PASS no `test:db` (`followup-classificar-espera-a-resposta.test.ts`, catraca; `followup-classificar-ciclo-completo.test.ts`, caso D) |
+| J38.2 | A resposta chega DEPOIS do job vazio | reatividade (linha REAL de `event_log`) acorda o nó, o tick enfileira o 2º job sem forçar relógio, e ele classifica pela classe | PASS no `test:db` (ciclo completo, caso A) |
+| J38.3 | O lead responde e o AGENTE responde antes do job | a resposta do lead ao envio do fluxo é a classificada; o texto do agente não vai ao modelo | PASS no `test:db` (caso C) e em unit (`tests/unit/followup-classificar-sem-resposta.test.ts`) |
+| J38.4 | A resposta chega entre o envio e a 1ª entrada no classificar | o 1º job já classifica | PASS no `test:db` (caso E) |
+| J38.5 | Ninguém responde até o prazo vencer | o motor sai por "Sem resposta" sem chamar o modelo e grava o desfecho `no_reply` | PASS no `test:db` (caso B; controle 2 do arquivo irmão) |
+| J38.6 | Condição "Desfecho do passo anterior" depois de "Sem resposta" | `last_outcome = no_reply`; com a classe "não quer", a mesma condição vai para o outro ramo | PASS no `test:db` (ciclo completo, `describe` do #527) e em unit (`followup-desfecho-do-passo-anterior.test.ts`) |
+| J38.7 | O dossiê do enrollment pela TELA | as duas linhas novas aparecem em português | **PASS** em tela — as duas specs verdes contra `pnpm e2e:build` numa bancada fresca com as sementes do CI (26/09, `5 passed`; capturas `evidence/followup-dossie/08-classificar-sem-resposta.png` e `e2e-artifacts/followup-8.3-035-dossie-esperando-resposta.png`): "Esperando a resposta do cliente" na jornada (`followup-journey.spec.ts`, passo 6 — `awaiting_reply` injetado pelo seam `complete-turn`, dossiê aberto pela fila) e as duas frases em `followup-dossie.spec.ts` (classificar sem resposta → carência vencida pelo cron). Até rodar, a prova é a mesma `descreveEvento` que a tela chama, sobre a linha REAL do banco (caso D/B), e `lib/followup/eventos-legiveis.test.ts` |
+| J38.8 | Dois envios e dois classificar: sem resposta à 2ª oferta | o 2º classificar espera — a resposta à 1ª oferta NÃO é classificada de novo; com resposta à 2ª, é ela a lida | PASS no `test:db` (`followup-classificar-le-o-envio-mais-recente.test.ts`); sabotado `max` → `min` em `envioDoFluxoFechadoEm`, o caso sem resposta reprova (`e_nao`) |
+
+Sabotagens medidas (cada conserto desfeito, o teste fica vermelho, restaurado com
+`cp -p` e conferido com `cmp`): sem a classe no avanço, B e o desfecho reprovam
+(`e_nao` no lugar de `e_sim`); `ultimoDesfechoDe` lendo só `ai_classified`, o
+desfecho reprova; o candidato antigo, C reprova (e 3 casos em unit); a janela por
+horário em vez de posição, o caso do mesmo segundo reprova; sem o rastro, D
+reprova; o nó sem reenfileirar no despertar, A e C reprovam.
+
+**Fica declarado:** sem nenhum envio do fluxo antes do classificar (classificar
+logo depois do acionamento), vale a regra antiga — a inbound que ninguém
+respondeu; se a mensagem do fluxo saiu da janela do histórico (`historyLimit`),
+vale o horário, no segundo. Uma inbound sem texto acorda o nó, não é
+classificada, e a carência recomeça desse despertar (comportamento anterior do
+motor, não mexido aqui).

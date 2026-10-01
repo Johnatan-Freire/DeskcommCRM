@@ -54,7 +54,11 @@ A tripla é indivisível: arquivo em `supabase/migrations/`, apêndice **idempot
 `create or replace function`, `drop policy if exists` + `create policy`), linha no `MANIFEST.md`.
 O kit self-host aplica **só o baseline** — migration sem apêndice não existe para quem instalou.
 
-- `NNNN` e timestamp únicos contra `origin/main` (o hook confere; o script também). Ao renumerar,
+- `NNNN` e timestamp únicos contra a POPULAÇÃO da pergunta: a main do PRODUTO (o remoto que
+  aponta para `melgarafael/DeskcommCRM`, com qualquer nome — num fork, `origin/main` é a main do
+  fork) mais `refs/heads` e `refs/remotes`; os PRs abertos saem por fora, declarados, e quem os
+  mede é `pnpm checar:colisao-de-migration` (issue #1273). O `NNNN` sai da posição do nome
+  canônico (`^[0-9]{14}_([0-9]{4})_`), nunca de um `_NNNN_` do slug. Ao renumerar,
   troque o timestamp junto: renumerar só o `NNNN` é o que fabrica colisão de timestamp.
 - Tabela tenant-aware: `organization_id uuid not null references organizations(id) on delete cascade`,
   `enable row level security`, policy `tenant_isolation_<tabela>_all` via `fn_user_org_ids()`, e a

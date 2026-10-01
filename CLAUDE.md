@@ -144,7 +144,7 @@ DeskcommCRM é um sistema operacional de vendas open source com agentes de IA na
 - Engine NOWEB default; WEBJS apenas se precisar stickers animados / botões
 - Auth: env do WAHA recebe **hash SHA512 hex** da api key; cliente envia plaintext em `X-Api-Key`
 - Webhooks: HMAC SHA512 com `crypto.timingSafeEqual`
-- Anti-banimento: throttle 1 msg/1.2s + jitter ≤800ms. Campanha 1 msg/5s. Warm-up 7-14d. Spinning de copy. Janela 7h-22h (domingo LIBERADO por default desde 2026-08-20; a janela é knob por canal)
+- Anti-banimento: throttle 1 msg/1.2s + jitter ≤800ms. Campanha 1 msg/5s. Warm-up 7-14d. Spinning de copy. Janela de disparo 7h-22h (domingo LIBERADO por default desde 2026-08-20; a janela é knob por canal). Janela de RESPOSTA por canal (0495, `channel_knobs.resposta_*`), que herda a de disparo quando vazia — só `inbound_turn`/`case_reply_turn` a leem
 - STOP detection: a regra mora em `lib/opt-out/deteccao.ts` e é a MESMA nos dois lados —
   a ingestão (que grava `is_blocked=true`) e o runtime do agente. **Não é mais a palavra
   solta:** só bloqueia palavra ISOLADA (mensagem inteira = a palavra) ou verbo de cessação
@@ -565,8 +565,24 @@ Processo padrão (siga sempre):
 1. **Arquivo versionado** em `supabase/migrations/` com o padrão do repo: `<timestamp>_<NNNN>_<slug>.sql` (ex.: `20260706210000_0027_whatsapp_conversation_unification.sql`). `NNNN` é o próximo número sequencial — e **não** é o do último arquivo da listagem:
 
    ```bash
-   ls supabase/migrations/ | grep -oE '_[0-9]{4}_' | tr -d _ | sort -n | tail -1
+   # A POPULAÇÃO da pergunta: main do PRODUTO (o remoto que aponta para
+   # melgarafael/DeskcommCRM, com qualquer nome) + TODO PR ABERTO, inclusive de
+   # fork. O `ls` abaixo mede o DISCO, que responde uma pergunta menor.
+   pnpm checar:colisao-de-migration   # declara o que mediu e o que não mediu
    ```
+
+   Se a leitura for manual, três coisas são obrigatórias: um `git fetch` antes (a árvore em dia
+   não é a main atual), `git ls-tree` da main do PRODUTO e não `ls` do disco, e o `NNNN` tirado
+   com a **âncora do nome canônico** aplicada ao nome **sem a pasta** —
+   `sed 's#.*/##' | sed -nE 's#^[0-9]{14}_([0-9]{4})_.*#\1#p'`. O
+   `ls | grep -oE '_[0-9]{4}_'` que estava aqui pegava um `_NNNN_` do SLUG (com
+   `…_0326_relatorio_2024_anual.sql` o teto virava 2024) e media a árvore de
+   trabalho, onde a 0336 já podia estar reservada por um PR aberto (#1273).
+
+   O `checar` mede o arquivo que você **já** acrescentou: sem migration nova, ele responde
+   `OK — nenhuma migration acrescentada` e não dá número. Crie o arquivo com um número provisório
+   e rode; ou, para alocar antes, use a enumeração do que está em voo em `triagem/TRIAGEM.md`
+   (modo de falha 37). O teto é a main **mais** tudo em voo, em NNNN **e** em timestamp.
 
    O nome do arquivo começa pelo **timestamp**, e timestamp e `NNNN` podem discordar: em
    09/09/2026 o `ls | tail -1` devolvia o `_0230_` (timestamp de 07/09) enquanto o maior `NNNN`

@@ -34,7 +34,13 @@ export interface AgentVersionRow {
   can_mark_lost: boolean;
   split_messages: boolean;
   split_max_chars: number;
-  followup: { enabled: boolean; flow_pointer_ids: string[] };
+  inbound_debounce_ms: number | null;
+  followup: {
+    enabled: boolean;
+    flow_pointer_ids: string[];
+    callback_enabled?: boolean;
+    send_window?: { start: string; end: string; weekdays: number[] } | null;
+  };
   status: "draft" | "published" | "superseded" | "archived";
   published_at: string | null;
   superseded_at: string | null;

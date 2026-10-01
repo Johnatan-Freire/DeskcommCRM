@@ -35,10 +35,14 @@ export interface PublishedAgentConfig {
   handoffToolEnabled: boolean;
   splitMessages: boolean;
   splitMaxChars: number;
+  /** Janela de rajada inbound (ms) configurada na versão. `null` = usa a env. */
+  inboundDebounceMs: number | null;
   /** input multimodal (imagem/áudio/pdf) habilitado no turno (Onda 3). */
   multimodalInput: boolean;
   /** tools open_human_case/provide_case_update habilitadas no turno (spec 15). */
   casesEnabled: boolean;
+  /** JSON versionado com `followup.callback_enabled` e os fluxos normais. */
+  followup?: unknown;
   /** tool_ids do catálogo MCP habilitadas na tela (2B-tools). */
   toolIds: string[];
   /**
@@ -138,8 +142,10 @@ interface Row {
   handoff_tool_enabled: boolean;
   split_messages: boolean;
   split_max_chars: number;
+  inbound_debounce_ms: number | null;
   multimodal_input: boolean;
   cases_enabled: boolean;
+  followup: unknown;
   tool_ids: string[] | null;
   sistema_escolar_tool_ids: string[] | null;
   can_mark_won: boolean | null;
@@ -172,8 +178,10 @@ const SELECT_AGENT_CONFIG_COLUMNS = `a.operation_mode,a.paused_at,a.operation_re
             v.handoff_tool_enabled,
             v.split_messages,
             v.split_max_chars,
+            v.inbound_debounce_ms,
             v.multimodal_input,
             v.cases_enabled,
+            v.followup,
             v.tool_ids,
             v.sistema_escolar_tool_ids,
             v.can_mark_won,
@@ -232,8 +240,10 @@ function mapAgentConfigRow(r: Row): PublishedAgentConfig {
     handoffToolEnabled: r.handoff_tool_enabled,
     splitMessages: r.split_messages,
     splitMaxChars: r.split_max_chars,
+    inboundDebounceMs: r.inbound_debounce_ms ?? null,
     multimodalInput: r.multimodal_input,
     casesEnabled: r.cases_enabled,
+    followup: r.followup,
     toolIds: r.tool_ids ?? [],
     // `?? []` cobre o clone sem a 0276: sem a coluna, o agente roda sem NENHUMA
     // tool de sistema escolar em vez de quebrar a query — mesma direção segura

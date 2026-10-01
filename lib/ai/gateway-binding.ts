@@ -192,8 +192,15 @@ function idParaOProvider(provider: string, id: string): string | null {
  * binding ele custa uma consulta a `organizations`, e o id prefixado — o de
  * toda instalação padrão — resolve sem ela.
  *
- * Devolve `null` quando não há chave nenhuma para o provedor — o chamador PULA
- * com motivo claro, em vez de inventar provedor.
+ * O degrau de BAIXO é a conta SEM chave: quando a rota do provedor que a
+ * organização escolheu não acha chave no ambiente (o `anthropic` que o gatilho
+ * semeia numa instalação onde o instalador coletou `OPENAI_API_KEY`, por
+ * exemplo), o id BARE é resolvido pelo provedor do MODELO no catálogo
+ * `ai_models` — a mesma fonte que o resto do produto usa para o id BARE, e o
+ * que a própria mensagem de `LlmNotConfiguredError` já declara ("fallback de
+ * plataforma, conforme o provider do modelo"). Sem linha no catálogo, nada é
+ * adivinhado: devolve `null` e o chamador PULA com motivo claro, em vez de
+ * mandar um id para o endpoint de outro provedor.
  */
 async function padraoDaInstalacao(
   providerDaConfiguracao: () => Promise<string | null>,
@@ -204,8 +211,57 @@ async function padraoDaInstalacao(
   const id = String(padrao);
   if (id.includes("/")) return null;
   const provider = await providerDaConfiguracao();
-  if (provider === null || provider === "openrouter") return null;
-  return resolveLanguageModel(`${provider}/${id}`);
+  if (provider !== null && provider !== "openrouter") {
+    const peloProvider = resolveLanguageModel(`${provider}/${id}`);
+    if (peloProvider !== null) return peloProvider;
+  }
+
+  // A CONTA NÃO TEM CHAVE PARA ESTE ID — e a instalação tem. A rota de cima
+  // sintetiza o prefixo a partir do provedor que a ORGANIZAÇÃO escolheu (ou do
+  // `anthropic` que `fn_seed_org_llm_defaults` semeia), e quando esse provedor
+  // não tem chave no `.env` o ponto pedia silêncio com
+  // `reason: "ai_gateway_key_missing"` enquanto `OPENAI_API_KEY` estava lá — a
+  // instalação que responde pelo teste do agente e pelo "Sugerir resposta" ficava
+  // muda só no caminho que responde sozinho (issue #1181).
+  //
+  // Quem diz de QUEM é o id é o CATÁLOGO (`ai_models`), não a vontade de usar
+  // qualquer chave que exista: é a mesma fonte que serve o id BARE e o mesmo
+  // predicado que `resolveOrgLlmConfig` declara. Id que o catálogo não conhece,
+  // ou cujo provedor é exatamente o que já tentamos, segue sem resposta.
+  const provedorDoModelo = await provedorDoModeloNoCatalogo(id);
+  if (provedorDoModelo === null || provedorDoModelo === provider) return null;
+  return resolveLanguageModel(`${provedorDoModelo}/${id}`);
+}
+
+/**
+ * O provedor de um id BARE segundo o catálogo `ai_models` — `null` quando o
+ * catálogo não o conhece (id legado, catálogo ainda não sincronizado).
+ *
+ * Leitura só no degrau de baixo, que hoje termina em skip: o custo é uma
+ * consulta no caminho que, sem ela, responderia "nenhuma chave configurada".
+ * Admin client sem coluna de organização — `ai_models` é catálogo da
+ * instalação, e é assim que `definirPadraoDeIaDaOrganizacao` o lê.
+ */
+async function provedorDoModeloNoCatalogo(modelId: string): Promise<string | null> {
+  try {
+    const admin = createAdminClient();
+    const { data } = await admin
+      .from("ai_models")
+      .select("provider")
+      .eq("model_id", modelId)
+      .limit(1)
+      .maybeSingle();
+    const provider = (data as { provider?: unknown } | null)?.provider;
+    return typeof provider === "string" && provider !== "" ? provider : null;
+  } catch (erro) {
+    // Mesma regra das outras leituras do módulo: fecha a ação (o desfecho é o
+    // `null` de antes), abre a informação, e o log leva só a CLASSE do erro.
+    logger.warn("[gateway-binding] não consegui ler o provedor do modelo no catálogo", {
+      model_id: modelId,
+      erro: erro instanceof Error ? erro.name : typeof erro,
+    });
+    return null;
+  }
 }
 
 /**

@@ -43,17 +43,50 @@ type BreadcrumbLike = { message?: string; data?: Record<string, unknown> };
  * proíbe fora de `lib/channels/` (`docs/doctrine/restricao-de-canal.md`). Casar pelo
  * que torna o header sensível cobre os dois casos de uma vez.
  */
-const SENSITIVE_HEADER = /authorization|cookie|api[-_]?key|token|secret|password|credential/i;
+// Sensível é credencial OU endereço do titular: `x-forwarded-for`, `x-real-ip`,
+// `cf-connecting-ip` e afins carregam o IP de quem acessou (upstream #1746).
+const SENSITIVE_HEADER =
+  /authorization|cookie|api[-_]?key|token|secret|password|credential|forwarded|-ip\b|remote-|^via$/i;
 
 export function isSensitiveHeader(name: string): boolean {
   return SENSITIVE_HEADER.test(name);
 }
 
+/**
+ * UUID tem forma exata (8-4-4-4-12 em hexadecimal) e é identificador de
+ * depuração, não dado do titular. Ele é separado do texto ANTES dos padrões de
+ * CPF e telefone: sem isso os padrões comiam pedaço de UUID. O grupo de captura
+ * faz o `split` devolver o UUID nas posições ímpares. (Portado do upstream —
+ * commits de privacidade que acompanharam o #1746.)
+ */
+const UUID = /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i;
+
 export function scrubMessage(input: string): string {
   return input
-    .replace(/\d{3}\.?\d{3}\.?\d{3}-?\d{2}/g, "[CPF]")
-    .replace(/\+?\d{2}\s?\d{4,5}-?\d{4}/g, "[PHONE]")
-    .replace(/[\w.+-]+@[\w-]+\.[\w.-]+/g, "[EMAIL]");
+    // Chave de API no formato `apikey_<hex>_<hex>` solta no texto. PRIMEIRO,
+    // porque os padrões de CPF e telefone comeriam pedaços numéricos dela.
+    .replace(/apikey_[A-Za-z0-9_]{16,}/g, "[CHAVE]")
+    // E-mail antes dos números, para o telefone não comer dígito de dentro do
+    // endereço e deixar o resto dele passar.
+    .replace(/[\w.+-]+@[\w-]+\.[\w.-]+/g, "[EMAIL]")
+    .split(UUID)
+    .map((trecho, i) => (i % 2 === 1 ? trecho : apagarCpfETelefone(trecho)))
+    .join("");
+}
+
+function apagarCpfETelefone(trecho: string): string {
+  return trecho
+    // Telefone como se escreve no Brasil: +55 opcional, DDD opcional (com ou
+    // sem parênteses), 8 ou 9 dígitos, e hífen, ponto, espaço ou nada entre os
+    // blocos. A borda (`[^\w-]` antes, `(?![\w-])` depois) tira o padrão de
+    // dentro de hash. Os dois padrões de baixo pegam o número colado em texto.
+    .replace(
+      /(^|[^\w-])(?:\+?55\s?)?(?:\(?\d{2}\)?[-.\s]?)?(?:9[-.\s]?\d{4}|\d{4,5})[-.\s]?\d{4}(?![\w-])/g,
+      "$1[PHONE]",
+    )
+    // CPF com qualquer separador entre os blocos (ponto, espaço, hífen ou nada).
+    .replace(/\d{3}[.\s-]?\d{3}[.\s-]?\d{3}[.\s-]?\d{2}/g, "[CPF]")
+    .replace(/\+?\d{2}\s?\d{4,5}-?\d{4}/g, "[PHONE]");
 }
 
 /**

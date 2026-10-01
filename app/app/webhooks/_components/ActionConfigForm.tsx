@@ -372,6 +372,13 @@ function CallWebhookForm({
             ? t("Já existe um segredo guardado com segurança. Digitar aqui substitui; limpar remove.")
             : t("Se preencher, enviaremos uma assinatura para o outro sistema conferir que fomos nós.")}
         </p>
+        {/* O guia de quem recebe (#1529). Pelo CAMINHO, em texto, e não link:
+            numa instalação de marca própria um link para o repositório de
+            origem apareceria para o cliente do revendedor — mesmo precedente
+            do UpdatePanel, que aponta o CHANGELOG pelo nome do arquivo. */}
+        <p className="text-xs text-muted-foreground">
+          {t("Como o outro sistema confere a assinatura e reconhece reenvios: guia de integração em docs/integracao/webhooks-de-saida.md, na documentação do projeto.")}
+        </p>
       </div>
     </div>
   );

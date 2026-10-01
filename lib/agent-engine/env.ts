@@ -11,6 +11,7 @@ import {
   RETORNO_MIN_AHEAD_MS_PADRAO,
   RETORNO_STAGGER_WINDOW_MS_PADRAO,
 } from '@/lib/followup/janela';
+import { esforcoDeRaciocinioOpenAI } from '@/lib/agent-engine/edge/llm/providers';
 
 const envSchema = z.object({
   // Postgres do Supabase (connection string — Settings → Database). O motor usa
@@ -126,6 +127,11 @@ const envSchema = z.object({
   // Coalescência de rajada inbound: mensagens do MESMO contato dentro desta
   // janela viram UM job (responder em rajada é gatilho de ban). 0 = sem debounce.
   INBOUND_DEBOUNCE_MS: z.coerce.number().int().min(0).default(8_000),
+  // Resposta obsoleta: o cliente escreveu de novo enquanto o turno pensava → a
+  // resposta desatualizada não sai e o turno seguinte responde a tudo junto,
+  // enquanto a mensagem mais antiga sem resposta tiver menos que isto. 0 = desliga.
+  // Ver `respostaFicouObsoleta` (agent/turno-ja-respondido.ts).
+  RESPOSTA_OBSOLETA_TETO_MS: z.coerce.number().int().min(0).default(120_000),
   // Circuito de saúde do número — ritmo do ticker (block/response rate por número).
   NUMBER_HEALTH_INTERVAL_MS: z.coerce.number().int().positive().default(300_000),
   // Cron persistente por contato — knobs, nunca constantes.
@@ -148,6 +154,27 @@ const envSchema = z.object({
   // 'disabled' injeta o desligamento no corpo das chamadas — e SÓ nas da
   // DeepSeek (a fábrica é dela; ver providers.ts).
   DEEPSEEK_THINKING: z.enum(['provider', 'disabled']).default('provider'),
+  // Esforço de raciocínio das chamadas diretas à OpenAI (só modelos o*, gpt-5*,
+  // gpt-6*). Opcional; validado AQUI, pela mesma função que o lê em runtime, para
+  // um erro de grafia derrubar o boot com o nome da variável — e não cada turno
+  // do agente, que é onde `createDefaultRegistry` o lê.
+  OPENAI_REASONING_EFFORT: z
+    .string()
+    .optional()
+    .refine(
+      (v) => {
+        // `undefined` explícito tem de ser tratado aqui: passado à função, ele
+        // acionaria o default dela, que lê `process.env` e não o `source` do loadEnv.
+        if (v === undefined) return true;
+        try {
+          esforcoDeRaciocinioOpenAI(v);
+          return true;
+        } catch {
+          return false;
+        }
+      },
+      'use none | minimal | low | medium | high | xhigh (ou deixe vazio)',
+    ),
   // Payload curado da tool get_lead_context.
   LEAD_CONTEXT_HISTORY_LIMIT: z.coerce.number().int().positive().default(20),
   LEAD_CONTEXT_MAX_TOKENS: z.coerce.number().int().positive().default(1_000),
