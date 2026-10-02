@@ -175,8 +175,10 @@ done
 
 docker exec "$CONTAINER" psql -U postgres -d postgres -q -c "create database $TEMPLATE" >/dev/null
 
+# `PSQL_DB` escolhe o molde (padrão: o principal) — é assim que o molde do
+# projeto Supabase recente passa pelas MESMAS `aplicar_prelude`/`aplicar_baseline`.
 psql_install() {
-  docker exec -i "$CONTAINER" psql -U postgres -d "$TEMPLATE" -v ON_ERROR_STOP=1 -q -f - "$@"
+  docker exec -i "$CONTAINER" psql -U postgres -d "${PSQL_DB:-$TEMPLATE}" -v ON_ERROR_STOP=1 -q -f - "$@"
 }
 
 # Toda aplicação do baseline deixa UMA linha em `test_db.aplicacoes_do_baseline`,
@@ -195,6 +197,7 @@ SQL
 echo "==> prelude: stubs mínimos do Supabase (roles, auth.uid(), extensions)"
 # Um Postgres cru não tem os roles/schemas do Supabase que o baseline (pg_dump) supõe.
 # Criamos os stubs mínimos AQUI — nunca editar o baseline.sql pra isso.
+aplicar_prelude() {
 psql_install <<'SQL'
 do $$
 begin
@@ -358,6 +361,8 @@ create or replace function auth.uid() returns uuid
 grant usage on schema auth, extensions, storage to anon, authenticated, service_role;
 grant select on auth.users to anon, authenticated, service_role;
 SQL
+}
+aplicar_prelude
 
 echo "==> conferindo que o banco efêmero é o do PRODUTO (antes do baseline)"
 # A guarda tem de rodar AQUI e não na suíte de invariantes, e isto foi medido:
@@ -470,6 +475,76 @@ echo "==> modo UPDATE: re-aplicando baseline.sql COM ON_ERROR_STOP=1 (idempotên
 aplicar_baseline
 echo "    ✓ update ok (zero erro na re-aplicação)"
 
+# O MOLDE DE PROJETO SUPABASE RECENTE (issue do `ensure_rls`, 2026-10-02).
+#
+# Projetos criados no Supabase a partir de 2026 nascem com DUAS diferenças que um
+# Postgres cru (e os moldes acima) não tem — medidas no projeto de Estocolmo,
+# criado em 2026-10-01, contra o de Oregon, mais antigo:
+#   1. o event trigger `ensure_rls` (função `public.rls_auto_enable`), que LIGA a
+#      RLS de toda tabela criada em `public` no mesmo instante do CREATE TABLE;
+#   2. o default ACL de tabelas, sequências e funções do `postgres` sem
+#      SELECT/INSERT/UPDATE/DELETE/USAGE/EXECUTE para anon/authenticated/service_role.
+# A (1) cegava `fn_proteger_tabelas_de_organizacao`, cuja régua era "RLS
+# desligada": tabela nova nascia com RLS e SEM a policy de isolamento — bloqueada.
+# Este molde aplica o baseline (install + update, os dois com ON_ERROR_STOP=1)
+# num banco com as duas, e tests/invariants/rls-tabela-nova-com-ensure-rls.test.ts
+# cobra que ele chega ao MESMO conjunto de RLS, policies e grants do molde principal.
+# A função do event trigger é cópia literal da do Supabase (pg_get_functiondef no
+# projeto de Estocolmo), não uma aproximação.
+TEMPLATE_SUPABASE_RECENTE="inv_baseline_supabase_recente"
+echo "==> molde de projeto Supabase recente (ensure_rls + default ACL novo): $TEMPLATE_SUPABASE_RECENTE"
+docker exec "$CONTAINER" psql -U postgres -d postgres -q -c "create database $TEMPLATE_SUPABASE_RECENTE" >/dev/null
+psql_recente() {
+  docker exec -i "$CONTAINER" psql -U postgres -d "$TEMPLATE_SUPABASE_RECENTE" -v ON_ERROR_STOP=1 -q -f - "$@"
+}
+PSQL_DB="$TEMPLATE_SUPABASE_RECENTE" aplicar_prelude
+psql_recente <<'SQL'
+set client_min_messages = warning;
+-- (2) default ACL de projeto recente: o que o prelude concedeu, o projeto novo não concede
+alter default privileges for role postgres in schema public revoke select, insert, update, delete on tables from anon, authenticated, service_role;
+alter default privileges for role postgres in schema public revoke all on sequences from anon, authenticated, service_role;
+alter default privileges for role postgres in schema public revoke execute on functions from anon, authenticated, service_role;
+-- (1) o event trigger do Supabase, com a função copiada do projeto real
+CREATE OR REPLACE FUNCTION public.rls_auto_enable()
+ RETURNS event_trigger
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'pg_catalog'
+AS $function$
+DECLARE
+  cmd record;
+BEGIN
+  FOR cmd IN
+    SELECT *
+    FROM pg_event_trigger_ddl_commands()
+    WHERE command_tag IN ('CREATE TABLE', 'CREATE TABLE AS', 'SELECT INTO')
+      AND object_type IN ('table','partitioned table')
+  LOOP
+     IF cmd.schema_name IS NOT NULL AND cmd.schema_name IN ('public') AND cmd.schema_name NOT IN ('pg_catalog','information_schema') AND cmd.schema_name NOT LIKE 'pg_toast%' AND cmd.schema_name NOT LIKE 'pg_temp%' THEN
+      BEGIN
+        EXECUTE format('alter table if exists %s enable row level security', cmd.object_identity);
+        RAISE LOG 'rls_auto_enable: enabled RLS on %', cmd.object_identity;
+      EXCEPTION
+        WHEN OTHERS THEN
+          RAISE LOG 'rls_auto_enable: failed to enable RLS on %', cmd.object_identity;
+      END;
+     ELSE
+        RAISE LOG 'rls_auto_enable: skip % (either system schema or not in enforced list: %.)', cmd.object_identity, cmd.schema_name;
+     END IF;
+  END LOOP;
+END;
+$function$;
+revoke execute on function public.rls_auto_enable() from public, anon, authenticated;
+drop event trigger if exists ensure_rls;
+create event trigger ensure_rls on ddl_command_end
+  when tag in ('CREATE TABLE', 'CREATE TABLE AS', 'SELECT INTO')
+  execute function public.rls_auto_enable();
+SQL
+for passada in install update; do
+  PSQL_DB="$TEMPLATE_SUPABASE_RECENTE" aplicar_baseline
+  echo "    ✓ $passada ok no projeto recente (ON_ERROR_STOP=1)"
+done
+
 echo "==> banco \`postgres\` a partir do molde (o setupFile o recria a cada arquivo)"
 # Criar aqui, ALÉM do reset por arquivo, tem dois motivos medidos:
 #  - `docker exec … psql -d postgres` (o que se digita para depurar o container)
@@ -490,6 +565,7 @@ echo "==> invariantes: vitest (tests/invariants) — banco novo por ARQUIVO, ord
 # ficar dormente até alguém renomear um arquivo.
 TEST_DB_CONTAINER="$CONTAINER" TEST_DB_TEMPLATE="$TEMPLATE" TEST_DB_PORT="$PORT" \
   TEST_DB_TEMPLATE_UMA_APLICACAO="$TEMPLATE_UMA_APLICACAO" \
+  TEST_DB_TEMPLATE_SUPABASE_RECENTE="$TEMPLATE_SUPABASE_RECENTE" \
   vitest run --config vitest.db.config.ts --sequence.shuffle.files=true "$@"
 
 # A RECUSA. Vem depois do vitest e ANTES da palavra "verde", porque o que se
