@@ -124,7 +124,12 @@ const ACTION_MIN_ROLE: Record<string, Role> = {
   "settings.write": "admin",
   "lgpd.execute_redact": "admin",
   "audit.view": "manager",
-  "ai.automatico.view": "agent",
+  // `viewer`, e não `agent`: a aba "Fila" depende deste booleano para saber se
+  // inclui as conversas `automatico`, e o CONTADOR da fila já o calcula no
+  // servidor para todo papel. Com `agent`, o viewer via 2 conversas sob um
+  // contador de 51. A rota devolve só `{ ativo }` — nada de prompt nem modelo.
+  // Vigiado por tests/unit/viewer-fila-do-inbox-igual-ao-contador.test.tsx.
+  "ai.automatico.view": "viewer",
   "ai.inbox.view": "agent",
   "inbox.notes.view": "agent",
   // O cartão da passagem, dentro da conversa. `agent` e não `viewer` porque é o

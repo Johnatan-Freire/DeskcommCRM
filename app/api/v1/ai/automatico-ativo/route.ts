@@ -11,7 +11,7 @@
  * justamente na primeira impressão, que é P0.
  *
  * `GET /api/v1/ai/agents` responderia, mas exige `manager+` — e quem vive no
- * Inbox é o `agent`. Alargar aquela rota exporia prompt, guardrails e modelo a
+ * Inbox é o `agent` (e o `viewer`, que lê a mesma fila). Alargar aquela rota exporia prompt, guardrails e modelo a
  * quem não precisa. Esta devolve UM booleano: o mínimo que a tela precisa para
  * parar de afirmar o que não sabe.
  *
@@ -38,7 +38,9 @@ export const dynamic = "force-dynamic";
 
 export async function GET(_req: NextRequest): Promise<Response> {
   const requestId = randomUUID();
-  const authz = await requireRole("agent", { requestId, resource: "ai_agents" });
+  // `viewer`: é o fato que a aba "Fila" usa para decidir o que listar, e o contador
+  // da mesma aba já o calcula para todo papel — ver o hook `useAutomaticoAtivo`.
+  const authz = await requireRole("viewer", { requestId, resource: "ai_agents" });
   if (!authz.ok) return authz.response;
 
   const supabase = await createClient();
