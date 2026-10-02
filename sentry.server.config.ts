@@ -3,14 +3,14 @@
 // https://docs.sentry.io/platforms/javascript/guides/nextjs/
 
 import * as Sentry from "@sentry/nextjs";
-import { resolveSentryDsn, isCommunityDsn, DEFAULT_SENTRY_DSN } from "./lib/sentry/dsn";
+import { resolveSentryDsn, dsnParaOSdk, isCommunityDsn, DEFAULT_SENTRY_DSN } from "./lib/sentry/dsn";
 import { sentryScrubHooks } from "./lib/sentry/scrub";
 
 const sentryDsn = resolveSentryDsn(process.env.SENTRY_DSN);
 const community = isCommunityDsn(sentryDsn);
 
 Sentry.init({
-  dsn: sentryDsn,
+  dsn: dsnParaOSdk(sentryDsn),
 
   // No Sentry da comunidade, só erro (issue #100). Ver isCommunityDsn().
   tracesSampleRate: community ? 0 : 1,

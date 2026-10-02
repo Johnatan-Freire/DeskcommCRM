@@ -31,6 +31,19 @@ export function resolveSentryDsn(value: string | undefined | null): string | und
  * sessões de um CRM que não é nosso. Quem aponta para o próprio Sentry recebe tudo,
  * porque aí o dado não sai da infraestrutura de quem é dono dele.
  */
+/**
+ * O que entregar ao `Sentry.init` do servidor, do edge e do worker.
+ *
+ * `undefined` NÃO desliga em silêncio: o SDK do Node faz
+ * `dsn: options.dsn ?? process.env.SENTRY_DSN` e, sem DSN explícita, relê o
+ * ambiente — encontra o `off` cru e imprime `Invalid Sentry Dsn: off` a cada
+ * processo que sobe. String vazia é "sem DSN" para o SDK: nem relê o ambiente,
+ * nem tenta interpretar nada. Vigiado por `lib/sentry/dsn-off-sem-ruido.test.ts`.
+ */
+export function dsnParaOSdk(dsn: string | undefined): string {
+  return dsn ?? "";
+}
+
 export function isCommunityDsn(dsn: string | undefined): boolean {
   return dsn === DEFAULT_SENTRY_DSN;
 }
