@@ -17,6 +17,7 @@ import { Label } from "@/components/ui/label";
 import { apiClient } from "@/lib/api/client";
 import type { VisibilityMode } from "@/lib/auth/types";
 import { PRAZO_MAX_MINUTOS, PRAZO_MIN_MINUTOS } from "@/lib/escalacao/devolucao-automatica";
+import { PRAZO_PADRAO_DO_SILENCIO_MINUTOS } from "@/lib/escalacao/atendimento-manual";
 import { ROUTING_MODES, VISIBILITY_MODES, type RoutingMode } from "@/lib/schemas/routing";
 import { useT } from "@/hooks/i18n/useT";
 
@@ -29,6 +30,8 @@ export interface AtendimentoConfig {
   handoff_return_after_minutes: number | null;
   /** "A conversa fica com quem atendeu" — desligado é o padrão do produto. */
   conversation_stays_with_attendant: boolean;
+  /** Minutos de silêncio da IA após resposta pelo celular. `null` = o padrão de 60. */
+  manual_reply_silence_minutes: number | null;
 }
 
 const MODO_COPY: Record<RoutingMode, { titulo: string; corpo: string }> = {
@@ -299,6 +302,40 @@ export function AtendimentoForm({ initial }: { initial: AtendimentoConfig }) {
             </p>
           </div>
         ) : null}
+      </Card>
+
+      <Card className="space-y-4 p-4" data-testid="silencio-apos-resposta-pelo-celular">
+        <div>
+          <h2 className="text-sm font-semibold">
+            {t("Quando alguém responde pelo celular, a IA espera quanto tempo?")}
+          </h2>
+          <p className="text-xs text-muted-foreground">
+            {t(
+              "Quando alguém da equipe responde o cliente direto pelo celular, fora do sistema, o agente de IA fica calado naquela conversa por este tempo. Cada nova resposta pelo celular recomeça a contagem.",
+            )}
+          </p>
+        </div>
+        <div className="max-w-xs space-y-1">
+          <Label htmlFor="manual_reply_silence_minutes">
+            {t("Minutos de silêncio da IA depois de uma resposta pelo celular")}
+          </Label>
+          <Input
+            id="manual_reply_silence_minutes"
+            type="number"
+            min={PRAZO_MIN_MINUTOS}
+            max={PRAZO_MAX_MINUTOS}
+            value={form.manual_reply_silence_minutes ?? PRAZO_PADRAO_DO_SILENCIO_MINUTOS}
+            disabled={isPending}
+            onChange={(e) =>
+              setForm((f) => ({ ...f, manual_reply_silence_minutes: Number(e.target.value) }))
+            }
+          />
+          <p className="text-xs text-muted-foreground">
+            {t(
+              "Entre 5 minutos e 24 horas. O padrão é 60. Quem atende o dia inteiro pelo celular costuma preferir um prazo curto, como 15, para a IA voltar a responder entre um atendimento e outro.",
+            )}
+          </p>
+        </div>
       </Card>
 
       <Card className="space-y-4 p-4" data-testid="conversa-fica-com-quem-atendeu">

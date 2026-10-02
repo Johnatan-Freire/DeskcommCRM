@@ -4904,6 +4904,18 @@ export const DICIONARIO: Traducoes = {
     es: "El tiempo se cuenta desde la última actividad de una persona en la conversación: asumirla, responder desde la pantalla o desde el celular. Solo se devuelve donde hay un agente publicado. Si la opción está desactivada, rige la regla de siempre: la IA solo vuelve cuando alguien hace clic en Devolver.",
   },
   "Minutos sem resposta da equipe": { es: "Minutos sin respuesta del equipo" },
+  "Quando alguém responde pelo celular, a IA espera quanto tempo?": {
+    es: "Cuando alguien responde desde el celular, ¿cuánto tiempo espera la IA?",
+  },
+  "Quando alguém da equipe responde o cliente direto pelo celular, fora do sistema, o agente de IA fica calado naquela conversa por este tempo. Cada nova resposta pelo celular recomeça a contagem.": {
+    es: "Cuando alguien del equipo responde al cliente directamente desde el celular, fuera del sistema, el agente de IA se queda callado en esa conversación durante este tiempo. Cada nueva respuesta desde el celular reinicia la cuenta.",
+  },
+  "Minutos de silêncio da IA depois de uma resposta pelo celular": {
+    es: "Minutos de silencio de la IA después de una respuesta desde el celular",
+  },
+  "Entre 5 minutos e 24 horas. O padrão é 60. Quem atende o dia inteiro pelo celular costuma preferir um prazo curto, como 15, para a IA voltar a responder entre um atendimento e outro.": {
+    es: "Entre 5 minutos y 24 horas. El valor predeterminado es 60. Quien atiende todo el día desde el celular suele preferir un plazo corto, como 15, para que la IA vuelva a responder entre una atención y otra.",
+  },
   "Quando alguém responde, a conversa fica com essa pessoa?": {
     es: "Cuando alguien responde, ¿la conversación se queda con esa persona?",
   },
