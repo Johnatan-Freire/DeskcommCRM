@@ -36,14 +36,14 @@ import { StaleServiceBoundaryError } from "@/lib/atendimento/fronteira";
 // O `@sentry/nextjs` funciona fora do Next — aqui é só `Sentry.init` puro,
 // sem `instrumentation.ts` porque o worker não é um processo Next.
 import * as Sentry from "@sentry/nextjs";
-import { resolveSentryDsn, isCommunityDsn, DEFAULT_SENTRY_DSN } from "@/lib/sentry/dsn";
+import { resolveSentryDsn, dsnParaOSdk, isCommunityDsn, DEFAULT_SENTRY_DSN } from "@/lib/sentry/dsn";
 import { sentryScrubHooks } from "@/lib/sentry/scrub";
 
 const sentryDsn = resolveSentryDsn(process.env.SENTRY_DSN);
 const sentryCommunity = isCommunityDsn(sentryDsn);
 
 Sentry.init({
-  dsn: sentryDsn,
+  dsn: dsnParaOSdk(sentryDsn),
 
   // No Sentry da comunidade, só erro (issue #100). Ver isCommunityDsn().
   tracesSampleRate: sentryCommunity ? 0 : 1,
