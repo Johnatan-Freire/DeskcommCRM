@@ -69,6 +69,7 @@ import {
 } from './agent-config';
 import { classifyIntent, type ClassifierContextMessage } from './intent-classifier';
 import { resolverIdentidadeDoContato } from './identidade-do-contato';
+import { corpoDaMensagem, type CorpoDaMensagemRow } from '../edge/crm/get-lead-context';
 
 /**
  * Janela de contexto passada ao CLASSIFICADOR, não confundir com
@@ -362,25 +363,35 @@ export async function resolveConversationTurn(
     [input.tenantId, input.conversationId],
   );
   const signalRow = input.inbound
-    ? (await db.query<{ id: string; body: string | null }>(
-        "select id,body from messages where organization_id=$1 and conversation_id=$2 and direction='inbound' order by sent_at desc,created_at desc,id desc limit 1",
+    ? (await db.query<{ id: string } & CorpoDaMensagemRow>(
+        "select id,body,type,media_url,media_storage_path,media_derived_text from messages where organization_id=$1 and conversation_id=$2 and direction='inbound' order by sent_at desc,created_at desc,id desc limit 1",
         [input.tenantId, input.conversationId],
       )).rows[0] ?? null
     : null;
-  const signal = signalRow?.body ?? null;
+  // signal = o texto EFETIVO do turno, composto pelo mesmo caminho do agente
+  // (#617): o que o cliente digitou OU a transcrição do áudio já pronta
+  // (media_derived_status = ready ⇒ media_derived_text preenchido). Áudio SEM
+  // transcrição (sem texto digitado nem derivado) segue como `null` → regra 6.
+  const signal =
+    signalRow !== null && (signalRow.body !== null || (signalRow.media_derived_text ?? '').trim() !== '')
+      ? corpoDaMensagem(signalRow)
+      : null;
 
   // Contexto curto pro CLASSIFICADOR (regra 2 abaixo desambigua resposta
   // curta em meio a fluxo) — nunca o histórico completo. Só busca quando há
-  // signal: sem inbound (regra 6) o classificador nem roda.
+  // signal: sem inbound (regra 6) o classificador nem roda. Inclui mídia
+  // transcrita: a linha entra composta pelo corpo canônico (corpoDaMensagem).
   let recentMessages: ClassifierContextMessage[] = [];
   if (signalRow !== null && signal !== null) {
-    const { rows: contextRows } = await db.query<ClassifierContextMessage>(
-      `select direction,body from messages
-       where organization_id=$1 and conversation_id=$2 and body is not null and id<>$3
+    const { rows: contextRows } = await db.query<{ direction: 'inbound' | 'outbound' } & CorpoDaMensagemRow>(
+      `select direction,body,type,media_url,media_storage_path,media_derived_text from messages
+       where organization_id=$1 and conversation_id=$2 and (body is not null or media_derived_text is not null) and id<>$3
        order by sent_at desc,created_at desc,id desc limit $4`,
       [input.tenantId, input.conversationId, signalRow.id, CLASSIFIER_CONTEXT_MESSAGES],
     );
-    recentMessages = contextRows.reverse();
+    recentMessages = contextRows
+      .map((r) => ({ direction: r.direction, body: corpoDaMensagem(r) }))
+      .reverse();
   }
 
   const resolvido = await resolveTurnAgent(db, llmCfg, {
