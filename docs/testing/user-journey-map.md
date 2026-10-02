@@ -226,6 +226,12 @@ para reproduzir o teste local.
 | J6.14 | **Formulário com campos que o mapeamento não reconhece** | a captação aparece como **Não entrou**, com o motivo em português e os campos crus — antes o site recebia 400 e não sobrava rastro nenhum na tela |
 | J6.15 | `viewer` tenta abrir o histórico | redirecionado; a RLS de `webhook_lead_captures` exige `manager` (o formulário é PII) |
 | J6.16 | Ação **"Mensagem escrita pela IA"** no ENTÃO | pede agente publicado + número + o contexto do que fazer com os dados; o agente sabe que é abordagem pós-formulário |
+| J6.17 | **Formulário do Elementor Pro** (ação "Webhook", `fields[id][value]`) | o lead ENTRA com nome, telefone e e-mail — antes o webhook respondia 400 "Nenhum campo mapeável" e nenhum lead nascia (achado de 2026-09-30, com envio real). **Unit verde** (`lib/webhooks/elementor.test.ts`, com sabotagem); **NÃO provado pela tela nem pela rota com banco** — sem Docker na sessão que escreveu |
+| J6.18 | **JetFormBuilder**, envio REAL (página publicada) | o lead entra sem `__refer`/`__form_id`/`__is_ajax` no card. **Medido em envio real** que name/phone/email já eram reconhecidos; o lixo interno só some com a mudança. Na PRÉVIA do editor o JetFormBuilder manda só os campos internos e a captação aparece "Não entrou" — é o comportamento dele, não defeito do CRM |
+| J6.19 | Painel da captação, campo **já cadastrado** no funil | a linha mostra o rótulo do funil, não a chave crua. Unit com RTL (`CapturaDetail.test.tsx`); **tela real NÃO executada** |
+| J6.20 | Painel da captação, campo **novo** → "Cadastrar como campo do lead" | grava o que já existia MAIS o campo, a partir da leitura fresca do funil; some o botão para nome que a API recusaria. Unit com RTL; **tela real NÃO executada** |
+| J6.21 | `{{servico}}` numa mensagem de automação | resolve o campo do lead; `{{nome}}` e o caminho longo seguem iguais. Unit (`template.test.ts`) |
+| J6.22 | Ação "Mensagem escrita pela IA" com campo cadastrado | a IA recebe "Serviço que precisa: …" em vez de `servico: …`. Unit com banco dublê (`dados-do-formulario.test.ts`) |
 
 ## J8 — O cliente não morre por falta de resposta `[P1]`
 

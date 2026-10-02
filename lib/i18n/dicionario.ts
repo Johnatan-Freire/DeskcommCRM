@@ -12163,6 +12163,20 @@ export const DICIONARIO: Traducoes = {
   "Erro ao carregar a previsão.": { es: "Error al cargar la previsión." },
   "Falha ao calcular a previsão do funil.": { es: "No se pudo calcular la previsión del embudo." },
   "Janelas de resposta e de disparo, ritmo, teto diário, envio aos domingos e aquecimento de cada número.": { es: "Horarios de respuesta y de envíos proactivos, ritmo, tope diario, envío los domingos y calentamiento de cada número." },
+  // ─── Cadastrar um campo do formulário a partir da captação ───
+  "Cadastrar como campo do lead": { es: "Registrar como campo del lead" },
+  "Texto longo": { es: "Texto largo" },
+  "Link": { es: "Enlace" },
+  "Sim/Não": { es: "Sí/No" },
+  "Não foi possível ler o funil desta fonte.": { es: "No se pudo leer el embudo de esta fuente." },
+  "Não foi possível cadastrar o campo. Só quem administra o funil pode fazer isso.": { es: "No se pudo registrar el campo. Solo quien administra el embudo puede hacerlo." },
+  "Campo cadastrado. Ele já aparece no card do lead e pode ser usado nas mensagens.": { es: "Campo registrado. Ya aparece en la tarjeta del lead y se puede usar en los mensajes." },
+  "Este nome de campo não pode ser cadastrado aqui. Cadastre em Configurações › Funis.": { es: "Este nombre de campo no se puede registrar aquí. Regístralo en Configuración › Embudos." },
+  "Esse campo já está cadastrado.": { es: "Ese campo ya está registrado." },
+  "O funil já tem o máximo de campos.": { es: "El embudo ya tiene el máximo de campos." },
+  "Dê um rótulo ao campo.": { es: "Ponle una etiqueta al campo." },
+  'Em "Ações após o envio", adicione "Webhook" e cole o endereço acima em "URL do Webhook".': { es: 'En "Acciones después del envío", agrega "Webhook" y pega la dirección de arriba en "URL del Webhook".' },
+  'Adicione a ação "Call Webhook" ao formulário e cole o endereço acima.': { es: 'Agrega la acción "Call Webhook" al formulario y pega la dirección de arriba.' },
 };
 
 /**

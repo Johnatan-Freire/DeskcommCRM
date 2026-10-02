@@ -34,6 +34,7 @@ import {
   mapRdStationPayload,
   type RdStationMapped,
 } from "@/lib/webhooks/rdstation";
+import { isElementorPayload, mapElementorPayload, type ElementorMapped } from "@/lib/webhooks/elementor";
 import { origemDaPagina, registrarCaptacao } from "@/lib/webhooks/captacao";
 import { ipDoClienteParaInet } from "@/lib/http/ip-do-cliente";
 import { decryptWebhookSecret } from "@/lib/webhooks/secrets";
@@ -194,6 +195,15 @@ export async function POST(req: NextRequest, ctx: RouteCtx): Promise<NextRespons
       ? mapRdStationPayload(payload)
       : null;
 
+  // Elementor Pro manda `fields[<id>][value]` (colchetes, uma linha por
+  // propriedade) — mesmo problema: nenhuma chave de topo chama `nome`. Fica por
+  // último na precedência porque a detecção é por forma estrita, e nenhum
+  // payload é de duas origens.
+  const elementorMapped: ElementorMapped | null =
+    respondiMapped === null && rdStationMapped === null && isElementorPayload(payload)
+      ? mapElementorPayload(payload)
+      : null;
+
   // Idempotência (spec §5): `external_id` é campo reservado do envio — quem
   // integra via sistema (Zapier/n8n/loja) manda o ID único do disparo e o
   // reenvio automático (retry por timeout) NUNCA duplica o lead. O índice
@@ -258,10 +268,12 @@ export async function POST(req: NextRequest, ctx: RouteCtx): Promise<NextRespons
   // O `respondiMapped ??` é do PR #326: sem ele o payload aninhado do Respondi
   // volta a cair no mapeador genérico, que é o defeito que aquele PR conserta.
   // O `rdStationMapped ??` é a mesma figura para o envelope `leads[]` do RD
-  // Station (achado 2026-09-08). Ordem: Respondi, RD Station, genérico.
+  // Station (achado 2026-09-08), e o `elementorMapped ??` para os campos em
+  // colchetes do Elementor. Ordem: Respondi, RD Station, Elementor, genérico.
   const mapped =
     respondiMapped ??
     rdStationMapped ??
+    elementorMapped ??
     mapInboundPayload(externalId ? payloadForMapping : payload, fieldMap);
   if (!mapped.phone) {
     const rawPhone = findRawPhoneIfUnnormalized(payload, fieldMap);
