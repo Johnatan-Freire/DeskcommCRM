@@ -11035,6 +11035,8 @@ export const DICIONARIO: Traducoes = {
     { es: "Hiciste demasiadas preguntas seguidas. Inténtalo de nuevo en un minuto." },
   "As perguntas dos colegas aparecem aqui em alguns segundos.":
     { es: "Las preguntas de tus colegas aparecen aquí en unos segundos." },
+  "Trechos do acervo ligados à pergunta.":
+    { es: "Fragmentos del acervo relacionados con la pregunta." },
   // lib/escalacao/passagem.ts (migration 0291) — por que a conversa saiu do
   // automático, e por que o cliente não foi avisado. A frase existe para a
   // TELA: `requested_human` é vocabulário de constraint, não texto para uma
