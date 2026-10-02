@@ -1079,6 +1079,7 @@ jobs:
         olhar-telas-do-epico.spec.ts
         buffer-ssr-caixa-orfa.spec.ts
         contadores-do-menu.spec.ts
+        fonte-de-captacao-assina-os-envios.spec.ts
 
       # ─── FORA_DO_CI — as duas que ficaram, e o motivo continua onde sempre ───
       #
