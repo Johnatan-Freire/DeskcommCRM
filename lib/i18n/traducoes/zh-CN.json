@@ -3660,7 +3660,6 @@
   "Modo de roteamento": "分配模式",
   "Como as conversas novas são distribuídas entre os atendentes da organização.": "新会话如何在组织内的客服之间分配。",
   "Modo": "模式",
-  "Balanceamento por carga (em breve)": "按负载均衡（即将推出）",
   "Tentativas máx.": "最大尝试次数",
   "Backoff (s)": "退避（秒）",
   "Atendentes": "客服",
