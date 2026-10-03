@@ -282,3 +282,157 @@ describe("0529 — support_readonly não escreve na fatia 1 do #2115", () => {
     expect(writeCountAs(FULL_0529, linha("cccccccc-2115-4000-8000-0000000000f2", "sonda-full-2115"))).toBe(1);
   });
 });
+
+/* ======================================================================== *
+ * 0533 — fatia 2 da #2115: as 36 restantes (prioridade 5).
+ *
+ * Medição na main@17c4b81b8 (pós-#2193): 36 policies de escrita com a função
+ * pura — 29 trocas diretas de topo, 6 policies internas do módulo honorários
+ * (o corpo de `fn_honorarios_provisionar` é redefinido; as duas SELECT dele
+ * seguem com a função pura) e o único par da lista, em `recurring_entries`
+ * (a única das 47 sem SELECT própria).
+ *
+ * COBERTURA: o catálogo mede as 36 expressões vivas (`pg_policies`), o par é
+ * medido em COMPORTAMENTO — leitura de pé, `support_readonly` com 0 linhas,
+ * `full` escrevendo — e a última asserção é a conta GLOBAL: nenhuma policy de
+ * escrita em `public` volta a citar a função pura, nem por definição nova, nem
+ * pelo caminho dinâmico (os laços `format()` de 0350/0351 usavam a pura; ver
+ * `platform-admin-full-so-escreve-dinamicas.test.ts`).
+ *
+ * As 35 trocas diretas não ganham sonda tabela a tabela: o mecanismo é o mesmo
+ * que a fatia 1 mede em cinco delas, e o catálogo é o que prova a expressão de
+ * cada uma.
+ *
+ * Previsão escrita antes de rodar (sabotagem): de volta à função pura, o
+ * catálogo acusa as 36, a conta global acusa as mesmas e o comportamento do par
+ * devolve 1/0 — vermelho.
+ * ======================================================================== */
+
+const ORG_0533 = "cccccccc-2115-4000-8000-000000000201";
+const FULL_0533 = "cccccccc-2115-4000-8000-000000000210";
+const READONLY_0533 = "cccccccc-2115-4000-8000-000000000211";
+const CONTA_0533 = "cccccccc-2115-4000-8000-000000000202";
+const RECORRENTE_0533 = "cccccccc-2115-4000-8000-000000000203";
+const RECORRENTE_PROBE_0533 = "cccccccc-2115-4000-8000-000000000204";
+
+/** As policies de ESCRITA da fatia 2 — `[tabela, policy]`. No fork são 30: as 6 do módulo honorários (não portado) ficam de fora. */
+const FATIA_2: ReadonlyArray<readonly [string, string]> = [
+  ["ai_agents", "tenant_isolation_ai_agents_write"],
+  ["ai_budgets", "tenant_isolation_ai_budgets_write"],
+  ["ai_chunks", "tenant_isolation_ai_chunks_write"],
+  ["ai_knowledge_sources", "tenant_isolation_ai_knowledge_sources_write"],
+  ["ai_knowledge_versions", "tenant_isolation_ai_kbv_write"],
+  ["attendant_availability", "attendant_availability_delete"],
+  ["attendant_availability", "attendant_availability_insert"],
+  ["attendant_availability", "attendant_availability_update"],
+  ["automation_rules", "automation_rules_manager_write"],
+  ["calendar_appointments", "calendar_appointments_write"],
+  ["calendar_availability_exceptions", "calendar_availability_exceptions_write"],
+  ["calendar_event_types", "calendar_event_types_write"],
+  ["calendar_locations", "calendar_locations_insert"],
+  ["campaign_channel_sessions", "campaign_channel_sessions_write"],
+  ["campaign_recipients", "campaign_recipients_write"],
+  ["campaign_suppressions", "campaign_suppressions_write"],
+  ["campaign_templates", "campaign_templates_write"],
+  ["campaigns", "campaigns_write"],
+  ["catalog_products", "catalog_products_write"],
+  ["crm_lead_activities", "crm_lead_activities_insert"],
+  ["crm_lead_links", "crm_lead_links_delete"],
+  ["crm_lead_links", "crm_lead_links_insert"],
+  ["crm_lead_links", "crm_lead_links_update"],
+  ["crm_pipelines", "crm_pipelines_manager_write"],
+  ["crm_stages", "crm_stages_manager_write"],
+  ["crm_tasks", "crm_tasks_write"],
+  ["org_guardrail_layers", "org_guardrail_layers_admin_write"],
+  ["org_voice_calls", "org_voice_calls_admin_write"],
+  ["recurring_entries", "tenant_isolation_recurring_entries_write"],
+  ["webhook_sources", "webhook_sources_manager_write"],
+];
+
+describe("0533 — support_readonly não escreve na fatia 2 do #2115 (prioridade 5)", () => {
+  beforeAll(() => {
+    sql(`
+      -- (No upstream o módulo honorários é provisionado aqui; este fork não
+      -- tem o módulo, então as 6 policies dele ficam fora do catálogo: 30.)
+
+      -- Filhos antes do pai: financial_accounts -> recurring_entries é RESTRICT.
+      delete from public.recurring_entries where organization_id = '${ORG_0533}';
+      delete from public.financial_accounts where organization_id = '${ORG_0533}';
+      delete from public.organizations where id = '${ORG_0533}';
+      insert into public.organizations (id, slug, legal_name, display_name)
+        values ('${ORG_0533}', 'org-2115-2', 'Org 2115-2', 'Org 2115-2');
+      insert into auth.users (id, email) values
+        ('${FULL_0533}', 'full-2115-2@invariant.test'),
+        ('${READONLY_0533}', 'readonly-2115-2@invariant.test')
+      on conflict (id) do nothing;
+      delete from public.platform_admins where user_id in ('${FULL_0533}', '${READONLY_0533}');
+      insert into public.platform_admins (user_id, granted_by, scope, mfa_required, reason) values
+        ('${FULL_0533}', '${FULL_0533}', 'full', false, 'invariante 2115 fatia 2'),
+        ('${READONLY_0533}', '${FULL_0533}', 'support_readonly', false, 'invariante 2115 fatia 2');
+      insert into public.financial_accounts (id, organization_id, name)
+        values ('${CONTA_0533}', '${ORG_0533}', 'Conta 2115-2');
+      insert into public.recurring_entries (id, organization_id, name, account_id, direction, amount_cents, day_of_month)
+        values ('${RECORRENTE_0533}', '${ORG_0533}', 'Aluguel 2115-2', '${CONTA_0533}', 'out', 100000, 5),
+               ('${RECORRENTE_PROBE_0533}', '${ORG_0533}', 'Sonda 2115-2', '${CONTA_0533}', 'out', 200000, 10);
+    `);
+  });
+
+  it("catálogo: as 30 policies de escrita vivas (36 no upstream, sem honorários) usam _full e não a pura", () => {
+    const faltando: string[] = [];
+    for (const [tabela, policy] of FATIA_2) {
+      const expr = expressaoViva(tabela, policy);
+      if (!expr.includes("fn_is_platform_admin_full")) faltando.push(`${tabela}.${policy}: sem _full`);
+      if (/fn_is_platform_admin\s*\(/.test(expr)) faltando.push(`${tabela}.${policy}: ainda aceita a pura`);
+    }
+    expect(faltando, "policy de escrita da fatia 2 fora do conserto da 0533").toEqual([]);
+  });
+
+  it("catálogo: a leitura de recurring_entries MANTÉM a função pura — o par não restringe leitura", () => {
+    const expr = expressaoViva("recurring_entries", "tenant_isolation_recurring_entries_read");
+    expect(expr).toContain("fn_is_platform_admin");
+    expect(expr).not.toContain("fn_is_platform_admin_full");
+  });
+
+  it("recurring_entries: a política _all não existe mais (virou par)", () => {
+    expect(
+      sql(
+        `select count(*) from pg_policies where schemaname = 'public' and tablename = 'recurring_entries' and policyname = 'tenant_isolation_recurring_entries_all';`,
+      ),
+    ).toBe("0");
+  });
+
+  it("CONTA GLOBAL: nenhuma policy de escrita em public cita a função pura", () => {
+    // Fecha a superfície inteira da #2115: as 47 do texto + qualquer definição
+    // nova. As dinâmicas do baseline (`tenant_isolation_%s_all` e
+    // `support_write_*`) não usam a função pura; se uma futura passar a usar,
+    // este caso fica vermelho antes de o defeito chegar a um clone.
+    const n = sql(`
+      select count(*) from pg_policies
+       where schemaname = 'public'
+         and cmd <> 'SELECT'
+         and (qual like '%fn_is_platform_admin(%' or with_check like '%fn_is_platform_admin(%');
+    `);
+    expect(Number(n), "ainda há policy de escrita aceitando a função pura").toBe(0);
+  });
+
+  it("recurring_entries: support_readonly segue LENDO o molde", () => {
+    expect(countAs(READONLY_0533, `select count(*) from public.recurring_entries where id = '${RECORRENTE_0533}';`)).toBe(1);
+  });
+
+  it("recurring_entries: UPDATE 0 como support_readonly; 1 como full", () => {
+    expect(writeCountAs(READONLY_0533, `update public.recurring_entries set name = 'hackeado' where id = '${RECORRENTE_0533}'`)).toBe(0);
+    expect(writeCountAs(FULL_0533, `update public.recurring_entries set name = 'escrito pelo full' where id = '${RECORRENTE_0533}'`)).toBe(1);
+  });
+
+  it("recurring_entries: INSERT 0 como support_readonly; 1 como full", () => {
+    const linha = (id: string, nome: string) =>
+      `insert into public.recurring_entries (id, organization_id, name, account_id, direction, amount_cents, day_of_month) values ('${id}', '${ORG_0533}', '${nome}', '${CONTA_0533}', 'in', 5000, 15)`;
+    expect(writeCountAs(READONLY_0533, linha("cccccccc-2115-4000-8000-0000000002c1", "sonda readonly"))).toBe(0);
+    expect(writeCountAs(FULL_0533, linha("cccccccc-2115-4000-8000-0000000002c2", "sonda full"))).toBe(1);
+  });
+
+  it("recurring_entries: DELETE 0 como support_readonly; a sonda some como full", () => {
+    expect(writeCountAs(READONLY_0533, `delete from public.recurring_entries where id = '${RECORRENTE_PROBE_0533}'`)).toBe(0);
+    expect(writeCountAs(FULL_0533, `delete from public.recurring_entries where id = '${RECORRENTE_PROBE_0533}'`)).toBe(1);
+  });
+});
