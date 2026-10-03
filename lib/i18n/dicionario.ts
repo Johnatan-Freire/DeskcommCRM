@@ -7398,6 +7398,12 @@ export const DICIONARIO: Traducoes = {
   "Contexto, observações, links…": { es: "Contexto, observaciones, enlaces…" },
   "Selecione a etapa": { es: "Selecciona la etapa" },
   "Criar lead": { es: "Crear lead" },
+  "Criar mesmo assim": { es: "Crear de todos modos" },
+  "Não criar": { es: "No crear" },
+  "Este contato já tem um negócio aberto neste funil.": {
+    es: "Este contacto ya tiene un negocio abierto en este embudo.",
+  },
+  "Abrir mesmo assim?": { es: "¿Abrir uno de todos modos?" },
   "Propõe:": { es: "Propone:" },
   "Aprovar:": { es: "Aprobar:" },
   "Ignorar:": { es: "Ignorar:" },
