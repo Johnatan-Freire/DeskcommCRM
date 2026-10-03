@@ -12163,8 +12163,15 @@ export const DICIONARIO: Traducoes = {
     es: "Guardar crea una versión nueva (la anterior queda en el historial). El cuerpo solo entra en la conversación cuando una de las palabras clave aparece en el mensaje del cliente.",
   },
   "Não foi possível carregar a skill.": { es: "No se pudo cargar la skill." },
-  "Esta skill veio de um pacote com arquivos. Para mudar o texto, edite o pacote e envie o .zip de novo.": {
-    es: "Esta skill vino de un paquete con archivos. Para cambiar el texto, edita el paquete y vuelve a enviar el .zip.",
+  "Skill de pacote: descrição, palavras-chave e corpo são editáveis. Ao salvar, a versão nova herda os arquivos do pacote — nada se perde.": {
+    es: "Skill de paquete: la descripción, las palabras clave y el cuerpo se pueden editar. Al guardar, la versión nueva hereda los archivos del paquete: nada se pierde.",
+  },
+  "Arquivos do pacote (somente leitura)": { es: "Archivos del paquete (solo lectura)" },
+  "Para adicionar, trocar ou remover um arquivo, monte o pacote de novo e envie o .zip — esta tela só grava texto.": {
+    es: "Para agregar, cambiar o eliminar un archivo, arma el paquete de nuevo y sube el .zip: esta pantalla solo guarda texto.",
+  },
+  "Não foi possível copiar os arquivos do pacote para a versão nova. Nada mudou — tente de novo.": {
+    es: "No fue posible copiar los archivos del paquete a la versión nueva. No cambió nada: inténtalo de nuevo.",
   },
   "Descrição (aparece no índice do agente)": { es: "Descripción (aparece en el índice del agente)" },
   "Palavras-chave de ativação (separe por vírgula)": { es: "Palabras clave de activación (separadas por coma)" },
