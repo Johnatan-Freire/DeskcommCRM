@@ -5827,6 +5827,9 @@ export const DICIONARIO: Traducoes = {
   "Velocidade de reprodução": { es: "Velocidad de reproducción" },
   "Ampliar imagem": { es: "Ampliar imagen" },
   "Imagem recebida": { es: "Imagen recibida" },
+  // Transcrição do áudio no balão (#2133): rótulo e estado de carregamento.
+  Transcrição: { es: "Transcripción" },
+  "Transcrevendo…": { es: "Transcribiendo…" },
   Baixar: { es: "Descargar" },
   "Abrir conversa com este contato": { es: "Abrir conversación con este contacto" },
   "Não foi possível abrir a conversa.": { es: "No se pudo abrir la conversación." },
