@@ -72,12 +72,11 @@
  * MOTOR (`computeDueAt`), não da leitura. Ver `horasAteOFimDoPrazo`.
  */
 
-import { diasAtePrazo, diasDeAtraso, horasAteOFimDoPrazo } from "./sla";
+import { diasAtePrazo, diasDeAtraso, fimDoPrazo, horasAteOFimDoPrazo } from "./sla";
 
 export type SlaBucket = "overdue" | "critical" | "warning" | "ok";
 export type RiskLevel = "expired" | "at_risk" | "warning" | "ok";
 
-const DIA_MS = 86_400_000;
 /** `dias < 2` — o "menos de dois dias" do balde `critical`. */
 const JANELA_CRITICA_EM_DIAS = 2;
 /** `horas < 24` — o "menos de um dia" do selo `at_risk`. */
@@ -102,7 +101,7 @@ export function computeSlaBucket(
 /**
  * Selo da PLATAFORMA, em horas até o fim do dia. Ver o cabeçalho.
  *
- * `expired` usa `diasDeAtraso`, e não `horas < 0`, **de propósito**: é a mesma
+ * `expired` usa `diasDeAtraso`, e não `horas < 0`, **de propósito**: é o mesmo
  * predicado que faz o balde da organização virar `overdue`, e é o que garante
  * que os dois selos virem no mesmo instante. `horas` decide `at_risk`.
  *
@@ -116,12 +115,13 @@ export function computeRiskLevel(
   agora: Date = new Date(),
 ): RiskLevel {
   const horas = horasAteOFimDoPrazo(dueAt, agora);
-  if (!dueAt || horas === null) return "ok";
+  const fim = fimDoPrazo(dueAt);
+  if (!dueAt || horas === null || fim === null) return "ok";
   if (diasDeAtraso(dueAt, agora) > 0) return "expired";
   if (horas < JANELA_DE_RISCO_EM_HORAS) return "at_risk";
 
   const totalWindow = new Date(dueAt).getTime() - new Date(receivedAt).getTime();
-  const msAteOFim = new Date(dueAt).getTime() + DIA_MS - agora.getTime();
+  const msAteOFim = fim.getTime() - agora.getTime();
   if (totalWindow > 0 && msAteOFim < totalWindow * 0.5) return "warning";
   return "ok";
 }

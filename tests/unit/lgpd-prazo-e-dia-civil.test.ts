@@ -47,7 +47,9 @@ import {
   diaDoPrazo,
   diasAtePrazo,
   diasDeAtraso,
+  fimDoPrazo,
   horasAteOFimDoPrazo,
+  progressoDoPrazo,
   prazoEmBr,
 } from "@/lib/lgpd/sla";
 import { computeRiskLevel, computeSlaBucket } from "@/lib/lgpd/balde-de-sla";
@@ -383,6 +385,121 @@ describe("a coluna 'Vence em' conta até o FIM do dia, não até a meia-noite UT
 });
 
 // ---------------------------------------------------------------------------
+// A BARRA DO PRAZO NAS TELAS DE DETALHE
+// ---------------------------------------------------------------------------
+
+describe("a barra do prazo das telas de detalhe lê o fim do dia, não a meia-noite UTC", () => {
+  const recebido = "2026-09-14T12:00:00.000Z";
+  const prazo = computeDueAt(d("2026-09-14"), 15).toISOString(); // 2026-10-05T00:00:00Z
+
+  /** `progresso` como as DUAS cópias calculavam: até a meia-noite UTC do dia. */
+  const progressoAntigo = (agora: Date): number => {
+    const elapsed = agora.getTime() - new Date(recebido).getTime();
+    const total = new Date(prazo).getTime() - new Date(recebido).getTime();
+    return Math.min(1, Math.max(0, total > 0 ? elapsed / total : 0));
+  };
+  // a conta que as DUAS telas chamam — não uma cópia dela
+  const progressoNovo = (agora: Date): number => progressoDoPrazo(recebido, prazo, agora);
+
+  it("fimDoPrazo é a meia-noite UTC do dia seguinte ao guardado", () => {
+    // A âncora que os quatro consumidores passaram a compartilhar. Sem asserção
+    // direta, um `+ DIA_MS` trocado por outra coisa só apareceria por acidente,
+    // via algum consumidor — e este é o primitivo, então ele se testa aqui.
+    expect(fimDoPrazo(prazo)?.toISOString()).toBe("2026-10-06T00:00:00.000Z");
+    // em São Paulo isso é o FIM do dia 05 — 21:00 —, e é o eixo do motor:
+    expect(emSaoPaulo(fimDoPrazo(prazo)!)).toBe("2026-10-05");
+    // e o dia guardado é o 05, não o 06:
+    expect(diaDoPrazo(prazo)).toBe("2026-10-05");
+    // ausente ou ilegível não vira data inventada:
+    expect(fimDoPrazo(null)).toBeNull();
+    expect(fimDoPrazo(undefined)).toBeNull();
+    expect(fimDoPrazo("não-é-data")).toBeNull();
+    expect(fimDoPrazo("2026-13-45T00:00:00.000Z")).toBeNull();
+  });
+
+  it("a barra não fecha 100% na VÉSPERA do prazo", () => {
+    // 04/10 21:00 em São Paulo = 05/10 00:00Z: a meia-noite UTC do dia do prazo.
+    const vespera = new Date("2026-10-05T00:00:00.000Z");
+    expect(emSaoPaulo(vespera)).toBe("2026-10-04");
+    expect(progressoAntigo(vespera)).toBe(1); // o defeito: barra cheia na véspera
+    expect(progressoNovo(vespera)).toBeLessThan(1);
+    expect(progressoNovo(vespera)).toBeGreaterThan(0.9);
+  });
+
+  it("a barra fecha no fim do dia do prazo", () => {
+    const fimDoDia = new Date("2026-10-06T00:00:00.000Z"); // 05/10 21:00 em São Paulo
+    expect(emSaoPaulo(fimDoDia)).toBe("2026-10-05");
+    expect(progressoNovo(fimDoDia)).toBe(1);
+    // e um minuto antes ainda não fechou
+    expect(progressoNovo(new Date(fimDoDia.getTime() - 60_000))).toBeLessThan(1);
+  });
+
+  it("a contagem em dias é a MESMA que o resto do módulo usa", () => {
+    // As duas cópias divergiam entre si: a da organização usava
+    // `differenceInDays(dueAt, now)` e a da administração `Math.floor(ms/DIA)`.
+    // Medido: em 92 de 169 horas elas diziam coisas DIFERENTES.
+    const manhaDoPrazo = new Date("2026-10-05T12:00:00.000Z"); // 09:00 do dia do prazo
+    const cópiaAdminAntiga = Math.floor(
+      (new Date(prazo).getTime() - manhaDoPrazo.getTime()) / DIA_MS,
+    );
+    expect(cópiaAdminAntiga).toBe(-1); // o defeito: "1d em atraso" com o prazo vencendo HOJE
+    expect(diasAtePrazo(prazo, manhaDoPrazo)).toBe(0); // "vence hoje"
+    expect(computeRiskLevel(prazo, recebido, manhaDoPrazo)).toBe("at_risk");
+    expect(computeSlaBucket(prazo, recebido, manhaDoPrazo)).toBe("critical");
+  });
+
+  it("na véspera à noite o módulo diz 'vence hoje' — é o eixo UTC, e é de propósito", () => {
+    // 04/10 22:00 em São Paulo = 05/10 01:00Z: o dia civil do prazo JÁ começou no
+    // eixo em que o motor conta. A cópia da administração dizia "1d em atraso"
+    // aqui; a da organização já dizia "vence hoje".
+    //
+    // Não é deste recorte: as três superfícies leem o mesmo dia civil, e ele
+    // começa às 21h de São Paulo. Mudar isso é mudar `computeDueAt`.
+    const vesperaNoite = new Date("2026-10-05T01:00:00.000Z");
+    expect(emSaoPaulo(vesperaNoite)).toBe("2026-10-04");
+    const cópiaAdminAntiga = Math.floor(
+      (new Date(prazo).getTime() - vesperaNoite.getTime()) / DIA_MS,
+    );
+    expect(cópiaAdminAntiga).toBe(-1); // o defeito: "1d em atraso" na véspera
+    expect(diasAtePrazo(prazo, vesperaNoite)).toBe(0);
+  });
+
+  it("as DUAS cópias usam a mesma régua — a divergência de 92 horas não volta", () => {
+    // Este caso é de FONTE, e não de comportamento, de propósito: depois do
+    // conserto as duas cópias chamam o mesmo helper, então comparar os dois
+    // resultados seria comparar um valor com ele mesmo — um teste que sempre
+    // passa, que é o defeito que a casa chama de pior. O que pode regredir é cada
+    // cópia voltar a fazer a conta por conta própria.
+    for (const arquivo of [
+      "app/app/lgpd/requests/[id]/SlaTimeline.tsx",
+      "app/admin/(protected)/lgpd/requests/[id]/_client.tsx",
+    ]) {
+      const fonte = codigoSemComentario(arquivo);
+      expect(fonte, `${arquivo} deixou de usar diasAtePrazo`).toContain("diasAtePrazo(");
+      expect(fonte, `${arquivo} deixou de usar progressoDoPrazo`).toContain("progressoDoPrazo(");
+      expect(
+        /differenceInDays\(\s*due/.test(fonte) || /msUntilDue/.test(fonte),
+        `${arquivo} voltou a medir o prazo a partir de due_at em vez do helper`,
+      ).toBe(false);
+    }
+  });
+
+  it("o último marco dá o prazo por passado junto com o selo — e não desde as 21h da véspera", () => {
+    // `milestoneStatus` comparava `isBefore(dueAt, now)`: `dueAt` é o INÍCIO do dia
+    // guardado, então o predicado antigo já era verdadeiro às 21h da VÉSPERA.
+    const antes = new Date("2026-10-05T12:00:00.000Z"); // 09:00 do dia do prazo
+    const depois = new Date("2026-10-06T01:00:00.000Z"); // 22:00 do dia do prazo
+    const vespera = new Date("2026-10-05T01:00:00.000Z"); // 22:00 da VÉSPERA
+    // na véspera, o predicado antigo já dava o prazo por passado; o novo, não
+    expect(new Date(prazo).getTime() < vespera.getTime()).toBe(true);
+    expect(diasDeAtraso(prazo, vespera)).toBe(0);
+    expect(diasDeAtraso(prazo, antes)).toBe(0);
+    expect(diasDeAtraso(prazo, depois)).toBe(1);
+    expect(new Date(prazo).getTime() < depois.getTime()).toBe(true); // o predicado antigo
+  });
+});
+
+// ---------------------------------------------------------------------------
 // A LISTA DE CONSUMIDORES — a parte que impede a classe de voltar
 // ---------------------------------------------------------------------------
 
@@ -468,6 +585,8 @@ const LEEM_PELO_HELPER: readonly string[] = [
   "app/api/v1/admin/lgpd/requests/route.ts",
   "components/admin/lgpd/LgpdRequestsTable.tsx",
   "app/app/lgpd/requests/[id]/_client.tsx",
+  "app/app/lgpd/requests/[id]/SlaTimeline.tsx",
+  "app/admin/(protected)/lgpd/requests/[id]/_client.tsx",
 ];
 
 /**
@@ -497,19 +616,9 @@ const REPASSA_O_VALOR: readonly string[] = [
  */
 const DIVIDA_CONGELADA: ReadonlyArray<{ arquivo: string; motivo: string }> = [
   {
-    arquivo: "app/admin/(protected)/lgpd/requests/[id]/_client.tsx",
-    motivo:
-      "Tela: a linha 'Vence em' JÁ foi corrigida (`prazoEmBr`). O que resta neste arquivo é o `SlaTimelineInline`, que ainda mede `dueAt.getTime()` — o mesmo defeito de família, agora no progresso e no 'Nd restantes' — e é cópia de `app/app/lgpd/requests/[id]/SlaTimeline.tsx`. Os dois pedem UM dono só, e o recorte é das telas.",
-  },
-  {
     arquivo: "app/app/lgpd/requests/RequestsTable.tsx",
     motivo:
       "Tela: `fmtDistance(due_at)` em milissegundos — diz 'atrasado hoje' às 21h do dia ANTERIOR ao prazo.",
-  },
-  {
-    arquivo: "app/app/lgpd/requests/[id]/SlaTimeline.tsx",
-    motivo:
-      "Tela: `differenceInDays(dueAt, now)` em dias locais. Defeito IRMÃO e mais fundo: os marcos D+5/D+7/D+10 são dias CORRIDOS desde `received_at`, enquanto o prazo é dias ÚTEIS — duas réguas na mesma tela.",
   },
   {
     arquivo: "app/api/v1/admin/dashboard/kpis/route.ts",
@@ -567,6 +676,27 @@ describe("nenhum consumidor de due_at nasce fora da lista", () => {
     for (const arquivo of [...LEEM_PELO_HELPER, ...REPASSA_O_VALOR]) {
       expect(readFileSync(join(RAIZ, arquivo), "utf8")).toContain("due_at");
     }
+  });
+
+  it("um arquivo está em UMA lista só — as três são partição, não camadas", () => {
+    // Este caso nasceu de um defeito real: no #2169 a tela de detalhe da
+    // organização entrou em `LEEM_PELO_HELPER` e NÃO saiu da `DIVIDA_CONGELADA`.
+    // O arquivo ficou ao mesmo tempo "consertado" e "devendo", e nada aqui
+    // reprovou — a lista é que estava mentindo, e foi o mantenedor que viu.
+    //
+    // A partição é o que faz "a lista só encolhe" valer: sem ela, mover uma
+    // entrada entre listas vira acrescentar em uma e esquecer a outra.
+    const donos = new Map<string, string[]>();
+    const registrar = (arquivo: string, lista: string) => {
+      donos.set(arquivo, [...(donos.get(arquivo) ?? []), lista]);
+    };
+    for (const a of LEEM_PELO_HELPER) registrar(a, "LEEM_PELO_HELPER");
+    for (const a of REPASSA_O_VALOR) registrar(a, "REPASSA_O_VALOR");
+    for (const { arquivo } of DIVIDA_CONGELADA) registrar(arquivo, "DIVIDA_CONGELADA");
+    const duplicados = [...donos.entries()]
+      .filter(([, listas]) => listas.length > 1)
+      .map(([arquivo, listas]) => `${arquivo} → ${listas.join(" + ")}`);
+    expect(duplicados).toEqual([]);
   });
 
   it("todo arquivo que lê due_at está na lista, com motivo escrito quando é dívida", () => {
@@ -640,6 +770,16 @@ describe("nenhum consumidor de due_at nasce fora da lista", () => {
         "app/admin/(protected)/lgpd/requests/[id]/_client.tsx",
         /new Date\(\s*request\.due_at\s*\)/,
         "a linha 'Vence em' da tela de detalhe de admin voltou a construir um INSTANTE a partir de `request.due_at` — o dia anterior para quem lê a oeste de UTC. Use `prazoEmBr`.",
+      ],
+      [
+        "app/app/lgpd/requests/[id]/SlaTimeline.tsx",
+        /differenceInDays\(\s*due|new Date\(\s*due_at\s*\)/,
+        "a linha do tempo da organização voltou a medir o prazo a partir de `due_at` em vez de `diasAtePrazo`/`fimDoPrazo` — a contagem em dias e a barra voltam a errar por um dia.",
+      ],
+      [
+        "app/admin/(protected)/lgpd/requests/[id]/_client.tsx",
+        /msUntilDue|new Date\(\s*due_at\s*\)/,
+        "a linha do tempo da administração voltou a medir o prazo a partir de `due_at` em vez de `diasAtePrazo`/`fimDoPrazo` — a contagem em dias e a barra voltam a errar por um dia.",
       ],
     ];
     for (const [arquivo, padrao, porque] of armadilhas) {
