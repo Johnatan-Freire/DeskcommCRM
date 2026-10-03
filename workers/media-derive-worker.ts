@@ -643,7 +643,14 @@ async function avisarMidiaNaoLida(
     // recusa era engolida, o worker devolvia "ok" e nada era logado. Um aviso
     // que falha em silêncio é pior que aviso nenhum — ele faz o próximo
     // diagnóstico começar da premissa errada.
-    if (error) {
+    //
+    // `23505` é a EXCEÇÃO, e não é recusa: é o índice único parcial da 0527
+    // fazendo o trabalho dele. O `select` acima é uma pergunta sem trava, então
+    // dois workers derivando mídia no mesmo instante podem os dois ler "não
+    // existe"; quem chega segundo ao índice perde a corrida, e isso quer dizer
+    // exatamente o que o aviso quer — já existe um aberto. Logar isso como aviso
+    // de banco seria alarme falso em cima de um alarme correto.
+    if (error && error.code !== "23505") {
       logger.warn("[media-derive] o banco recusou o aviso de mídia não lida", {
         organization_id: organizationId,
         error: error.message,
