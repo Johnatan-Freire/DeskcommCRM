@@ -715,3 +715,62 @@ describe("StagesSection — a janela de esfriando, em dias e horas (#1532)", () 
     expect(screen.getByTestId("janela-dias-e1")).toHaveValue(2);
   });
 });
+
+describe("StagesSection — Escape descarta o rascunho do nome e da chance (#2164)", () => {
+  it("no nome: Escape desfaz o rascunho e NÃO manda PATCH", async () => {
+    const user = userEvent.setup();
+    vi.mocked(apiClient.patch).mockResolvedValue({ data: { etapas: [] } });
+    montar();
+    const campo = await screen.findByTestId("nome-e1");
+
+    await user.clear(campo);
+    await user.type(campo, "Carrinho abandonadoX");
+    await user.keyboard("{Escape}");
+    // O blur que o Escape dispara roda ANTES do setState do rascunho: sem a
+    // marca `descartando`, o confirmar grava "Carrinho abandonadoX".
+    expect(apiClient.patch).not.toHaveBeenCalled();
+    expect(screen.getByTestId("nome-e1")).toHaveValue("Carrinho abandonado");
+  });
+
+  it("na chance: Escape desfaz o rascunho e NÃO manda PATCH", async () => {
+    const user = userEvent.setup();
+    vi.mocked(apiClient.patch).mockResolvedValue({ data: { etapas: [] } });
+    montar();
+    const campo = await screen.findByTestId("probabilidade-e1");
+
+    await user.type(campo, "40");
+    await user.keyboard("{Escape}");
+    expect(apiClient.patch).not.toHaveBeenCalled();
+    expect(screen.getByTestId("probabilidade-e1")).toHaveValue(null);
+  });
+
+  it("controle: sem Escape, Enter no nome segue gravando", async () => {
+    const user = userEvent.setup();
+    vi.mocked(apiClient.patch).mockResolvedValue({ data: { etapas: [] } });
+    montar();
+    const campo = await screen.findByTestId("nome-e1");
+
+    await user.clear(campo);
+    await user.type(campo, "Primeira consulta{Enter}");
+    await waitFor(() => expect(apiClient.patch).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(apiClient.patch).mock.calls[0]).toEqual([
+      `/api/v1/pipelines/${PIPE}/stages/e1`,
+      { name: "Primeira consulta" },
+    ]);
+  });
+
+  it("controle: sem Escape, sair do campo da chance segue gravando", async () => {
+    const user = userEvent.setup();
+    vi.mocked(apiClient.patch).mockResolvedValue({ data: { etapas: [] } });
+    montar();
+    const campo = await screen.findByTestId("probabilidade-e1");
+
+    await user.type(campo, "40");
+    await user.tab();
+    await waitFor(() => expect(apiClient.patch).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(apiClient.patch).mock.calls[0]).toEqual([
+      `/api/v1/pipelines/${PIPE}/stages/e1`,
+      { win_probability: 40 },
+    ]);
+  });
+});

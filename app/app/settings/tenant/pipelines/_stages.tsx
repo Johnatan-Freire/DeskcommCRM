@@ -899,8 +899,16 @@ function ProbabilidadeDaEtapa({
   // Ganho e perda valem 100 e 0 na regra (`lib/leads/previsao.ts`): o número
   // gravado ali seria lido por ninguém e entenderia mal quem lê a tela.
   const fixa = etapa.is_won || etapa.is_lost;
+  // Escape chama `blur()`, e o blur confirma — com o rascunho DESTA renderização,
+  // não com o restaurado (o setState ainda não aplicou). Sem esta marca, Escape
+  // gravava o que devia descartar; o mesmo conserto do JanelaDaEtapa (#2161).
+  const descartando = useRef(false);
 
   function confirmar() {
+    if (descartando.current) {
+      descartando.current = false;
+      return;
+    }
     const bruto = rascunho.trim().replace(/%$/, "");
     if (bruto === "") {
       if (etapa.win_probability != null) aoConfirmar(null);
@@ -939,6 +947,7 @@ function ProbabilidadeDaEtapa({
       onKeyDown={(e) => {
         if (e.key === "Enter") e.currentTarget.blur();
         if (e.key === "Escape") {
+          descartando.current = true;
           setRascunho(etapa.win_probability == null ? "" : String(etapa.win_probability));
           e.currentTarget.blur();
         }
@@ -969,8 +978,16 @@ function NomeDaEtapa({
 }) {
   const t = useT();
   const [rascunho, setRascunho] = useState(etapa.name);
+  // Escape chama `blur()`, e o blur confirma — com o rascunho DESTA renderização,
+  // não com o restaurado (o setState ainda não aplicou). Sem esta marca, Escape
+  // gravava o que devia descartar; o mesmo conserto do JanelaDaEtapa (#2161).
+  const descartando = useRef(false);
 
   function confirmar() {
+    if (descartando.current) {
+      descartando.current = false;
+      return;
+    }
     const nome = rascunho.trim();
     if (!nome || nome === etapa.name) {
       setRascunho(etapa.name);
@@ -991,6 +1008,7 @@ function NomeDaEtapa({
       onKeyDown={(e) => {
         if (e.key === "Enter") e.currentTarget.blur();
         if (e.key === "Escape") {
+          descartando.current = true;
           setRascunho(etapa.name);
           e.currentTarget.blur();
         }
