@@ -34892,7 +34892,7 @@ returns boolean language sql stable security definer set search_path=public as $
   join public.organizations o on o.id=a.organization_id and o.status='active'
   where cs.archived_at is null and a.meeting_delivery->>'channel_session_id'=cs.id::text and j.organization_id=p_org and j.id=p_job and j.kind='transactional_delivery' and j.status='running' and j.locked_by=p_worker and j.locked_at=p_acquired_at
    and a.contact_id=j.contact_id and not c.is_anonymized and not c.is_blocked and a.status<>'cancelled' and (a.location_kind<>'google_meet' or (a.meeting_state='ready' and a.meeting_url is not null))
-   and a.meeting_request_id::text=j.payload->>'meeting_request_id' and a.meeting_delivery->>'generation'=j.payload->>'delivery_generation'
+   and a.meeting_request_id::text is not distinct from j.payload->>'meeting_request_id' and a.meeting_delivery->>'generation'=j.payload->>'delivery_generation'
    and a.meeting_delivery_job_id=j.id and a.meeting_delivery->>'state'='queued'
    and exists(select 1 from public.user_organizations where organization_id=p_org and user_id=a.owner_user_id and revoked_at is null)
    and (a.meeting_delivery->'authorized_by'->>'kind'='ai_agent' or
