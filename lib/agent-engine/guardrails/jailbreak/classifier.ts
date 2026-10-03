@@ -21,6 +21,7 @@ import type { Logger } from '../../obs/logger';
 import type { ProviderRegistry } from '../../edge/llm/providers';
 import { LlmBudgetExceededError, runModelCall, type LlmEdgeConfig } from '../../edge/llm/run-model-call';
 import type { LlmResolveOverride } from '../../edge/llm/credentials';
+import { extrairObjetoJsonDoTexto } from '@/lib/agent-engine/texto/extrair-json-do-texto';
 
 /** Severidade do sinal: none (limpo) < low (suspeito) < high (jailbreak/injeção claro). */
 export type JailbreakLevel = 'none' | 'low' | 'high';
@@ -76,14 +77,13 @@ function buildJailbreakMessage(message: string): string {
  */
 export function parseJailbreakClassification(text: string): JailbreakClassification {
   const clean = (): JailbreakClassification => ({ flag: false, level: 'none', reason: null });
-  const match = /\{[\s\S]*\}/.exec(text);
-  if (match === null) return clean();
-  let obj: Record<string, unknown>;
-  try {
-    obj = JSON.parse(match[0]) as Record<string, unknown>;
-  } catch {
-    return clean();
-  }
+  // O parser robusto devolve o PRIMEIRO objeto parseável (prosa, cerca de código
+  // e JSON REPETIDO — a saída ecoada derrubava o recorte antigo). O que NÃO muda:
+  // sem objeto parseável o veredito é `clean()` — o fail-open de sempre; nenhuma
+  // regra de bloqueio mudou.
+  const bruto = extrairObjetoJsonDoTexto(text);
+  if (bruto === null || typeof bruto !== 'object') return clean();
+  const obj = bruto as Record<string, unknown>;
   const raw = typeof obj.level === 'string' ? obj.level.trim().toLowerCase() : '';
   const level: JailbreakLevel = raw === 'high' ? 'high' : raw === 'low' ? 'low' : 'none';
   if (level === 'none') return clean();

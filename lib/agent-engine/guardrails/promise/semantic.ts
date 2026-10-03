@@ -23,6 +23,7 @@ import type { Logger } from "../../obs/logger";
 import type { ProviderRegistry } from "../../edge/llm/providers";
 import { runModelCall, type LlmEdgeConfig } from "../../edge/llm/run-model-call";
 import type { LlmResolveOverride } from "../../edge/llm/credentials";
+import { extrairObjetoJsonDoTexto } from "@/lib/agent-engine/texto/extrair-json-do-texto";
 import type { EvidenciaComercial } from "./evidencias-comerciais";
 
 /** Veredito binário do classificador. suspectPhrase = null quando isPromise = false. */
@@ -83,29 +84,31 @@ const INSTRUCAO_COM_EVIDENCIAS =
  * F4-01 já rodou); a camada semântica NUNCA bloqueia envio por falha de parse do auxiliar.
  */
 export function parsePromiseClassification(text: string, log?: Logger): PromiseClassification {
-  const match = /\{[\s\S]*\}/.exec(text);
-  if (match === null) {
+  // O parser robusto devolve o PRIMEIRO objeto parseável (prosa, cerca de código e
+  // JSON REPETIDO — o recorte antigo abria no primeiro `{` e fechava no último `}`,
+  // abrangendo as DUAS cópias e quebrando o parse). O que NÃO muda é a falha: sem
+  // objeto parseável continua o mesmo fail-open para "sem promessa", com o MESMO
+  // warn de antes — e o `reason` usa o mesmo critério de antes (havia `{`…`}` para
+  // o regex antigo = havia JSON candidato que não parseou → invalid_json; sem ele →
+  // no_json). A regex abaixo é SÓ o critério do motivo do log, não o parser.
+  const bruto = extrairObjetoJsonDoTexto(text);
+  if (bruto === null || typeof bruto !== "object") {
+    const haviaJsonCandidato = /\{[\s\S]*\}/.test(text);
     // degrade OBSERVÁVEL (F4-08 ressalva 2): sem o warn, um classificador sistematicamente
     // quebrado ficaria invisível (todo envio "sem promessa"). Loga só o FATO do parse-fail —
     // nunca o texto do modelo (poderia carregar trecho da candidata, PII fora de log).
-    log?.warn('classificador semântico de promessa: saída sem JSON — fail-open p/ "sem promessa"', {
-      event: "promise_semantic_parse_fail",
-      reason: "no_json",
-    });
+    log?.warn(
+      haviaJsonCandidato
+        ? 'classificador semântico de promessa: JSON inválido — fail-open p/ "sem promessa"'
+        : 'classificador semântico de promessa: saída sem JSON — fail-open p/ "sem promessa"',
+      {
+        event: "promise_semantic_parse_fail",
+        reason: haviaJsonCandidato ? "invalid_json" : "no_json",
+      },
+    );
     return { isPromise: false, suspectPhrase: null };
   }
-  let obj: Record<string, unknown>;
-  try {
-    obj = JSON.parse(match[0]) as Record<string, unknown>;
-  } catch {
-    // saída do auxiliar não é JSON válido → degrada para "sem promessa" (não bloqueia envio
-    // por falha de parse; a camada determinística já cobriu o valor estruturado).
-    log?.warn('classificador semântico de promessa: JSON inválido — fail-open p/ "sem promessa"', {
-      event: "promise_semantic_parse_fail",
-      reason: "invalid_json",
-    });
-    return { isPromise: false, suspectPhrase: null };
-  }
+  const obj = bruto as Record<string, unknown>;
   const isPromise = obj.isPromise === true || obj.isPromise === "true";
   const rawPhrase = typeof obj.suspectPhrase === "string" ? obj.suspectPhrase.trim() : "";
   return { isPromise, suspectPhrase: isPromise && rawPhrase !== "" ? rawPhrase : null };
