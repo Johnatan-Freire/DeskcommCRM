@@ -18,10 +18,9 @@ import { deriveMediaText, type DeriveDeps } from "@/lib/messaging/media/derive";
 import { MARCADOR_NAO_LIDA, TIPOS_DERIVAVEIS } from "@/lib/messaging/media/derivable";
 import { deriveVideoText } from "@/lib/messaging/media/video-derive";
 import {
-  apiTranscriptionProvider,
-  idiomasDaTranscricao,
-  modeloDeTranscricaoEmVigor,
-} from "@/lib/messaging/media/transcription";
+  decidirTranscricao,
+  type DecisaoDeTranscricao,
+} from "@/lib/messaging/media/escada-de-transcricao";
 import { logger } from "@/lib/logger";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { motivoDaRecusaDeDestino } from "@/lib/automation/destinos-internos-autorizados";
@@ -51,6 +50,8 @@ interface MessageRow {
   media_mime: string | null;
   media_storage_path: string | null;
   media_derived_status: string | null;
+  /** Onde o motivo do `failed` mora: sem ele o operador vê o estado sem a causa. */
+  metadata: Record<string, unknown> | null;
 }
 
 export async function deriveMessageMedia(row: EventRow): Promise<HandlerResult> {
@@ -61,7 +62,7 @@ export async function deriveMessageMedia(row: EventRow): Promise<HandlerResult> 
   const admin = createAdminClient();
   const { data, error } = await admin
     .from("messages")
-    .select("id, organization_id, type, media_mime, media_storage_path, media_derived_status")
+    .select("id, organization_id, type, media_mime, media_storage_path, media_derived_status, metadata")
     .eq("id", messageId)
     .eq("organization_id", row.organization_id)
     .maybeSingle();
@@ -119,10 +120,24 @@ export async function deriveMessageMedia(row: EventRow): Promise<HandlerResult> 
   //
   // O turno que já rodou não volta atrás — o dreno tem teto de espera. O que
   // isto conserta é todo turno seguinte da conversa, que lê o histórico.
-  const markFailed = async () => {
+  //
+  // O `motivo` é o item 2 da #2171: "ninguém tentou" e "tentou e não deu"
+  // eram o MESMO nulo, e o drain nem chegava aqui — ele desistia no teto de
+  // 8 minutos com a coluna ainda nula. Agora todo desfecho terminal da
+  // derivação é `failed` + a razão, gravada em `metadata.media_derived_motivo`,
+  // que é o que o operador lê antes de sair mexendo em Provedores de IA.
+  const markFailed = async (motivo: string) => {
     await admin.from("messages")
-      .update({ media_derived_text: MARCADOR_NAO_LIDA, media_derived_status: "failed" })
-      .eq("id", msg.id).eq("organization_id", msg.organization_id);
+      .update({
+        media_derived_text: MARCADOR_NAO_LIDA,
+        media_derived_status: "failed",
+        metadata: { ...(msg.metadata ?? {}), media_derived_motivo: motivo },
+      })
+      .eq("id", msg.id).eq("organization_id", msg.organization_id)
+      // A mesma guarda LGPD do caminho `ready` (#1991): `metadata` aqui é a
+      // foto lida no começo, e a anonimização que acontecer no meio a zera —
+      // regravá-la devolveria à linha redigida o que a cascata apagou.
+      .filter("body", "isdistinct", MENSAGEM_REDIGIDA);
   };
 
   try {
@@ -200,25 +215,86 @@ export async function deriveMessageMedia(row: EventRow): Promise<HandlerResult> 
       llm = await resolveOrgLlmConfig(derivePool(), llmCfg, row.organization_id);
     }
 
-    // A transcrição é SEMPRE do Whisper (api.openai.com), então precisa de uma
-    // chave OpenAI — não da chave do provedor de chat da org. O comentário
-    // antigo já dizia isso ("senão exige credencial openai dedicada"), mas o
-    // código passava `llm.apiKey` direto: numa org com Anthropic, a chave da
-    // Anthropic era enviada para a OpenAI e voltava 401 em toda tentativa
-    // (visto nesta VPS: media.derive_requested preso com transcription_401,
-    // e o cliente ouvindo "não consigo ouvir áudio" com a chave certa no .env).
-    let openaiKey: string | null = null;
-    if (llm.provider === "openai") {
-      openaiKey = llm.apiKey;
-    } else {
+    // ─── DE QUEM É O OUVIDO: a escada, não a árvore de if (#2171) ──────────
+    //
+    // O comentário antigo — "a transcrição é SEMPRE do Whisper (api.openai.com),
+    // então precisa de uma chave OpenAI" — era verdadeiro, e é justamente o
+    // defeito: uma organização rodando Gemini com a chave do Google validada
+    // recebia o áudio, não transcrevia, e a falha ficava MUDA. O ponto fixo
+    // `transcricao_de_audio` só fala o protocolo da OpenAI; quem fala o
+    // protocolo do modelo de conversa é a escada em
+    // `lib/messaging/media/escada-de-transcricao.ts`, e é ela quem decide o
+    // degrau. Aqui só se monta a entrada dela.
+    //
+    // O 401 de 09/2025 (chave da Anthropic indo para api.openai.com) continua
+    // tratado: o degrau OpenAI só usa a chave do chat quando o chat É OpenAI;
+    // fora disso resolve a credencial OpenAI à parte (`chaveOpenai` abaixo).
+    // Só áudio e vídeo têm quem transcreva: imagem e documento não precisam
+    // desta pergunta, e fazê-la à toa resolveria o padrão da organização numa
+    // leitura de foto que nunca vai usar o degrau (o teste #1591 cobre justamente
+    // que o binding de visão não dispare uma resolução que ninguém pediu).
+    const precisaTranscricao = msg.type === "audio" || msg.type === "video";
+    let conversa: Awaited<ReturnType<typeof resolveOrgLlmConfig>> | null = llm;
+    if (precisaTranscricao && bindingDaVisao) {
+      // O `llm` acima é o binding de VISÃO. O degrau 3 pede o modelo de
+      // CONVERSA — o padrão da organização, resolvido sem override. Pode não
+      // existir credencial padrão nenhuma; aí o degrau simplesmente não existe
+      // e a escada devolve `nada` com o motivo, em vez de um nulo mudo.
+      try {
+        conversa = await resolveOrgLlmConfig(derivePool(), llmCfg, row.organization_id);
+      } catch {
+        conversa = null;
+      }
+    }
+
+    // Thunk, não valor: a credencial OpenAI só é LIDA se o serviço de
+    // transcrição da instalação (degrau 1) não valer.
+    const chaveOpenai = async (): Promise<string | null> => {
+      if (llm.provider === "openai") return llm.apiKey;
       try {
         const oa = await resolveOrgLlmConfig(derivePool(), llmCfg, row.organization_id, {
           provider: "openai",
         });
-        openaiKey = oa.apiKey;
+        return oa.apiKey;
       } catch {
-        openaiKey = null; // sem credencial e sem OPENAI_API_KEY: áudio fica sem transcrição
+        return null; // sem credencial e sem chave da instalação: nenhum degrau OpenAI
       }
+    };
+
+    // A escada roda SEMPRE: `deps.transcriber` existe para todo tipo (vídeo
+    // também transcreve), e antes da escada ele era montado sem condicional.
+    // O que é condicional é a PERGUNTA ao modelo de conversa — só áudio e
+    // vídeo precisam de quem ouça, e uma leitura de foto não pode custar uma
+    // resolução de credencial que ninguém pediu (o teste #1591 aperta exatamente
+    // isso: o binding de visão resolve, e mais nada).
+    const decisao: DecisaoDeTranscricao = await decidirTranscricao({
+      conversa:
+        precisaTranscricao && conversa
+          ? { provider: conversa.provider, apiKey: conversa.apiKey, modelId: conversa.defaultModel }
+          : null,
+      chaveOpenai,
+    });
+    logger.info("[media-derive] transcrição resolvida", {
+      organization_id: row.organization_id,
+      origem: decisao.origem,
+      motivo: decisao.motivo,
+    });
+
+    // ─── `nada` é uma RESPOSTA, não um silêncio ─────────────────────────────
+    //
+    // Antes: sem chave OpenAI o worker gravava um texto-marcador e seguia —
+    // `media_derived_status` acabava em `ready` (ou ficava nulo, quando o
+    // degrau falhava antes). Agora, para áudio sem quem transcreva, o desfecho
+    // é terminal e com causa: `failed` + motivo, que é o item 2 da #2171.
+    if (msg.type === "audio" && !decisao.transcriber) {
+      await markFailed(decisao.motivo);
+      await avisarMidiaNaoLida(
+        msg.organization_id,
+        rotuloDoTipo,
+        decisao.motivo,
+        "Cadastre a chave do provedor de conversa da organização (Provedores de IA) ou a chave OpenAI que transcreve — depois disso a próxima nota de voz volta a virar texto.",
+      );
+      return { consumer_key, status: "ok", detail: `transcricao_indisponivel: ${decisao.origem}` };
     }
 
     // ─── A chave de QUEM vai para o endereço de QUEM ────────────────────────
@@ -247,9 +323,28 @@ export async function deriveMessageMedia(row: EventRow): Promise<HandlerResult> 
 
     // O 5º argumento é a `base_url` do binding: o factory precisa dela para não
     // cair no endpoint padrão do provedor (ver o comentário lá em cima).
-    const deps = buildDeriveDeps(llm, openaiKey, row.organization_id, admin, baseUrlDaVisao, chaveEhDaInstalacao);
+    const deps = buildDeriveDeps(llm, decisao, row.organization_id, admin, baseUrlDaVisao, chaveEhDaInstalacao);
 
     const text = await deriveMediaText(msg.type, buffer, msg.media_mime ?? "application/octet-stream", deps);
+
+    // ─── Transcrição que veio VAZIA também é `failed` + motivo (#2171) ──────
+    //
+    // Um provedor que responde 200 sem nada fazia o worker gravar `ready` com
+    // `media_derived_text=''`: o turno seguia sem a mensagem, o operador via
+    // "pronto" no painel e ninguém sabia por quê. Silêncio pro cliente com
+    // status de sucesso é pior que o nulo — era o mesmo defeito de olhar.
+    if (msg.type === "audio" && !text.trim()) {
+      const motivo =
+        `o modelo devolveu a transcrição do áudio vazia (${decisao.origem}: ${decisao.motivo})`;
+      await markFailed(motivo);
+      await avisarMidiaNaoLida(
+        msg.organization_id,
+        rotuloDoTipo,
+        motivo,
+        "O provedor respondeu sem texto. Confira o modelo em Provedores de IA: se ele aceita áudio mas devolve vazio, troque por outro modelo com capacidade audio.",
+      );
+      return { consumer_key, status: "ok", detail: "transcricao_vazia" };
+    }
 
     // ─── LGPD: nunca gravar transcrição em mensagem já redigida (#1991) ────
     //
@@ -279,7 +374,9 @@ export async function deriveMessageMedia(row: EventRow): Promise<HandlerResult> 
     const detail = err instanceof Error ? err.message : String(err);
     if (row.attempts >= DRAIN_MAX_ATTEMPTS - 1) {
       logger.error("[media-derive] failed permanently", { message_id: msg.id, detail });
-      await markFailed();
+      await markFailed(
+        `a derivação da ${rotuloDoTipo} falhou em todas as tentativas: ${detail.slice(0, 200)}`,
+      );
       // ─── E AVISA. Desistir calado era o desfecho mais comum ────────────────
       //
       // As recusas que este worker já sabia explicar — modelo sem visão,
@@ -368,7 +465,7 @@ async function lerBindingDoPonto(
 
 function buildDeriveDeps(
   llm: { provider: string; apiKey: string; defaultModel: string | null },
-  openaiKey: string | null,
+  decisao: DecisaoDeTranscricao,
   orgId: string,
   admin: ReturnType<typeof createAdminClient>,
   // Endpoint próprio do binding de visão, quando houver. `null` = usa o padrão
@@ -497,29 +594,6 @@ function buildDeriveDeps(
       return MARCADOR_NAO_LIDA;
     },
   };
-  // Serviço de transcrição: a chave da OpenAI continua sendo o padrão, porque é
-  // o que toda instalação já tem. Mas o ponto "Ouvir o áudio" promete aceitar
-  // outro serviço compatível — o provedor por trás já aceita `baseUrl` e
-  // `model`, e o worker nunca os passava: quem tinha Groq/Whisper próprio
-  // continuava batendo em api.openai.com com `whisper-1`. Sem
-  // `TRANSCRIPTION_API_KEY` o comportamento é exatamente o de antes.
-  //
-  // `TRANSCRIPTION_MODEL` e `TRANSCRIPTION_LANGUAGES` valem TAMBÉM aqui, com a
-  // chave da OpenAI da organização: trocar `whisper-1` por um modelo melhor da
-  // própria OpenAI não pode exigir copiar a chave para o `.env`. O MODELO só
-  // vale aqui com `TRANSCRIPTION_BASE_URL` vazio (ver `modeloDeTranscricaoEmVigor`).
-  const idiomas = idiomasDaTranscricao(env.TRANSCRIPTION_LANGUAGES);
-  const transcricaoPadrao: DeriveDeps["transcriber"] = openaiKey
-    ? apiTranscriptionProvider({
-        apiKey: openaiKey,
-        model: modeloDeTranscricaoEmVigor({
-          model: env.TRANSCRIPTION_MODEL,
-          apiKey: env.TRANSCRIPTION_API_KEY,
-          baseUrl: env.TRANSCRIPTION_BASE_URL,
-        }),
-        languages: idiomas,
-      })
-    : semTranscricao;
   // O endereço do serviço de transcrição vem do .env da instalação e a chamada
   // leva a chave no cabeçalho: mesma recusa do endereço da visão, e antes de a
   // chave sair daqui.
@@ -550,17 +624,20 @@ function buildDeriveDeps(
   // em que a régua mudasse — sem ninguém ver, porque este arquivo roda no
   // worker, não no Next. Não é dependência nova: o worker já carrega o módulo
   // por `lib/supabase/admin`.
-  const chaveDeTranscricao = env.TRANSCRIPTION_API_KEY;
-  const transcriber: DeriveDeps["transcriber"] = chaveDeTranscricao
-    ? transcriberDeServico(
-        apiTranscriptionProvider({
-          apiKey: chaveDeTranscricao,
-          baseUrl: env.TRANSCRIPTION_BASE_URL || undefined,
-          model: env.TRANSCRIPTION_MODEL || undefined,
-          languages: idiomas,
-        }),
-      )
-    : transcricaoPadrao;
+  // ─── O degrau que a ESCADA escolheu, com a recusa onde ela vale ──────────
+  //
+  // Só o degrau 1 (o serviço de transcrição do `.env`) aponta para um
+  // endereço configurado à mão — por isso é o único que ainda passa pela
+  // recusa de destino interno antes da chave sair. Os degraus 2 e 3 vão para
+  // o endereço público do provedor com a chave da própria organização.
+  // `semTranscricao` continua sendo o fallback de quem não é áudio (vídeo e
+  // imagem têm o caminho deles), porque o degrau 4 `nada` já foi tratado no
+  // corpo do handler — lá em cima, com `failed` + motivo.
+  const transcriber: DeriveDeps["transcriber"] = !decisao.transcriber
+    ? semTranscricao
+    : decisao.origem === "servico_da_instalacao"
+      ? transcriberDeServico(decisao.transcriber)
+      : decisao.transcriber;
   return {
     transcriber,
     describeImage,
