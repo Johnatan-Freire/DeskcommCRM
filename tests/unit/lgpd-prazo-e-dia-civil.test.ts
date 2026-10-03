@@ -44,6 +44,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   computeDueAt,
+  corteDaJanela,
   diaDoPrazo,
   diasAtePrazo,
   diasDeAtraso,
@@ -75,6 +76,23 @@ function emSaoPaulo(instante: Date): string {
     month: "2-digit",
     day: "2-digit",
   }).format(instante);
+}
+
+/** Igual, com a hora — para as bordas que caem dentro de um dia. */
+function emSaoPauloComHora(instante: Date): string {
+  return new Intl.DateTimeFormat("sv-SE", {
+    timeZone: "America/Sao_Paulo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(instante);
+}
+
+/** O dia guardado cujo início é `YYYY-MM-DDT00:00:00Z` — como o motor grava. */
+function guardado(iso: string): Date {
+  return new Date(`${iso}T00:00:00.000Z`);
 }
 
 describe("a coluna due_at é um dia civil", () => {
@@ -595,6 +613,121 @@ describe("a barra do prazo das telas de detalhe lê o fim do dia, não a meia-no
 });
 
 // ---------------------------------------------------------------------------
+// O KPI E O ALERTA DO PAINEL DA INSTALAÇÃO — janela de 5 dias e "vencida"
+// ---------------------------------------------------------------------------
+
+describe("a janela de 5 dias do painel conta até o FIM do dia do prazo", () => {
+  const agora = new Date("2026-10-03T12:00:00.000Z"); // 03/10 09:00 em São Paulo
+
+  it("corteDaJanela anda um dia para trás, e é exatamente a diferença do fim do dia", () => {
+    // A propriedade, e não o número: o corte de N dias é o corte ingênuo
+    // (`agora + N dias`) menos a distância entre o início e o fim do dia guardado.
+    const ingênuo = new Date(agora.getTime() + 5 * DIA_MS);
+    const corte = corteDaJanela(agora, 5);
+    const distanciaDoDia =
+      fimDoPrazo(guardado("2026-10-05"))!.getTime() - guardado("2026-10-05").getTime();
+    expect(ingênuo.getTime() - corte.getTime()).toBe(distanciaDoDia);
+    expect(distanciaDoDia).toBe(DIA_MS);
+  });
+
+  it("quem expira em 5 dias e meio NÃO entra na janela de 5 dias", () => {
+    // O caso que a consulta antiga (`due_at < agora + 5 dias`) deixava passar:
+    // dia guardado 08/10, que expira em 08/10 21:00 = 132 h depois das 09:00 de 03/10.
+    const diaDoPrazo = guardado("2026-10-08");
+    const expiraEmHoras = (fimDoPrazo(diaDoPrazo)!.getTime() - agora.getTime()) / 3_600_000;
+    expect(expiraEmHoras).toBeGreaterThan(120);
+    // a consulta ingênua incluía:
+    expect(diaDoPrazo.getTime() < agora.getTime() + 5 * DIA_MS).toBe(true);
+    // a nova, não:
+    expect(diaDoPrazo.getTime() <= corteDaJanela(agora, 5).getTime()).toBe(false);
+  });
+
+  it("quem expira em 4 dias e meio ENTRA — a janela não encolheu", () => {
+    // dia guardado 07/10, que expira em 07/10 21:00 = 108 h depois de 03/10 09:00.
+    const diaDoPrazo = guardado("2026-10-07");
+    const expiraEmHoras = (fimDoPrazo(diaDoPrazo)!.getTime() - agora.getTime()) / 3_600_000;
+    expect(expiraEmHoras).toBeLessThanOrEqual(120);
+    expect(diaDoPrazo.getTime() <= corteDaJanela(agora, 5).getTime()).toBe(true);
+  });
+
+  it("a janela de 0 dias conta só quem já expirou (o corte é agora menos o dia guardado)", () => {
+    expect(corteDaJanela(agora, 0).getTime()).toBe(agora.getTime() - DIA_MS);
+  });
+});
+
+describe("o alerta 'vencida' do painel vira junto com o selo", () => {
+  const recebido = "2026-09-14T12:00:00.000Z";
+  const prazo = computeDueAt(new Date(recebido), 15); // 2026-10-05T00:00:00Z
+  const prazoIso = prazo.toISOString();
+  const t = (texto: string) => texto;
+
+  /** `isOverdue` como a rota comparava: o instante contra o início do dia. */
+  const vencidaAntiga = (agora: Date) => prazo.getTime() < agora.getTime();
+  const vencidaNova = (agora: Date) => diasDeAtraso(prazoIso, agora) > 0;
+
+  it("não diz 'vencida' na véspera do prazo", () => {
+    const vespera = new Date("2026-10-05T01:00:00.000Z"); // 04/10 22:00 em São Paulo
+    expect(emSaoPaulo(vespera)).toBe("2026-10-04");
+    expect(vencidaAntiga(vespera)).toBe(true); // o defeito
+    expect(vencidaNova(vespera)).toBe(false);
+  });
+
+  it("a divergência é o dia inteiro do prazo, minuto a minuto", () => {
+    // Primeiro e último minuto em que a rota antiga dizia "vencida" com o prazo
+    // ainda por expirar. O intervalo, e não a contagem de amostras: medir de hora
+    // em hora dá 23 amostras para um intervalo de ~24 h.
+    let primeiro: Date | null = null;
+    let ultimo: Date | null = null;
+    const de = new Date(prazo.getTime() - 3 * DIA_MS).getTime();
+    const ate = new Date(prazo.getTime() + 3 * DIA_MS).getTime();
+    for (let ms = de; ms <= ate; ms += 60_000) {
+      const instante = new Date(ms);
+      if (vencidaAntiga(instante) && !vencidaNova(instante)) {
+        if (!primeiro) primeiro = instante;
+        ultimo = instante;
+      }
+    }
+    expect(emSaoPauloComHora(primeiro!)).toBe("2026-10-04 21:01");
+    expect(emSaoPauloComHora(ultimo!)).toBe("2026-10-05 20:59");
+  });
+
+  it("as três superfícies viram no mesmo instante", () => {
+    const fim = fimDoPrazo(prazo)!;
+    expect(vencidaNova(fim)).toBe(true);
+    expect(diasDeAtraso(prazoIso, fim)).toBe(1);
+    expect(computeRiskLevel(prazoIso, recebido, fim)).toBe("expired");
+    expect(computeSlaBucket(prazoIso, recebido, fim)).toBe("overdue");
+    expect(distanciaDoPrazo(prazoIso, t, fim).label).toBe("atrasado hoje");
+  });
+
+  it("a rota filtra `due_at` só pelo corte da janela, e não lê o instante dele", () => {
+    // Os casos acima provam o HELPER; este prova que a ROTA o usa. Sem ele,
+    // devolver o KPI ou a lista de alertas a `Date.now() + 5 dias`, ou o
+    // "vencida" a `Date.parse(row.due_at) < now`, passava verde (medido na triagem
+    // do #2179). KPI e alertas usam o MESMO corte com o MESMO operador.
+    const fonte = codigoSemComentario("app/api/v1/admin/dashboard/kpis/route.ts");
+    const filtros = fonte.match(/\.(?:lt|lte|gt|gte|eq)\(\s*"due_at"[^)]*\)/g) ?? [];
+    expect(filtros).toEqual(['.lte("due_at", corteDeRisco)', '.lte("due_at", corteDeRisco)']);
+    expect(fonte).toMatch(/const corteDeRisco = corteDaJanela\(/);
+    expect(fonte).not.toMatch(/(?:Date\.parse|new Date)\(\s*row\.due_at/);
+  });
+
+  it("o texto do alerta carrega o DIA guardado, e não o fuso do processo", () => {
+    // A rota imprimia `new Date(due_at).toLocaleDateString("pt-BR")`, que depende
+    // do fuso do PROCESSO: medido, 05/10 num servidor em UTC e 04/10 numa máquina
+    // em São Paulo, para o mesmo `due_at`.
+    expect(prazoEmBr(prazoIso)).toBe("05/10/2026");
+    const dependenteDoFuso = new Intl.DateTimeFormat("pt-BR", {
+      timeZone: "America/Sao_Paulo",
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+    }).format(prazo);
+    expect(dependenteDoFuso).toBe("04/10/2026"); // o defeito, medido
+  });
+});
+
+// ---------------------------------------------------------------------------
 // A LISTA DE CONSUMIDORES — a parte que impede a classe de voltar
 // ---------------------------------------------------------------------------
 
@@ -683,6 +816,7 @@ const LEEM_PELO_HELPER: readonly string[] = [
   "app/app/lgpd/requests/RequestsTable.tsx",
   "app/app/lgpd/requests/[id]/SlaTimeline.tsx",
   "app/admin/(protected)/lgpd/requests/[id]/_client.tsx",
+  "app/api/v1/admin/dashboard/kpis/route.ts",
 ];
 
 /**
@@ -707,16 +841,21 @@ const REPASSA_O_VALOR: readonly string[] = [
 /**
  * DÍVIDA CONGELADA — quem ainda redesenha o instante com fuso ou o compara em
  * milissegundos, e por quê. Cada entrada carrega o motivo escrito; entrada que
- * deixa de casar é vermelho pedindo remoção. É a fila dos próximos recortes, e
- * ela é o que impede este PR de parecer um conserto pela metade.
+ * deixa de casar é vermelho pedindo remoção.
+ *
+ * ═══ ESTÁ VAZIA — sete recortes depois ═══
+ *
+ * Ela nasceu com uma entrada só (#2101). Chegou a sete. Está vazia desde o
+ * recorte do `admin/dashboard/kpis`, e vazia é o estado que a lista quer: cada
+ * linha que sai é uma superfície que passou a ler o dia pelo helper.
+ *
+ * **Vazia não é "o gate sumiu".** Os dois casos que a usam continuam valendo:
+ * arquivo que lê `due_at` sem estar em nenhuma das três listas é vermelho, e um
+ * arquivo em duas listas também. O que está vazio é só a TERCEIRA lista; a
+ * varredura e a partição seguem de pé, e é por isso que este bloco fica aqui em
+ * vez de ser apagado.
  */
-const DIVIDA_CONGELADA: ReadonlyArray<{ arquivo: string; motivo: string }> = [
-  {
-    arquivo: "app/api/v1/admin/dashboard/kpis/route.ts",
-    motivo:
-      "Filtra `due_at` em SQL contra `now + 5 dias`, então acende 'LGPD em risco' 3h antes do prazo e não tem como usar o helper sem tirar a comparação da query. Recorte de banco/API depois das telas.",
-  },
-];
+const DIVIDA_CONGELADA: ReadonlyArray<{ arquivo: string; motivo: string }> = [];
 
 /**
  * Os módulos que DETÊM a leitura do dia. Estar na lista só vale se o arquivo
@@ -871,6 +1010,16 @@ describe("nenhum consumidor de due_at nasce fora da lista", () => {
         "app/admin/(protected)/lgpd/requests/[id]/_client.tsx",
         /msUntilDue|new Date\(\s*due_at\s*\)/,
         "a linha do tempo da administração voltou a medir o prazo a partir de `due_at` em vez de `diasAtePrazo`/`fimDoPrazo` — a contagem em dias e a barra voltam a errar por um dia.",
+      ],
+      [
+        "app/api/v1/admin/dashboard/kpis/route.ts",
+        /new Date\(\s*row\.due_at\s*\)\.getTime\(\)\s*</,
+        "a virada de 'vencida' do painel voltou a comparar o INSTANTE de `due_at` com agora — ela anuncia atraso a partir das 21h da véspera. Use `diasDeAtraso`.",
+      ],
+      [
+        "app/api/v1/admin/dashboard/kpis/route.ts",
+        /toLocaleDateString\(/,
+        "a data do alerta voltou a ser formatada no fuso do PROCESSO: um servidor em UTC e uma máquina em São Paulo imprimem dias diferentes para o mesmo `due_at`. Use `prazoEmBr`.",
       ],
     ];
     for (const [arquivo, padrao, porque] of armadilhas) {

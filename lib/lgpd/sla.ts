@@ -193,6 +193,38 @@ export function fimDoPrazo(dueAt: string | Date | null | undefined): Date | null
 }
 
 /**
+ * O corte de "o prazo EXPIRA em até `dias` dias", como instante.
+ *
+ * ## Por que ele anda um dia para trás
+ *
+ * `due_at` é o INÍCIO do dia guardado, e quem expira é o **FIM** dele. Então um
+ * pedido que expira dentro de `dias` dias tem
+ * `due_at + 1 dia <= agora + dias dias`, ou seja
+ * `due_at <= agora + (dias - 1) dia`. Um dia, e não "quase" um: a diferença é
+ * exatamente `fimDoPrazo(due_at) - due_at`.
+ *
+ * Medido com `agora = 03/10 09:00` em São Paulo, janela de 5 dias:
+ *
+ * | dia do prazo | expira em | `due_at <= agora + 5d` | `due_at <= agora + 4d` |
+ * |---|---|---|---|
+ * | 05/10 | 60h | entra | **entra** |
+ * | 07/10 | 108h | entra | **entra** |
+ * | 08/10 | 132h | **entra** | **NÃO entra** |
+ * | 09/10 | 156h | não entra | não entra |
+ *
+ * A coluna do meio é o defeito: um pedido que expira em **5 dias e meio** entrava
+ * num KPI que promete cinco.
+ *
+ * Mora aqui, e não em cada consulta, pela mesma razão de `fimDoPrazo`: a âncora
+ * escrita à mão é a âncora que alguém esquece de mudar num dos lugares. Hoje há
+ * dois consumidores (`admin/dashboard/kpis`, o KPI e o alerta), e os dois leem
+ * este.
+ */
+export function corteDaJanela(agora: Date, dias: number): Date {
+  return new Date(agora.getTime() + (dias - 1) * DIA_MS);
+}
+
+/**
  * A fração (0..1) da janela entre o recebimento e o FIM do dia do prazo que já
  * passou — a barra das duas telas de detalhe. `0` quando uma das pontas não se
  * lê: barra vazia em vez de `NaN%`.
