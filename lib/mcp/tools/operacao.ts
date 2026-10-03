@@ -77,7 +77,8 @@ export const crmListStages: McpToolDefinition<typeof listStagesShape> = {
   description:
     "Lista as etapas ativas de um pipeline, na ordem do quadro, com id, name, slug, position, " +
     "is_won/is_lost, win_probability (probabilidade de ganho 0-100 ou null quando a etapa nao foi " +
-    "calibrada) e a autoria da última mudança de configuração (last_change_actor_kind: user|ai|system). " +
+    "calibrada), expected_duration_hours (janela de esfriando em HORAS, ou null quando a etapa " +
+    "usa o padrao de 24 h) e a autoria da última mudança de configuração (last_change_actor_kind: user|ai|system). " +
     "Use antes de mover um lead ou de criar etapa nova, para não duplicar coluna existente.",
   inputSchema: listStagesShape,
   category: "read",
@@ -130,13 +131,21 @@ const updateStageShape = {
    * probabilidade" em vez de somar zero em silêncio.
    */
   win_probability: z.number().int().min(0).max(100).nullable().optional(),
+  /**
+   * Janela de "esfriando" da etapa, em HORAS (1 a 8760; `null` limpa e o radar
+   * volta ao padrão de 24 h/72 h). É o que o CORE 5 lê de
+   * `crm_stages.expected_duration_hours` para classificar lead parado.
+   */
+  expected_duration_hours: z.number().int().min(1).max(8760).nullable().optional(),
 };
 
 export const crmUpdateStage: McpToolDefinition<typeof updateStageShape> = {
   name: "crm_update_stage",
   description:
     "Renomeia, reordena, calibra a probabilidade de ganho (win_probability, 0-100; null limpa a " +
-    "calibração e a previsão passa a reportar a etapa sem probabilidade) ou muda o papel de desfecho " +
+    "calibração e a previsão passa a reportar a etapa sem probabilidade), ajusta a janela de " +
+    "esfriando (expected_duration_hours, em HORAS de 1 a 8760; null volta ao padrão de 24 h) ou " +
+    "muda o papel de desfecho " +
     "(is_won/is_lost) de uma etapa. " +
     "after_stage_id é o id da etapa VIZINHA DA ESQUERDA (null = primeira coluna), não um número de posição. " +
     "Mover a marcação de ganho/perda para outra etapa é permitido; REMOVÊ-LA sem substituta não é — " +
@@ -152,13 +161,16 @@ export const crmUpdateStage: McpToolDefinition<typeof updateStageShape> = {
     if (input.is_lost !== undefined) pedido.is_lost = input.is_lost;
     if (input.after_stage_id !== undefined) pedido.depois_de = input.after_stage_id;
     if (input.win_probability !== undefined) pedido.win_probability = input.win_probability;
+    if (input.expected_duration_hours !== undefined) {
+      pedido.expected_duration_hours = input.expected_duration_hours;
+    }
     if (Object.keys(pedido).length === 0) {
       throw new ApiError(
         422,
         "unprocessable_entity",
         undefined,
         ctx.requestId,
-        "Diga o que mudar na etapa: o nome, a ordem ou o papel dela no desfecho do negócio.",
+        "Diga o que mudar na etapa: o nome, a ordem, a janela de esfriando ou o papel dela no desfecho do negócio.",
       );
     }
     const { funil } = await atualizarEtapa(deps(ctx), {

@@ -12212,6 +12212,15 @@ export const DICIONARIO: Traducoes = {
   "Dê um rótulo ao campo.": { es: "Ponle una etiqueta al campo." },
   'Em "Ações após o envio", adicione "Webhook" e cole o endereço acima em "URL do Webhook".': { es: 'En "Acciones después del envío", agrega "Webhook" y pega la dirección de arriba en "URL del Webhook".' },
   'Adicione a ação "Call Webhook" ao formulário e cole o endereço acima.': { es: 'Agrega la acción "Call Webhook" al formulario y pega la dirección de arriba.' },
+
+  // ─── Janela de "esfriando" da etapa editável (issue #1532) ───
+  "Janela de esfriando (vazio = 24 h de padrão)": {
+    es: "Ventana de enfriamiento (vacío = 24 h predeterminada)",
+  },
+  "Janela de esfriando": { es: "Ventana de enfriamiento" },
+  "A janela de esfriando vai de 1 hora a 8760 horas (365 dias).": {
+    es: "La ventana de enfriamiento va de 1 hora a 8760 horas (365 días).",
+  },
 };
 
 /**
