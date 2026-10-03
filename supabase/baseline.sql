@@ -38863,7 +38863,7 @@ declare c public.contacts; support jsonb; v_quando timestamptz;
 begin
  support:=public.fn_support_context();
  if auth.uid() is null or not public.fn_support_write_allowed(p_organization_id)
-  or not (public.fn_role_at_least(p_organization_id,'admin') or (public.fn_is_platform_admin() and support is null)) then
+  or not (public.fn_role_at_least(p_organization_id,'admin') or (public.fn_is_platform_admin_full() and support is null)) then
   raise exception 'contact_anonymize_forbidden' using errcode='42501';
  end if;
  if not public.fn_session_mfa_proven() then raise exception 'contact_anonymize_mfa_required' using errcode='42501';end if;
