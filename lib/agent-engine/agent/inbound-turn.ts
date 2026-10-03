@@ -3779,6 +3779,10 @@ async function executarTurnoDoAgente(
               conversationSummary: buildHandoffSummary(previous),
               contextoDoTurno: { checkpoint: previous, pendentesDoCliente: inboundsPendentes },
               avisoAoLead: aviso,
+              // #2210: com a mensagem na mão o handoff pergunta ao banco se a
+              // derivação da mídia ainda estava em aberto — e aí grava a marca
+              // que permite devolver o atendimento sozinho quando o texto chegar.
+              gatilho: { inboundMessageId: input.inboundMessageId },
               log: runLog,
             },
             raw,

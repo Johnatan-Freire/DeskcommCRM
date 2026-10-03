@@ -22,6 +22,7 @@ import {
   type DecisaoDeTranscricao,
 } from "@/lib/messaging/media/escada-de-transcricao";
 import { logger } from "@/lib/logger";
+import { reagirAConclusaoDeDerivacao } from "@/lib/escalacao/handoff-tecnico";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { motivoDaRecusaDeDestino } from "@/lib/automation/destinos-internos-autorizados";
 import { DETALHE_TECNICO } from "@/lib/event-log/aviso-de-evento-morto";
@@ -46,6 +47,8 @@ function derivePool(): pg.Pool {
 interface MessageRow {
   id: string;
   organization_id: string;
+  /** A conversa da mensagem: é onde o handoff da #2210 deixa a sua marca. */
+  conversation_id: string;
   type: string;
   media_mime: string | null;
   media_storage_path: string | null;
@@ -62,7 +65,7 @@ export async function deriveMessageMedia(row: EventRow): Promise<HandlerResult> 
   const admin = createAdminClient();
   const { data, error } = await admin
     .from("messages")
-    .select("id, organization_id, type, media_mime, media_storage_path, media_derived_status, metadata")
+    .select("id, organization_id, conversation_id, type, media_mime, media_storage_path, media_derived_status, metadata")
     .eq("id", messageId)
     .eq("organization_id", row.organization_id)
     .maybeSingle();
@@ -369,6 +372,17 @@ export async function deriveMessageMedia(row: EventRow): Promise<HandlerResult> 
     if (!gravados || gravados.length === 0) {
       return { consumer_key, status: "skipped", detail: "message_redacted" };
     }
+    // #2210 — o texto chegou. Se o turno já tiver rodado SEM ele e tiver
+    // passado a conversa para humano por "não há transcrição de texto", é aqui
+    // que a falha transitória deixa de ser permanente: a reação corrige o
+    // motivo gravado (o banco já o desmentiu), devolve pela MESMA função do
+    // botão "Devolver ao automático" e reenfileira o turno tardio.
+    await reagirAConclusaoDeDerivacao(admin, {
+      organizationId: msg.organization_id,
+      conversationId: msg.conversation_id,
+      messageId: msg.id,
+      requestId: row.id,
+    });
     return { consumer_key, status: "ok" };
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
