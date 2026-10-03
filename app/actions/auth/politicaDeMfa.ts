@@ -17,7 +17,7 @@ import { supportWriteError } from "@/lib/impersonate/support";
 import { revalidatePath } from "next/cache";
 
 import { audit } from "@/lib/audit";
-import { loadAuthUser, resolveActiveOrg, sessionAal, isMfaEnrolled } from "@/lib/auth/server";
+import { loadAuthUser, resolveActiveOrg, sessionAal, isMfaEnrolled, mfaEmDivida } from "@/lib/auth/server";
 import { empresaExigeMfa, exigeCadastroDeMfa } from "@/lib/auth/politica-mfa";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -42,6 +42,12 @@ export async function definirExigenciaDeMfa(exigir: boolean): Promise<ResultadoD
 
   if (org.role !== "admin") {
     return { ok: false, erro: "Só um administrador pode mudar essa regra." };
+  }
+  // Depois do papel: só quem passaria por ele é cobrado pelo segundo fator. A
+  // regra da empresa inteira é escrita tão sensível quanto desligar o próprio
+  // fator — quem TEM fator prova nesta sessão, como nas rotas (`requireRole`).
+  if (await mfaEmDivida()) {
+    return { ok: false, erro: "Confirme a verificação em duas etapas nesta sessão." };
   }
 
   const admin = createAdminClient();
