@@ -749,6 +749,10 @@ export const DICIONARIO: Traducoes = {
   "Revisar recuperação": { es: "Revisar recuperación" },
 
   "Abrir conversa": { es: "Abrir conversación" },
+  "sem telefone": { es: "sin teléfono" },
+  "Sem telefone no contato: cadastre um telefone para abrir a conversa.": {
+    es: "Sin teléfono en el contacto: agrega un teléfono para abrir la conversación.",
+  },
   "Abrir negócio": { es: "Abrir negocio" },
   "Abrir acompanhamento": { es: "Abrir seguimiento" },
   "Revisar conexão": { es: "Revisar conexión" },
