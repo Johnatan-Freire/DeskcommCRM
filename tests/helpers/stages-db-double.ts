@@ -127,6 +127,12 @@ export interface DbOpts {
   contacts?: Array<Record<string, unknown>>;
   /** Erro do banco na n-ésima escrita (1-based), como o PostgREST devolveria. */
   writeError?: (n: number, table: string) => { code: string; message: string } | null;
+  /**
+   * O `max_rows` do PostgREST (1000 em `supabase/config.toml`): corta TODA
+   * leitura nesse tamanho, sem erro, por maior que seja o `.limit`/`.range`.
+   * Ausente = sem corte, que é o que os testes que não falam de volume querem.
+   */
+  maxRows?: number;
 }
 
 type Linha = Record<string, unknown>;
@@ -181,6 +187,14 @@ export function makeDb(opts: DbOpts = {}): Registro {
 
   function builder(table: string) {
     const filtros: Array<[string, unknown]> = [];
+    /**
+     * `.gte(col, valor)` / `.lte(col, valor)` — recorte por DATA, o que a taxa
+     * histórica por etapa (#1753) usa para dizer de QUAL período é o número.
+     * Sem estes dois, a rota cairia num TypeError do dublê e o teste mediria o
+     * dublê em vez do handler. A comparação é de string: o `performed_at` do
+     * Postgres é ISO-8601 em UTC, e ISO ordena lexicograficamente.
+     */
+    const intervalos: Array<{ coluna: string; op: "gte" | "lte"; valor: string }> = [];
     const pertinencias: Array<[string, unknown[]]> = [];
     const negacoes: Array<[string, unknown]> = [];
     let patch: Record<string, unknown> | null = null;
@@ -191,6 +205,7 @@ export function makeDb(opts: DbOpts = {}): Registro {
     let head = false;
     let apagar = false;
     let teto: number | null = null;
+    let desde = 0;
 
     const casam = () =>
       (tables[table] ?? [])
@@ -198,7 +213,13 @@ export function makeDb(opts: DbOpts = {}): Registro {
         .filter((r) => pertinencias.every(([c, vs]) => vs.includes(r[c])))
         // `neq` em SQL exclui NULL (`NULL <> v` nao e verdadeiro) — o duble
         // segue o banco, nao o JavaScript.
-        .filter((r) => negacoes.every(([c, v]) => r[c] !== null && r[c] !== undefined && r[c] !== v));
+        .filter((r) => negacoes.every(([c, v]) => r[c] !== null && r[c] !== undefined && r[c] !== v))
+        .filter((r) =>
+          intervalos.every(({ coluna, op, valor }) => {
+            const texto = typeof r[coluna] === "string" ? r[coluna] : String(r[coluna]);
+            return op === "gte" ? texto >= valor : texto <= valor;
+          }),
+        );
 
     /**
      * Ordena, corta e projeta como o PostgREST faria.
@@ -210,7 +231,8 @@ export function makeDb(opts: DbOpts = {}): Registro {
     const lidos = () => {
       let rows = [...casam()];
       if (ordem) rows.sort((a, b) => Number(a[ordem!]) - Number(b[ordem!]));
-      if (teto !== null) rows = rows.slice(0, teto);
+      if (teto !== null) rows = rows.slice(desde, desde + teto);
+      if (opts.maxRows !== undefined) rows = rows.slice(0, opts.maxRows);
       // `select("*")` (usado por `app/api/v1/leads/_handler.ts`) é o CURINGA do
       // PostgREST — a linha inteira, não uma coluna literal chamada "*". Sem
       // este ramo, o projetor abaixo tratava "*" como nome de coluna e devolvia
@@ -332,6 +354,20 @@ export function makeDb(opts: DbOpts = {}): Registro {
       },
       limit: (n: number) => {
         teto = n;
+        return b;
+      },
+      gte: (c: string, v: string) => {
+        intervalos.push({ coluna: c, op: "gte", valor: v });
+        return b;
+      },
+      lte: (c: string, v: string) => {
+        intervalos.push({ coluna: c, op: "lte", valor: v });
+        return b;
+      },
+      /** `.range(de, ate)` — inclusivo nas duas pontas, como o PostgREST. */
+      range: (de: number, ate: number) => {
+        desde = de;
+        teto = ate - de + 1;
         return b;
       },
       order: (col: string) => {
