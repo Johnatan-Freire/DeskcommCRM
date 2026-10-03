@@ -42,8 +42,16 @@ import { readFileSync, readdirSync, statSync, type Dirent } from "node:fs";
 import { join, relative, sep } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { computeDueAt, diaDoPrazo, diasAtePrazo, diasDeAtraso, prazoEmBr } from "@/lib/lgpd/sla";
-import { computeSlaBucket } from "@/lib/lgpd/balde-de-sla";
+import {
+  computeDueAt,
+  diaDoPrazo,
+  diasAtePrazo,
+  diasDeAtraso,
+  horasAteOFimDoPrazo,
+  prazoEmBr,
+} from "@/lib/lgpd/sla";
+import { computeRiskLevel, computeSlaBucket } from "@/lib/lgpd/balde-de-sla";
+import { contagemDoPrazo } from "@/lib/lgpd/contagem-do-prazo";
 
 const RAIZ = process.cwd();
 const DIA_MS = 86_400_000;
@@ -210,6 +218,147 @@ describe("o balde de SLA da linha não acende antes do prazo", () => {
 });
 
 // ---------------------------------------------------------------------------
+// O PAINEL DA PLATAFORMA — o selo e a contagem leem o MESMO dia
+// ---------------------------------------------------------------------------
+
+describe("o selo do painel e o balde da organização viram no mesmo instante", () => {
+  const recebido = "2026-09-14T12:00:00.000Z";
+  const prazo = computeDueAt(d("2026-09-14"), 15).toISOString(); // 2026-10-05T00:00:00Z
+
+  /** Selo como a rota de ADMIN comparava, para o defeito ficar explícito. */
+  const seloAntigo = (agora: Date): string => {
+    const ms = new Date(prazo).getTime() - agora.getTime();
+    if (ms < 0) return "expired";
+    if (ms < DIA_MS) return "at_risk";
+    return "ok";
+  };
+
+  it("não marca 'Vencido' na véspera: às 22h de 04/10 o prazo é amanhã", () => {
+    // 04/10 22:00 em São Paulo = 05/10 01:00Z.
+    const noiteDaVespera = new Date("2026-10-05T01:00:00.000Z");
+    expect(emSaoPaulo(noiteDaVespera)).toBe("2026-10-04");
+    expect(seloAntigo(noiteDaVespera)).toBe("expired"); // o defeito
+    expect(computeRiskLevel(prazo, recebido, noiteDaVespera)).not.toBe("expired");
+    // E o balde da organização já acertava neste ponto — discordava só o selo.
+    expect(computeSlaBucket(prazo, recebido, noiteDaVespera)).toBe("critical");
+  });
+
+  it("no dia do prazo é 'Crítico', e 'Vencido' no dia seguinte", () => {
+    const manhaDoPrazo = new Date("2026-10-05T12:00:00.000Z"); // 09:00 em São Paulo
+    expect(seloAntigo(manhaDoPrazo)).toBe("expired"); // o defeito
+    expect(computeRiskLevel(prazo, recebido, manhaDoPrazo)).toBe("at_risk");
+
+    const diaSeguinte = new Date("2026-10-06T12:00:00.000Z"); // 09:00 de 06/10
+    expect(computeRiskLevel(prazo, recebido, diaSeguinte)).toBe("expired");
+  });
+
+  it("prazo ausente ou ilegível é 'ok' — lixo não fica vermelho no painel de quem administra", () => {
+    const tarde = new Date("2026-10-05T12:00:00.000Z");
+    expect(computeRiskLevel(null, recebido, tarde)).toBe("ok");
+    expect(computeRiskLevel("não-é-data", recebido, tarde)).toBe("ok");
+  });
+
+  it("os dois selos nunca discordam sobre 'vencido', em 97 horas de relógio", () => {
+    // A propriedade que motivou trazer `computeRiskLevel` para `balde-de-sla.ts`:
+    // os dois baldes classificam o mesmo `due_at`, então não podem discordar
+    // sobre a única coisa que os dois dizem — se o prazo passou.
+    for (let h = -48; h <= 48; h += 1) {
+      const agora = new Date(new Date(prazo).getTime() + h * 3_600_000);
+      const overdueOrg = computeSlaBucket(prazo, recebido, agora) === "overdue";
+      const expiredPainel = computeRiskLevel(prazo, recebido, agora) === "expired";
+      expect(
+        overdueOrg,
+        `divergem em ${h}h: org=overdue ${overdueOrg}, painel=expired ${expiredPainel}`,
+      ).toBe(expiredPainel);
+    }
+  });
+});
+
+describe("a coluna 'Vence em' conta até o FIM do dia, não até a meia-noite UTC", () => {
+  const prazo = computeDueAt(d("2026-09-14"), 15).toISOString(); // 2026-10-05T00:00:00Z
+  const t = (texto: string) => texto;
+
+  /** Contagem como o componente comparava, para o defeito ficar explícito. */
+  const contagemAntiga = (agora: Date): string => {
+    const horas = Math.trunc((new Date(prazo).getTime() - agora.getTime()) / 3_600_000);
+    if (horas < 0) return `${Math.abs(horas)}h em atraso`;
+    if (horas < 24) return `${horas}h restantes`;
+    return `${Math.floor(horas / 24)}d restantes`;
+  };
+
+  it("às 9h do dia do prazo: vence hoje, e não '12h em atraso'", () => {
+    const manha = new Date("2026-10-05T12:00:00.000Z"); // 09:00 em São Paulo
+    expect(emSaoPaulo(manha)).toBe("2026-10-05");
+    expect(contagemAntiga(manha)).toBe("12h em atraso"); // o defeito
+    expect(contagemDoPrazo(prazo, "received", t, manha)).toBe("12h restantes");
+  });
+
+  it("às 21h da véspera ainda resta um dia inteiro", () => {
+    const noite = new Date("2026-10-05T00:00:00.000Z"); // 04/10 21:00 em São Paulo
+    expect(emSaoPaulo(noite)).toBe("2026-10-04");
+    expect(contagemAntiga(noite)).toBe("0h restantes"); // o defeito
+    expect(contagemDoPrazo(prazo, "received", t, noite)).toBe("1d restantes");
+  });
+
+  it("'em atraso' começa na primeira hora cheia depois de o DIA acabar", () => {
+    // 05/10 20:00 em São Paulo = 05/10 23:00Z: ainda dentro do dia guardado.
+    const vinteHoras = new Date("2026-10-05T23:00:00.000Z");
+    expect(emSaoPaulo(vinteHoras)).toBe("2026-10-05");
+    expect(contagemAntiga(vinteHoras)).toBe("23h em atraso"); // o defeito
+    expect(contagemDoPrazo(prazo, "received", t, vinteHoras)).toBe("1h restantes");
+
+    // 05/10 21:00 em São Paulo = 06/10 00:00Z: o dia guardado acabou, e a coluna
+    // diz a coisa literal — zero hora restante. O "em atraso" vem na hora cheia
+    // seguinte, porque a contagem TRUNCA em direção a zero (o arredondamento de
+    // antes, preservado).
+    const virada = new Date("2026-10-06T00:00:00.000Z");
+    expect(emSaoPaulo(virada)).toBe("2026-10-05");
+    expect(contagemDoPrazo(prazo, "received", t, virada)).toBe("0h restantes");
+
+    // 05/10 22:00 em São Paulo: uma hora e meia depois do fim do dia.
+    const umaHoraDepois = new Date("2026-10-06T01:30:00.000Z");
+    expect(emSaoPaulo(umaHoraDepois)).toBe("2026-10-05");
+    expect(contagemAntiga(umaHoraDepois)).toBe("25h em atraso"); // o defeito
+    expect(contagemDoPrazo(prazo, "received", t, umaHoraDepois)).toBe("1h em atraso");
+  });
+
+  it("o pedido terminado e o prazo ilegível não têm nada a dizer", () => {
+    const agora = new Date("2026-10-05T12:00:00.000Z");
+    for (const status of ["completed", "failed"] as const) {
+      expect(contagemDoPrazo(prazo, status, t, agora)).toBe("—");
+    }
+    expect(contagemDoPrazo(null, "received", t, agora)).toBe("—");
+    expect(contagemDoPrazo("não-é-data", "received", t, agora)).toBe("—");
+  });
+
+  it("o vocabulário não ganhou nenhuma palavra nova", () => {
+    // As quatro formas de antes continuam as quatro de agora. Uma frase nova
+    // entraria no dicionário e na conta de quem revisa tradução; esta não entra.
+    const formas = new Set<string>();
+    for (let h = -96; h <= 96; h += 1) {
+      const instante = new Date(new Date(prazo).getTime() + h * 3_600_000);
+      formas.add(contagemDoPrazo(prazo, "received", t, instante));
+    }
+    const semNumero = (s: string) => s.replace(/^\d+[hd] /, "").trim();
+    expect([...new Set([...formas].map(semNumero))].sort()).toEqual(["em atraso", "restantes"]);
+  });
+
+  it("o tradutor injetado é usado, com a frase como literal", () => {
+    // O guardião de espanhol varre `lib/` atrás de `t("literal")`, então a frase
+    // precisa continuar literal aqui dentro — e o teste prova que ela chega ao
+    // tradutor, e não que alguém embrulhou a chamada por cima.
+    const chamada: string[] = [];
+    const coletor = (texto: string) => {
+      chamada.push(texto);
+      return `[${texto}]`;
+    };
+    const virada = new Date("2026-10-06T01:30:00.000Z");
+    expect(contagemDoPrazo(prazo, "received", coletor, virada)).toBe("1h [em atraso]");
+    expect(chamada).toEqual(["em atraso"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // A LISTA DE CONSUMIDORES — a parte que impede a classe de voltar
 // ---------------------------------------------------------------------------
 
@@ -289,8 +438,11 @@ const LEEM_PELO_HELPER: readonly string[] = [
   "lib/lgpd/sla.ts",
   "lib/lgpd/sla-alarm.ts",
   "lib/lgpd/balde-de-sla.ts",
+  "lib/lgpd/contagem-do-prazo.ts",
   "lib/lgpd/repository.ts",
   "app/api/v1/lgpd/requests/route.ts",
+  "app/api/v1/admin/lgpd/requests/route.ts",
+  "components/admin/lgpd/LgpdRequestsTable.tsx",
 ];
 
 /**
@@ -343,17 +495,34 @@ const DIVIDA_CONGELADA: ReadonlyArray<{ arquivo: string; motivo: string }> = [
     motivo:
       "Filtra `due_at` em SQL contra `now + 5 dias`, então acende 'LGPD em risco' 3h antes do prazo e não tem como usar o helper sem tirar a comparação da query. Recorte de banco/API depois das telas.",
   },
-  {
-    arquivo: "app/api/v1/admin/lgpd/requests/route.ts",
-    motivo:
-      "API do painel da plataforma: `computeRiskLevel` compara `due_at` em milissegundos e devolve `expired` às 21h de São Paulo da VÉSPERA do prazo — o selo 'Vencido' da tabela e o LgpdRiskBanner leem esse valor. É o mesmo defeito que `computeSlaBucket` consertou na API da organização; vai junto com o recorte das telas.",
-  },
-  {
-    arquivo: "components/admin/lgpd/LgpdRequestsTable.tsx",
-    motivo:
-      "Tela: `countdownLabel` faz `differenceInHours(new Date(due_at), now)` e diz 'Nh em atraso' a partir das 21h de São Paulo da véspera do prazo. Recorte das telas.",
-  },
 ];
+
+/**
+ * Os módulos que DETÊM a leitura do dia. Estar na lista só vale se o arquivo
+ * **importar** um deles — não basta citar o nome.
+ *
+ * A distinção não é preciosismo: a primeira versão deste gate procurava o NOME
+ * da função, e a sabotagem de apagar só a linha do `import` passou verde. O nome
+ * continuava no arquivo porque a chamada continua lá — quem apagou o import
+ * deixou um arquivo que nem compila, e um gate que não vê isso é o "gate que
+ * devolve verde" que a casa chama de pior defeito. `pnpm typecheck` pegaria a
+ * sabotagem; o gate precisa pegar sozinho, porque é ele que existe para vigiar a
+ * leitura quando ninguém está olhando o compilador.
+ */
+const MODULOS_QUE_LEEM_O_DIA = [
+  "@/lib/lgpd/sla",
+  "@/lib/lgpd/balde-de-sla",
+  "@/lib/lgpd/contagem-do-prazo",
+  "./sla",
+  "./balde-de-sla",
+  "./contagem-do-prazo",
+];
+
+function importaLeitorDeDia(fonte: string): boolean {
+  return MODULOS_QUE_LEEM_O_DIA.some((modulo) =>
+    new RegExp(`from\\s+"${modulo.replace(/[./]/g, "\\$&")}"`).test(fonte),
+  );
+}
 
 describe("nenhum consumidor de due_at nasce fora da lista", () => {
   const conhecidos = new Set([
@@ -383,17 +552,19 @@ describe("nenhum consumidor de due_at nasce fora da lista", () => {
     expect(descobertos.map((f) => `${f} → ${leDueAt(f).join(" | ")}`)).toEqual([]);
   });
 
-  it("quem entra em LEEM_PELO_HELPER importa o helper de verdade (dente do gate)", () => {
+  it("quem entra em LEEM_PELO_HELPER IMPORTa um leitor de dia de verdade (dente do gate)", () => {
     // Este é o teste que fica VERMELHO quando alguém volta a usar `new
-    // Date(due_at)` com fuso: o import some e a lista passa a mentir.
+    // Date(due_at)` com fuso, OU quando apaga o import e deixa a chamada órfã.
+    // Nos dois casos o nome da função continua no arquivo; só o `from` some.
     for (const arquivo of LEEM_PELO_HELPER) {
-      if (arquivo === "lib/lgpd/sla.ts") continue; // o próprio dono dos helpers
+      // `sla.ts` É o leitor; ele não se importa. A exceção fica escrita e nomeada
+      // em vez de silenciosa, porque uma exceção muda de "quem?" para "ele se
+      // importa?" no dia em que o dono do módulo sai dali.
+      if (arquivo === "lib/lgpd/sla.ts") continue;
       const fonte = readFileSync(join(RAIZ, arquivo), "utf8");
-      const usa =
-        /diasDeAtraso|diasAtePrazo|diaDoPrazo|prazoEmBr|computeDueAt|computeSlaBucket/.test(fonte);
       expect(
-        usa,
-        `${arquivo} entrou na lista de quem lê pelo helper e não importa nenhum: ` +
+        importaLeitorDeDia(fonte),
+        `${arquivo} entrou na lista de quem lê pelo helper e não importa nenhum leitor de dia: ` +
           "ou ele lê o dia civil por outro caminho (declare por que), ou a lista mentiu.",
       ).toBe(true);
     }
@@ -423,6 +594,16 @@ describe("nenhum consumidor de due_at nasce fora da lista", () => {
         "lib/lgpd/balde-de-sla.ts",
         /Math\.round\(\s*\(?[\s\S]{0,80}due[\s\S]{0,80}\/\s*86_400_000/,
         "o balde voltou a comparar instantes — 'Vencido' acende 26 horas antes do prazo.",
+      ],
+      [
+        "lib/lgpd/balde-de-sla.ts",
+        /msUntilDue/,
+        "o selo da plataforma voltou a medir a distância até a MEIA-NOITE UTC do dia do prazo, e não até o fim desse dia — é o que fazia 'expired' cair na véspera.",
+      ],
+      [
+        "lib/lgpd/contagem-do-prazo.ts",
+        /differenceInHours|new Date\(dueAt\)\.getTime\(\)/,
+        "a coluna 'Vence em' voltou a contar até a meia-noite UTC do dia, e não até o fim dele — '12h em atraso' às 9h do dia do prazo.",
       ],
     ];
     for (const [arquivo, padrao, porque] of armadilhas) {

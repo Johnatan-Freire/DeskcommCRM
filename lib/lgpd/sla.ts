@@ -160,6 +160,46 @@ export function diasAtePrazo(dueAt: string | Date | null | undefined, agora: Dat
   return dias === 0 ? 0 : -dias; // sem isto sai `-0` no dia do prazo
 }
 
+const HORA_MS = 3_600_000;
+
+/**
+ * HORAS até o FIM do dia que `due_at` representa — `0` no último minuto do dia,
+ * negativo depois dele. `null` quando o valor não é uma data.
+ *
+ * ## Para quem precisa de horas, e não de dias
+ *
+ * O e-mail ao DPO fala em **dias** ("1 dia(s) em atraso") e usa
+ * {@link diasDeAtraso}. O painel da plataforma fala em **horas** ("12h
+ * restantes") e precisa desta. As duas coisas são a mesma âncora — o dia que o
+ * motor contou — em unidades diferentes, e é por isso que as duas superfícies
+ * viram no mesmo instante.
+ *
+ * ## O que ela NÃO finge
+ *
+ * O prazo é contado no eixo UTC pelo motor (`computeDueAt`), e o fim do dia
+ * guardado é a meia-noite UTC do dia seguinte. Numa instalação brasileira isso
+ * significa que o "fim do prazo" chega às **21h** do dia, três horas antes da
+ * meia-noite local. Isso NÃO é deste módulo: é a herança do eixo do motor, e o
+ * que este PR garante é só que as três superfícies que leem o prazo
+ * (e-mail ao DPO, balde da organização e painel da plataforma) concordem entre
+ * si. Mudar o eixo é mudar o que `computeDueAt` grava — mexe em toda linha já
+ * existida e é decisão de produto, não correção de leitura.
+ *
+ * Fracionário de propósito: quem exibe quer o inteiro (`Math.trunc`) e quem
+ * compara contra um teto quer comparar as horas cruas. Cortar aqui obrigaria um
+ * dos dois a refazer a conta.
+ */
+export function horasAteOFimDoPrazo(
+  dueAt: string | Date | null | undefined,
+  agora: Date,
+): number | null {
+  const prazo = diaDoPrazo(dueAt);
+  if (prazo === null) return null;
+  const inicio = utcDeDiaCivil(prazo);
+  if (inicio === null) return null;
+  return (inicio + 86_400_000 - agora.getTime()) / HORA_MS;
+}
+
 /**
  * O prazo no formato de quem lê — `"DD/MM/AAAA"`.
  *
