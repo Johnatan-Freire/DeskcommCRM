@@ -4834,6 +4834,13 @@ export const DICIONARIO: Traducoes = {
   "Fortaleza (Brasil)": { es: "Fortaleza (Brasil)" },
   "Luanda (Angola)": { es: "Luanda (Angola)" },
   "Lisboa (Portugal)": { es: "Lisboa (Portugal)" },
+  "Cuiabá (Brasil)": { es: "Cuiabá (Brasil)" },
+  "Rio Branco (Brasil)": { es: "Rio Branco (Brasil)" },
+  "Madri (Espanha)": { es: "Madrid (España)" },
+  "Roma (Itália)": { es: "Roma (Italia)" },
+  "Nova York (EUA)": { es: "Nueva York (EE. UU.)" },
+  "Los Angeles (EUA)": { es: "Los Ángeles (EE. UU.)" },
+  "Roma": { es: "Roma" },
   UTC: { es: "UTC" },
   // ─── Idiomas de definição de template (canal parceiro) ───
   Espanhol: { es: "Español" },
