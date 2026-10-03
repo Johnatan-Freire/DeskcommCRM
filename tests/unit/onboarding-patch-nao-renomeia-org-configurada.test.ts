@@ -22,8 +22,10 @@
  *   VERMELHO sem a guarda).
  * - Controle: org com `onboarded_at` nulo segue gravando normalmente.
  * - O mesmo caminho visto pela action `acceptWelcome`: o submit de uma aba
- *   antiga recebe recusa e NÃO escreve (o mapeamento para `db_error` +
- *   `details` é o da própria action; este PR não toca nela).
+ *   antiga recebe recusa e NÃO escreve. O mapeamento do erro é o da própria
+ *   action; o #2146 trocou esse mapeamento por um redirect para
+ *   `/app/inbox` (o caso abaixo), medido em
+ *   `tests/unit/onboarding-aviso-org-ja-configurada.test.ts`.
  *
  * O dublê do client simula o PostgREST de verdade: filtro `.is` que não bate
  * = ZERO linhas = `data: []`. Não mede o banco real (sem Docker nesta VPS;
@@ -250,19 +252,16 @@ describe("patchOnboardingState: organização já configurada não é regravada"
     expect(linha.onboarding_state).toMatchObject({ teste: { skipped: true } });
   });
 
-  it("aba antiga enviando as boas-vindas depois do fim: acceptWelcome recusa e nada é gravado", async () => {
+  it("aba antiga enviando as boas-vindas depois do fim: sai para /app/inbox e nada é gravado", async () => {
     montarBanco({ onboardedAt: "2026-01-01T00:00:00.000Z" });
 
     const r = await executar(formulario("Clínica Nova"));
 
-    // A action mapeia QUALQUER OnboardingError para `db_error` + `details`
-    // (este PR não toca em `acceptWelcome.ts`); o essencial é a RECUSA.
-    expect(r).toEqual({
-      ok: false,
-      error: "db_error",
-      details: "Organização já configurada.",
-    });
-    expect(mundo.redirects).toEqual([]);
+    // A RECUSA é o essencial deste teste do #2113: nada é gravado. Como a
+    // action resolve (#2146) o submit sai para a caixa de entrada em vez de
+    // devolver `db_error` — o código de recusa foi o defeito do #2146.
+    expect(r).toBe("REDIRECT");
+    expect(mundo.redirects).toEqual(["/app/inbox"]);
     expect(linha.display_name).toBe("Nome Antigo");
     expect(escritas).toEqual([]);
   });
