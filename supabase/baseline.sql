@@ -40163,6 +40163,64 @@ begin
 end $f$;
 
 revoke execute on function public.fn_proteger_tabelas_sob_ensure_rls() from public, anon, authenticated, service_role;
+
+-- ---- a trava de imutabilidade da versão publicada cobre as colunas que
+-- ficaram de fora (migration 0503, issue #2003 do upstream — adaptada) ----
+-- Ver o cabeçalho da migration: parte da definição do FORK (Sistema Escolar,
+-- ganho/perda), acrescenta inbound_debounce_ms, service_scope e
+-- can_update_lead_state; NÃO cita proposal_ai_draft_enabled (coluna inexistente).
+create or replace function fn_ai_agent_version_content_immutable() returns trigger
+-- search_path fixo na PRÓPRIA definição: um create or replace sem a cláusula
+-- apaga o alter function ... set search_path da 0507 (0521 no upstream).
+language plpgsql set search_path = '' as $fn$
+begin
+  if old.status <> 'draft' and (
+       new.system_prompt          is distinct from old.system_prompt
+    or new.provider               is distinct from old.provider
+    or new.model                  is distinct from old.model
+    or new.credential_id          is distinct from old.credential_id
+    or new.tool_ids               is distinct from old.tool_ids
+    or new.trigger_config         is distinct from old.trigger_config
+    or new.channel_session_id     is distinct from old.channel_session_id
+    or new.max_steps              is distinct from old.max_steps
+    or new.token_budget           is distinct from old.token_budget
+    or new.cost_budget_cents      is distinct from old.cost_budget_cents
+    or new.history_message_window is distinct from old.history_message_window
+    or new.history_token_window   is distinct from old.history_token_window
+    or new.handoff_keywords       is distinct from old.handoff_keywords
+    or new.handoff_tool_enabled   is distinct from old.handoff_tool_enabled
+    or new.followup               is distinct from old.followup
+    or new.multimodal_input       is distinct from old.multimodal_input
+    or new.video_frames_enabled   is distinct from old.video_frames_enabled
+    or new.split_messages         is distinct from old.split_messages
+    or new.split_max_chars        is distinct from old.split_max_chars
+    or new.cases_enabled          is distinct from old.cases_enabled
+    or new.operator_enabled       is distinct from old.operator_enabled
+    or new.operator_model         is distinct from old.operator_model
+    or new.operator_tool_ids      is distinct from old.operator_tool_ids
+    or new.pipeline_ids           is distinct from old.pipeline_ids
+    or new.knowledge_source_ids   is distinct from old.knowledge_source_ids
+    or new.sistema_escolar_tool_ids is distinct from old.sistema_escolar_tool_ids
+    or new.can_mark_won           is distinct from old.can_mark_won
+    or new.can_mark_lost          is distinct from old.can_mark_lost
+    or new.service_scope          is distinct from old.service_scope
+    or new.can_update_lead_state  is distinct from old.can_update_lead_state
+    or new.inbound_debounce_ms    is distinct from old.inbound_debounce_ms
+    or new.version_number         is distinct from old.version_number
+    or new.agent_id               is distinct from old.agent_id
+    or new.organization_id        is distinct from old.organization_id
+  ) then
+    raise exception 'ai_agent_versions % é imutável (status=%): mudança de conteúdo = versão draft nova; rollback = revert (clona + publica)',
+      old.id, old.status;
+  end if;
+  return new;
+end;
+$fn$;
+drop trigger if exists trg_ai_agent_versions_content_immutable on public.ai_agent_versions;
+create trigger trg_ai_agent_versions_content_immutable
+  before update on public.ai_agent_versions
+  for each row execute function fn_ai_agent_version_content_immutable();
+
 -- ---- a recusa permanente do atendimento não pede repetição (migration 0514) ----
 -- `PT409` no lugar de `40001` em `service_stale` de `fn_service_status` (a
 -- revisão esperada não bate: recusa PERMANENTE). `40001` vira HTTP 500 no
