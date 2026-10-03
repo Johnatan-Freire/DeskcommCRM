@@ -5439,23 +5439,23 @@ drop policy if exists "conversations_agent_delete" on public.conversations;
 
 create policy "conversations_agent_insert" on public.conversations
   for insert with check (
-    public.fn_is_platform_admin()
+    public.fn_is_platform_admin_full()
     or ((organization_id in (select public.fn_user_org_ids()))
         and public.fn_role_at_least(organization_id, 'agent'))
   );
 create policy "conversations_agent_update" on public.conversations
   for update using (
-    public.fn_is_platform_admin()
+    public.fn_is_platform_admin_full()
     or ((organization_id in (select public.fn_user_org_ids()))
         and public.fn_role_at_least(organization_id, 'agent'))
   ) with check (
-    public.fn_is_platform_admin()
+    public.fn_is_platform_admin_full()
     or ((organization_id in (select public.fn_user_org_ids()))
         and public.fn_role_at_least(organization_id, 'agent'))
   );
 create policy "conversations_agent_delete" on public.conversations
   for delete using (
-    public.fn_is_platform_admin()
+    public.fn_is_platform_admin_full()
     or ((organization_id in (select public.fn_user_org_ids()))
         and public.fn_role_at_least(organization_id, 'agent'))
   );
@@ -5478,20 +5478,20 @@ create policy "messages_select" on public.messages
 create policy "messages_insert" on public.messages
   for insert with check (
     (organization_id in (select public.fn_user_org_ids()))
-    or public.fn_is_platform_admin()
+    or public.fn_is_platform_admin_full()
   );
 create policy "messages_update" on public.messages
   for update using (
     (organization_id in (select public.fn_user_org_ids()))
-    or public.fn_is_platform_admin()
+    or public.fn_is_platform_admin_full()
   ) with check (
     (organization_id in (select public.fn_user_org_ids()))
-    or public.fn_is_platform_admin()
+    or public.fn_is_platform_admin_full()
   );
 create policy "messages_delete" on public.messages
   for delete using (
     (organization_id in (select public.fn_user_org_ids()))
-    or public.fn_is_platform_admin()
+    or public.fn_is_platform_admin_full()
   );
 
 -- Forward-fix do G4-01: fn_conversation_assign (0031/0032) passa a SECURITY
@@ -5623,7 +5623,7 @@ create policy "crm_leads_select" on public.crm_leads
 
 create policy "crm_leads_insert" on public.crm_leads
   for insert with check (
-    public.fn_is_platform_admin()
+    public.fn_is_platform_admin_full()
     or ((organization_id in (select public.fn_user_org_ids()))
         and public.fn_role_at_least(organization_id, 'agent')
         and (public.fn_role_at_least(organization_id, 'manager')
@@ -5631,13 +5631,13 @@ create policy "crm_leads_insert" on public.crm_leads
   );
 create policy "crm_leads_update" on public.crm_leads
   for update using (
-    public.fn_is_platform_admin()
+    public.fn_is_platform_admin_full()
     or ((organization_id in (select public.fn_user_org_ids()))
         and public.fn_role_at_least(organization_id, 'agent')
         and (public.fn_role_at_least(organization_id, 'manager')
              or public.fn_can_view_lead(organization_id, owner_user_id)))
   ) with check (
-    public.fn_is_platform_admin()
+    public.fn_is_platform_admin_full()
     or ((organization_id in (select public.fn_user_org_ids()))
         and public.fn_role_at_least(organization_id, 'agent')
         and (public.fn_role_at_least(organization_id, 'manager')
@@ -5645,7 +5645,7 @@ create policy "crm_leads_update" on public.crm_leads
   );
 create policy "crm_leads_delete" on public.crm_leads
   for delete using (
-    public.fn_is_platform_admin()
+    public.fn_is_platform_admin_full()
     or ((organization_id in (select public.fn_user_org_ids()))
         and public.fn_role_at_least(organization_id, 'agent')
         and (public.fn_role_at_least(organization_id, 'manager')
@@ -12463,11 +12463,11 @@ create policy channel_sessions_tenant_write on public.channel_sessions
   for all using (
     (organization_id in (select public.fn_user_org_ids())
       and public.fn_role_at_least(organization_id, 'admin'))
-    or public.fn_is_platform_admin()
+    or public.fn_is_platform_admin_full()
   ) with check (
     (organization_id in (select public.fn_user_org_ids())
       and public.fn_role_at_least(organization_id, 'admin'))
-    or public.fn_is_platform_admin()
+    or public.fn_is_platform_admin_full()
   );
 
 -- ---- agentes de IA ----
@@ -23796,12 +23796,12 @@ create policy team_invites_select on public.team_invites
 drop policy if exists team_invites_write on public.team_invites;
 create policy team_invites_write on public.team_invites
   using (
-    public.fn_is_platform_admin()
+    public.fn_is_platform_admin_full()
     or ((organization_id in (select public.fn_user_org_ids()))
         and public.fn_role_at_least(organization_id, 'admin'))
   )
   with check (
-    public.fn_is_platform_admin()
+    public.fn_is_platform_admin_full()
     or ((organization_id in (select public.fn_user_org_ids()))
         and public.fn_role_at_least(organization_id, 'admin'))
   );
