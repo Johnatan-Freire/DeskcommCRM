@@ -58,6 +58,7 @@ export async function acceptWelcome(formData: FormData): Promise<AcceptWelcomeRe
         },
       },
       { display_name: input.display_name, timezone: input.timezone },
+      { soNoWizard: true },
     );
   } catch (err) {
     if (err instanceof OnboardingError) return { ok: false, error: "db_error", details: err.message };
