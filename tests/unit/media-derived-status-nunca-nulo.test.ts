@@ -65,7 +65,14 @@ vi.mock("@/lib/supabase/admin", () => ({
       },
       update: (patch: Record<string, unknown>) => {
         updateEqMock(patch);
-        return { eq: () => ({ eq: async () => ({ error: null }) }) };
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const cadeia: any = {
+          eq: () => cadeia,
+          filter: () => cadeia,
+          select: () => cadeia,
+          then: (ok: (v: unknown) => unknown) => Promise.resolve({ data: [{ id: "msg1" }], error: null }).then(ok),
+        };
+        return cadeia;
       },
     }),
     storage: { from: () => ({ upload: uploadMock }) },
