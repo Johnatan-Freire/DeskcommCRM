@@ -53,7 +53,7 @@ import {
   prazoEmBr,
 } from "@/lib/lgpd/sla";
 import { computeRiskLevel, computeSlaBucket } from "@/lib/lgpd/balde-de-sla";
-import { contagemDoPrazo } from "@/lib/lgpd/contagem-do-prazo";
+import { contagemDoPrazo, distanciaDoPrazo } from "@/lib/lgpd/contagem-do-prazo";
 
 const RAIZ = process.cwd();
 const DIA_MS = 86_400_000;
@@ -385,6 +385,101 @@ describe("a coluna 'Vence em' conta até o FIM do dia, não até a meia-noite UT
 });
 
 // ---------------------------------------------------------------------------
+// A COLUNA "VENCE EM" DA LISTA DA ORGANIZAÇÃO
+// ---------------------------------------------------------------------------
+
+describe("o rótulo da lista da organização mede até o FIM do dia do prazo", () => {
+  const recebido = "2026-09-14T12:00:00.000Z";
+  const prazo = computeDueAt(d("2026-09-14"), 15).toISOString(); // 2026-10-05T00:00:00Z
+  const t = (texto: string) => texto;
+
+  /**
+   * O rótulo de HOJE, copiado na letra de `RequestsTable.tsx` na `main` — só para
+   * a MEDIÇÃO do defeito. Nenhum caso abaixo afirma sobre esta função: o que se
+   * mede é `distanciaDoPrazo`, a que a tela chama. Um teste que reescreve a
+   * fórmula mede a si mesmo (foi o achado da revisão do #2170).
+   */
+  const rotuloAntigo = (agora: Date): string => {
+    const diffMs = new Date(prazo).getTime() - agora.getTime();
+    if (diffMs < 0) {
+      const overD = Math.floor(Math.abs(diffMs) / DIA_MS);
+      return overD > 0 ? `${overD}d atrasado` : "atrasado hoje";
+    }
+    const diffD = Math.floor(diffMs / DIA_MS);
+    if (diffD < 1) return `em ${Math.floor(diffMs / 3_600_000)}h`;
+    return `em ${diffD}d`;
+  };
+
+  it("não diz 'atrasado hoje' antes de o dia do prazo acabar", () => {
+    // 04/10 22:00 em São Paulo = 05/10 01:00Z: o rótulo antigo anunciava atraso
+    // com o prazo ainda por vencer.
+    const vesperaNoite = new Date("2026-10-05T01:00:00.000Z");
+    expect(emSaoPaulo(vesperaNoite)).toBe("2026-10-04");
+    expect(rotuloAntigo(vesperaNoite)).toBe("atrasado hoje"); // o defeito
+    expect(diasDeAtraso(prazo, vesperaNoite)).toBe(0);
+    expect(distanciaDoPrazo(prazo, t, vesperaNoite).label).toBe("em 23h");
+  });
+
+  it("mede 23 horas de defeito, uma por vez", () => {
+    // A varredura que dá o número: quantas horas o rótulo antigo dizia
+    // "atrasado hoje" com `diasDeAtraso` ainda em zero.
+    let horasDeDefeito = 0;
+    for (let h = -72; h <= 72; h += 1) {
+      const agora = new Date(new Date(prazo).getTime() + h * 3_600_000);
+      if (rotuloAntigo(agora) === "atrasado hoje" && diasDeAtraso(prazo, agora) === 0) {
+        horasDeDefeito++;
+      }
+    }
+    expect(horasDeDefeito).toBe(23);
+  });
+
+  it("a virada do atraso é a mesma do selo, inclusive no instante exato do fim", () => {
+    const fim = fimDoPrazo(prazo)!; // 2026-10-06T00:00:00Z, 05/10 21:00 em São Paulo
+    expect(emSaoPaulo(fim)).toBe("2026-10-05");
+    // No instante exato do fim: `diasDeAtraso` já é 1 (o dia civil virou), e o
+    // rótulo tem de acompanhar — é o mesmo milissegundo que a contagem da
+    // plataforma documenta.
+    expect(distanciaDoPrazo(prazo, t, fim).label).toBe("atrasado hoje");
+    expect(diasDeAtraso(prazo, fim)).toBe(1);
+    expect(computeRiskLevel(prazo, recebido, fim)).toBe("expired");
+    expect(computeSlaBucket(prazo, recebido, fim)).toBe("overdue");
+    // um minuto antes ainda não:
+    expect(distanciaDoPrazo(prazo, t, new Date(fim.getTime() - 60_000)).label).toBe("em 0h");
+  });
+
+  it("os rótulos continuam os quatro de antes, e o 'em Nd' conta até o fim", () => {
+    const formas = new Set<string>();
+    for (let h = -240; h <= 240; h += 1) {
+      const agora = new Date(new Date(prazo).getTime() + h * 3_600_000);
+      formas.add(distanciaDoPrazo(prazo, t, agora).label.replace(/\d+/, "N"));
+    }
+    expect([...formas].sort()).toEqual(["Nd atrasado", "atrasado hoje", "em Nd", "em Nh"].sort());
+
+    // "em 2d" às 09h de 03/10 (o antigo dizia "em 1d")
+    const doisDiasAntes = new Date("2026-10-03T12:00:00.000Z");
+    expect(rotuloAntigo(doisDiasAntes)).toBe("em 1d"); // o defeito
+    expect(distanciaDoPrazo(prazo, t, doisDiasAntes).label).toBe("em 2d");
+  });
+
+  it("o urgente passou a ser 48h até o fim, e não 48h até o início", () => {
+    const doisDiasAntes = new Date("2026-10-03T12:00:00.000Z"); // 09:00 de 03/10
+    expect(distanciaDoPrazo(prazo, t, doisDiasAntes).urgent).toBe(false);
+    const vespera = new Date("2026-10-04T12:00:00.000Z"); // 09:00 de 04/10
+    expect(distanciaDoPrazo(prazo, t, vespera).urgent).toBe(true);
+    const atrasado = new Date("2026-10-20T12:00:00.000Z");
+    expect(distanciaDoPrazo(prazo, t, atrasado).urgent).toBe(true);
+  });
+
+  it("prazo ausente ou ilegível não vira atraso nem some", () => {
+    const agora = new Date("2026-10-20T12:00:00.000Z");
+    expect(distanciaDoPrazo(null, t, agora)).toEqual({ label: "—", urgent: false });
+    expect(distanciaDoPrazo("não-é-data", t, agora)).toEqual({
+      label: "não-é-data",
+      urgent: false,
+    });
+  });
+});
+
 // A BARRA DO PRAZO NAS TELAS DE DETALHE
 // ---------------------------------------------------------------------------
 
@@ -585,6 +680,7 @@ const LEEM_PELO_HELPER: readonly string[] = [
   "app/api/v1/admin/lgpd/requests/route.ts",
   "components/admin/lgpd/LgpdRequestsTable.tsx",
   "app/app/lgpd/requests/[id]/_client.tsx",
+  "app/app/lgpd/requests/RequestsTable.tsx",
   "app/app/lgpd/requests/[id]/SlaTimeline.tsx",
   "app/admin/(protected)/lgpd/requests/[id]/_client.tsx",
 ];
@@ -615,11 +711,6 @@ const REPASSA_O_VALOR: readonly string[] = [
  * ela é o que impede este PR de parecer um conserto pela metade.
  */
 const DIVIDA_CONGELADA: ReadonlyArray<{ arquivo: string; motivo: string }> = [
-  {
-    arquivo: "app/app/lgpd/requests/RequestsTable.tsx",
-    motivo:
-      "Tela: `fmtDistance(due_at)` em milissegundos — diz 'atrasado hoje' às 21h do dia ANTERIOR ao prazo.",
-  },
   {
     arquivo: "app/api/v1/admin/dashboard/kpis/route.ts",
     motivo:

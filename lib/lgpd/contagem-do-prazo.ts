@@ -1,14 +1,27 @@
 /**
- * A CONTAGEM DO PRAZO na coluna "Vence em" do painel da plataforma.
+ * AS DUAS CONTAGENS DO PRAZO — os rótulos relativos das duas listas de LGPD.
  *
- * Sai de dentro de `components/admin/lgpd/LgpdRequestsTable.tsx` pelo mesmo
- * motivo que o balde saiu de dentro do route handler: a coluna decidia um número
- * de compliance, e o número mora em `lib/lgpd/` com o resto da aritmética de
- * `due_at`. Uma função pura é testável; um parágrafo dentro de um componente só
- * se prova pela tela — e a tela é onde este número é lido por quem decide o que
- * cobrar de um cliente.
+ * | superfície  | rótulo             | quem mostra                    |
+ * |-------------|--------------------|--------------------------------|
+ * | plataforma  | `contagemDoPrazo`  | tabela Admin › LGPD            |
+ * | organização | `distanciaDoPrazo` | coluna "Vence em" da lista      |
  *
- * ## O defeito que este arquivo conserta
+ * ## Por que os dois moram aqui
+ *
+ * São a mesma pergunta ("quanto falta para este prazo?") com vocabulários
+ * diferentes — de propósito, são telas diferentes — e **uma âncora só**: o FIM
+ * do dia que `due_at` guarda. Enquanto cada tela fazia a própria conta, elas
+ * discordavam entre si; a da organização dizia "atrasado hoje" e a da plataforma
+ * "1d em atraso" para a mesma linha. Ver `horasAteOFimDoPrazo`.
+ *
+ * ## Por que fora dos componentes
+ *
+ * A coluna decidia um número de compliance, e o número mora em `lib/lgpd/` com o
+ * resto da aritmética de `due_at`. Uma função pura é testável; um parágrafo
+ * dentro de um componente só se prova pela tela — e a tela é onde este número é
+ * lido por quem decide o que cobrar de um cliente.
+ *
+ * ## O defeito do `contagemDoPrazo` (a coluna da plataforma)
  *
  * A versão anterior ancorava no **instante**:
  *
@@ -32,7 +45,7 @@
  * e como "0h restantes" na véspera. A coluna é a que o administrador da
  * plataforma lê para decidir a quem cobrar primeiro.
  *
- * ## A régua agora
+ * ### A régua agora
  *
  * `horasAteOFimDoPrazo` conta até o FIM do dia guardado, então "em atraso" só
  * aparece depois que o dia acaba. No Brasil isso é a partir de **21h do próprio
@@ -48,7 +61,7 @@
  * Trocar a âncora e o arredondamento no mesmo PR tornaria o conserto impossível
  * de medir.
  *
- * ## O vocabulário NÃO muda
+ * ### O vocabulário NÃO muda
  *
  * As quatro formas de antes continuam as quatro de agora, e nenhuma frase nova
  * entra no dicionário: `—`, `Nh em atraso`, `Nh restantes`, `Nd restantes`.
@@ -116,4 +129,70 @@ export function contagemDoPrazo(
   const inteiras = Math.trunc(horas);
   if (inteiras < 24) return `${inteiras}h ${t("restantes")}`;
   return `${Math.floor(inteiras / 24)}d ${t("restantes")}`;
+}
+
+/**
+ * O rótulo da coluna "Vence em" da lista da ORGANIZAÇÃO, e o sinal de urgência
+ * que pinta de vermelho o prazo da linha.
+ *
+ * ## O defeito que este arquivo conserta
+ *
+ * A versão anterior media a distância até o INÍCIO do dia guardado:
+ *
+ * ```ts
+ * const diffMs = due - now;
+ * if (diffMs < 0) { … "atrasado hoje" … }
+ * ```
+ *
+ * Medido em São Paulo (UTC−3), com prazo no dia **05/10**
+ * (`2026-10-05T00:00:00.000Z`): por **quase 24 horas** o rótulo dizia "atrasado
+ * hoje" enquanto `diasDeAtraso` — o predicado do selo da mesma linha — ainda era
+ * 0 (a varredura hora a hora pega 23 amostras). Ia de logo depois de 04/10 21:00
+ * até 05/10 21:00, ou seja a linha anunciava atraso no dia INTEIRO anterior ao
+ * vencimento. A contagem para frente
+ * errava junto, para menos: "em 12h" às 09h de 04/10, quando faltava um dia.
+ *
+ * ## A régua agora
+ *
+ * O fim do dia guardado é a âncora, e a virada do atraso é a **mesma do selo**
+ * (`diasDeAtraso`), não `horas < 0` — no instante exato do fim os dois discordam
+ * por um milissegundo, e é o mesmo motivo que a contagem da plataforma documenta
+ * logo acima. A magnitude continua saindo das horas.
+ *
+ * ## O vocabulário NÃO muda
+ *
+ * As cinco formas de antes continuam as cinco de agora, e nenhuma frase nova entra
+ * no dicionário: `—`, `atrasado hoje`, `Nd atrasado`, `em Nh`, `em Nd`. Muda a
+ * âncora e o que cada uma significa — "atrasado hoje" passa a querer dizer
+ * "menos de 24 h de atraso", em vez de "depois do início do dia do prazo".
+ *
+ * ## O `urgent` também muda de âncora
+ *
+ * `urgent` pinta o prazo de vermelho, e era `diffMs < 2 dias` — dois dias antes do
+ * INÍCIO do dia do prazo. Agora são 48 h até o FIM dele. Medido: às 09h de 03/10,
+ * com prazo no dia 05/10, o prazo estava em vermelho; agora deixa de estar.
+ */
+export function distanciaDoPrazo(
+  dueAt: string | null,
+  t: (texto: string) => string = semTraduzir,
+  agora: Date = new Date(),
+): { label: string; urgent: boolean } {
+  if (!dueAt) return { label: "—", urgent: false };
+  const horas = horasAteOFimDoPrazo(dueAt, agora);
+  if (horas === null) return { label: dueAt, urgent: false };
+
+  if (diasDeAtraso(dueAt, agora) > 0) {
+    const horasDeAtraso = -horas;
+    return {
+      label:
+        horasDeAtraso < 24
+          ? t("atrasado hoje")
+          : `${Math.floor(horasDeAtraso / 24)}${t("d atrasado")}`,
+      urgent: true,
+    };
+  }
+
+  const urgent = horas < 48;
+  if (horas < 24) return { label: `${t("em")} ${Math.floor(horas)}h`, urgent };
+  return { label: `${t("em")} ${Math.floor(horas / 24)}d`, urgent };
 }
