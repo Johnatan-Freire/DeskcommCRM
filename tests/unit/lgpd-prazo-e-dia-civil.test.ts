@@ -307,19 +307,43 @@ describe("a coluna 'Vence em' conta até o FIM do dia, não até a meia-noite UT
     expect(contagemAntiga(vinteHoras)).toBe("23h em atraso"); // o defeito
     expect(contagemDoPrazo(prazo, "received", t, vinteHoras)).toBe("1h restantes");
 
-    // 05/10 21:00 em São Paulo = 06/10 00:00Z: o dia guardado acabou, e a coluna
-    // diz a coisa literal — zero hora restante. O "em atraso" vem na hora cheia
-    // seguinte, porque a contagem TRUNCA em direção a zero (o arredondamento de
-    // antes, preservado).
-    const virada = new Date("2026-10-06T00:00:00.000Z");
-    expect(emSaoPaulo(virada)).toBe("2026-10-05");
-    expect(contagemDoPrazo(prazo, "received", t, virada)).toBe("0h restantes");
-
     // 05/10 22:00 em São Paulo: uma hora e meia depois do fim do dia.
     const umaHoraDepois = new Date("2026-10-06T01:30:00.000Z");
     expect(emSaoPaulo(umaHoraDepois)).toBe("2026-10-05");
     expect(contagemAntiga(umaHoraDepois)).toBe("25h em atraso"); // o defeito
     expect(contagemDoPrazo(prazo, "received", t, umaHoraDepois)).toBe("1h em atraso");
+  });
+
+  it("a última hora do dia do prazo não contradiz o selo (21:00 a 21:59 de São Paulo)", () => {
+    // O defeito que o mantenedor apontou ao revisar o #2168: nesta hora a linha
+    // dizia "0h restantes" enquanto o selo já dizia "Vencido". As duas âncoras
+    // viram no mesmo instante (o fim do dia guardado); a hora de "0h" vinha do
+    // `Math.trunc`, que leva (-1h, 0] a zero.
+    for (const minuto of [0, 1, 15, 30, 45, 59]) {
+      const instante = new Date(Date.UTC(2026, 9, 6, 0, minuto, 30));
+      expect(emSaoPaulo(instante)).toBe("2026-10-05");
+      // O selo diz vencido nesta hora inteira...
+      expect(computeRiskLevel(prazo, prazo, instante)).toBe("expired");
+      // ...e a linha diz a mesma coisa, na menor unidade que ela tem.
+      expect(contagemDoPrazo(prazo, "received", t, instante)).toBe("1h em atraso");
+      expect(computeSlaBucket(prazo, prazo, instante)).toBe("overdue");
+    }
+  });
+
+  it("a linha e o selo nunca discordam sobre 'em atraso', hora a hora em 97 horas", () => {
+    // A prova de que a hora apontada na revisão foi fechada: se alguém voltar a
+    // governar a frase pela contagem truncada, esta varredura acha o minuto.
+    for (let h = -48; h <= 48; h += 1) {
+      for (const minuto of [0, 30]) {
+        const instante = new Date(new Date(prazo).getTime() + h * 3_600_000 + minuto * 60_000);
+        const linhaDizAtraso = contagemDoPrazo(prazo, "received", t, instante).includes("atraso");
+        const seloDizVencido = computeRiskLevel(prazo, prazo, instante) === "expired";
+        expect(
+          linhaDizAtraso,
+          `divergem em ${instante.toISOString()}: linha=${linhaDizAtraso}, selo=${seloDizVencido}`,
+        ).toBe(seloDizVencido);
+      }
+    }
   });
 
   it("o pedido terminado e o prazo ilegível não têm nada a dizer", () => {
@@ -443,6 +467,7 @@ const LEEM_PELO_HELPER: readonly string[] = [
   "app/api/v1/lgpd/requests/route.ts",
   "app/api/v1/admin/lgpd/requests/route.ts",
   "components/admin/lgpd/LgpdRequestsTable.tsx",
+  "app/app/lgpd/requests/[id]/_client.tsx",
 ];
 
 /**
@@ -472,13 +497,9 @@ const REPASSA_O_VALOR: readonly string[] = [
  */
 const DIVIDA_CONGELADA: ReadonlyArray<{ arquivo: string; motivo: string }> = [
   {
-    arquivo: "app/app/lgpd/requests/[id]/_client.tsx",
-    motivo:
-      "Tela: `format(new Date(due_at), 'dd/MM/yyyy')` no fuso do navegador. Recorte seguinte, e é UI — DoD 12 pede prova pela tela.",
-  },
-  {
     arquivo: "app/admin/(protected)/lgpd/requests/[id]/_client.tsx",
-    motivo: "Tela: a linha da anterior, no painel da plataforma. Vai junto com ela.",
+    motivo:
+      "Tela: a linha 'Vence em' JÁ foi corrigida (`prazoEmBr`). O que resta neste arquivo é o `SlaTimelineInline`, que ainda mede `dueAt.getTime()` — o mesmo defeito de família, agora no progresso e no 'Nd restantes' — e é cópia de `app/app/lgpd/requests/[id]/SlaTimeline.tsx`. Os dois pedem UM dono só, e o recorte é das telas.",
   },
   {
     arquivo: "app/app/lgpd/requests/RequestsTable.tsx",
@@ -604,6 +625,21 @@ describe("nenhum consumidor de due_at nasce fora da lista", () => {
         "lib/lgpd/contagem-do-prazo.ts",
         /differenceInHours|new Date\(dueAt\)\.getTime\(\)/,
         "a coluna 'Vence em' voltou a contar até a meia-noite UTC do dia, e não até o fim dele — '12h em atraso' às 9h do dia do prazo.",
+      ],
+      [
+        "lib/lgpd/contagem-do-prazo.ts",
+        /if\s*\(\s*(?:inteiras|horas)\s*<\s*0\s*\)/,
+        "a frase 'em atraso' voltou a ser governada pela contagem truncada (`inteiras < 0`) em vez do predicado do selo — o `Math.trunc` leva (-1h, 0] a zero, e é o que fazia a última hora do dia do prazo dizer '0h restantes' ao lado de 'Vencido'.",
+      ],
+      [
+        "app/app/lgpd/requests/[id]/_client.tsx",
+        /new Date\(\s*request\.due_at\s*\)/,
+        "a linha 'Vence em' da tela de detalhe voltou a construir um INSTANTE a partir de `request.due_at` — para quem lê a oeste de UTC volta a sair o dia anterior. Use `prazoEmBr`.",
+      ],
+      [
+        "app/admin/(protected)/lgpd/requests/[id]/_client.tsx",
+        /new Date\(\s*request\.due_at\s*\)/,
+        "a linha 'Vence em' da tela de detalhe de admin voltou a construir um INSTANTE a partir de `request.due_at` — o dia anterior para quem lê a oeste de UTC. Use `prazoEmBr`.",
       ],
     ];
     for (const [arquivo, padrao, porque] of armadilhas) {

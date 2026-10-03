@@ -42,10 +42,11 @@
  * `horasAteOFimDoPrazo`.
  *
  * Há uma hora de nuance que é o arredondamento, e ela fica: a contagem trunca em
- * direção a zero, como antes. Entre o fim do dia e a hora cheia seguinte a coluna
- * diz **"0h restantes"** — que é literalmente verdade — e só depois passa a
- * "Nh em atraso". Trocar o arredondamento junto com a âncora tornaria o conserto
- * impossível de medir.
+ * direção a zero, como antes, e só a **primeira hora de atraso** é levantada para
+ * "1h" — abaixo disso a frase diria "0h em atraso", que é literal mas lê como
+ * "nada está atrasado". Fora dessa hora o arredondamento é idêntico ao de antes.
+ * Trocar a âncora e o arredondamento no mesmo PR tornaria o conserto impossível
+ * de medir.
  *
  * ## O vocabulário NÃO muda
  *
@@ -60,7 +61,7 @@
 
 import type { AdminLgpdStatus } from "@/hooks/useAdminLGPDRequests";
 
-import { horasAteOFimDoPrazo } from "./sla";
+import { diasDeAtraso, horasAteOFimDoPrazo } from "./sla";
 
 /**
  * Os status em que a coluna não tem nada a dizer: o pedido já terminou.
@@ -95,8 +96,24 @@ export function contagemDoPrazo(
   const horas = horasAteOFimDoPrazo(dueAt, agora);
   if (horas === null) return "—";
 
+  // A VIRADA DE "EM ATRASO" É A MESMA DO SELO, e não a contagem truncada.
+  //
+  // As duas âncoras viram no MESMO instante: `horas` chega a zero no fim do dia
+  // guardado (a meia-noite UTC seguinte), exatamente quando `diasDeAtraso` — o
+  // predicado do selo — passa a 1. Quem abria a hora de contradição era o
+  // `Math.trunc`: ele leva todo o intervalo (-1h, 0] a zero, e a frase governada
+  // por `inteiras < 0` ficava uma hora dizendo "0h restantes" ao lado de um selo
+  // **Vencido** (medido: 21:00 a 21:59 de São Paulo do próprio dia do prazo).
+  // Com o predicado do selo, a frase vira junto com ele.
+  if (diasDeAtraso(dueAt, agora) > 0) {
+    // `max(1, …)` só toca a primeira hora: abaixo de 1h de atraso a frase diz
+    // "1h" em vez de "0h". Fora dela o arredondamento é o de sempre
+    // (`Math.floor` sobre a magnitude, irmão do `Math.trunc` de antes).
+    const horasDeAtraso = Math.max(1, Math.floor(-horas));
+    return `${horasDeAtraso}h ${t("em atraso")}`;
+  }
+
   const inteiras = Math.trunc(horas);
-  if (inteiras < 0) return `${Math.abs(inteiras)}h ${t("em atraso")}`;
   if (inteiras < 24) return `${inteiras}h ${t("restantes")}`;
   return `${Math.floor(inteiras / 24)}d ${t("restantes")}`;
 }

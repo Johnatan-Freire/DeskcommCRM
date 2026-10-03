@@ -11,6 +11,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { TenantBadge } from "@/components/admin/inbox/TenantBadge";
 import { useAdminLgpdRequest } from "@/hooks/useAdminLgpdRequest";
 import type { AdminLgpdStatus, AdminLgpdRequestType } from "@/hooks/useAdminLGPDRequests";
+import { prazoEmBr } from "@/lib/lgpd/sla";
 import { useT } from "@/hooks/i18n/useT";
 
 // ---------------------------------------------------------------------------
@@ -285,7 +286,7 @@ export function LgpdRequestAdminDetail({ id }: Props) {
           {request.due_at && (
             <>
               {" · "}
-              {t("Vence em")} {format(new Date(request.due_at), "dd/MM/yyyy", { locale: localeDaData })}
+              {t("Vence em")} {prazoEmBr(request.due_at)}
             </>
           )}
         </p>
