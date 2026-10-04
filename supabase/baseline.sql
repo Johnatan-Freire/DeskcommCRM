@@ -40577,6 +40577,63 @@ create trigger trg_starts_at_marked_at
   before update of starts_at on public.calendar_appointments
   for each row execute function public.fn_starts_at_marked_at();
 
+-- ---------------------------------------------------------------------------
+-- ---- a demanda do caso encerrado ganha próximo passo (migration 0505, #2035) ----
+-- A IA abre um caso por handoff e esse caso abre uma demanda (`origem='handoff'`,
+-- `agent_case_id` preenchido, `estado='em_atendimento'`). Quando o caso chega a
+-- `resolved`/`cancelled`, a demanda ligada ficava ABERTA e SEM PRÓXIMO PASSO para
+-- sempre — sem ninguém ter por onde agir (issue #2035). Aqui a garantia é da
+-- TABELA (mesma razão da 0148: o caso tem 5 escritores): a virada de status
+-- preenche o próximo passo da demanda ligada, NO ESPELHO do que `fn_service_status`
+-- faz quando a conversa vai a estado terminal — e NÃO decide o desfecho (0222:
+-- "O sistema não pode ser o único a decidir que uma demanda acabou").
+-- `escalated` não dispara; guardas `proximo_passo is null` e `fechada_em is null`
+-- = idempotente; `organization_id` sempre de `new` = tenant-safe.
+create or replace function public.fn_demanda_marca_proximo_passo_com_o_caso()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $fn$
+begin
+  if new.status not in ('resolved','cancelled') then
+    -- 'awaiting_human', 'awaiting_lead' e 'escalated' não encerram o caso:
+    -- o problema do contato segue em trabalho e a demanda continua como está.
+    return new;
+  end if;
+
+  -- O MESMO gesto de `fn_service_status` quando a conversa vai a estado
+  -- terminal: o sistema não decide que a demanda acabou, ele garante que ela
+  -- não fique sem próximo passo. As duas guardas tornam a escrita inofensiva —
+  -- o `where` casando zero linhas não dispara nem o bump de `revision`.
+  update public.demandas
+     set proximo_passo = 'Revisar o caso encerrado e registrar o desfecho da demanda'
+   where organization_id = new.organization_id
+     and agent_case_id   = new.id
+     and proximo_passo   is null
+     and fechada_em      is null;
+
+  return new;
+end;
+$fn$;
+
+-- ⚠️ AS DUAS ORIGENS DE EXECUTE (doutrina, item 9): público dá a qualquer
+-- função nova ao criá-la (revoke from anon não remove) e o default ACL do
+-- baseline dá a anon (revoke from public não remove). O PostgREST não pode
+-- alcançar esta função como RPC.
+revoke execute on function public.fn_demanda_marca_proximo_passo_com_o_caso() from public, anon;
+revoke execute on function public.fn_demanda_marca_proximo_passo_com_o_caso() from authenticated;
+
+drop trigger if exists trg_demanda_marca_proximo_passo_com_o_caso on public.agent_cases;
+create trigger trg_demanda_marca_proximo_passo_com_o_caso
+  after update of status on public.agent_cases
+  for each row
+  when (old.status is distinct from new.status
+        and new.status in ('resolved','cancelled'))
+  execute function public.fn_demanda_marca_proximo_passo_com_o_caso();
+
+notify pgrst, 'reload schema';
+
 -- ---- VARREDURA anon: função nova nasce exposta em quem ATUALIZA (migration 0116) ----
 --
 -- ⚠️ DE PROPÓSITO, NENHUMA FUNÇÃO É CRIADA DEPOIS DESTE BLOCO. Apêndice que cria
