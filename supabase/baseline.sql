@@ -4648,6 +4648,13 @@ GRANT ALL ON TABLE "public"."idempotency_keys" TO "anon";
 GRANT ALL ON TABLE "public"."idempotency_keys" TO "authenticated";
 GRANT ALL ON TABLE "public"."idempotency_keys" TO "service_role";
 
+-- TRUNCATE ignora RLS; nenhum consumidor de idempotência precisa dele. A
+-- revogação acompanha os grants acima de propósito: o `update.sh` reaplica o
+-- arquivo inteiro, e deixá-la no fim do apêndice devolvia o privilégio ao `anon`
+-- a cada atualização até essa linha — e o mantinha, se a passada morresse no
+-- meio (issue #2251).
+revoke truncate on public.idempotency_keys from public, anon, authenticated;
+
 
 
 GRANT ALL ON TABLE "public"."incidents" TO "anon";
@@ -18584,8 +18591,6 @@ create policy idempotency_platform_creation_server_only on public.idempotency_ke
   as restrictive for all to anon, authenticated
   using (endpoint not like '/api/v1/admin/tenants:%' and not tenant_creation_trusted)
   with check (endpoint not like '/api/v1/admin/tenants:%' and not tenant_creation_trusted);
--- TRUNCATE ignora RLS; nenhum consumidor de idempotência precisa dele.
-revoke truncate on public.idempotency_keys from public, anon, authenticated;
 
 -- Criação administrativa atômica; chave existente com endpoint por ator, sem tokens.
 -- Apenas service_role: identidade/plataforma/MFA são verificadas pelo handler.

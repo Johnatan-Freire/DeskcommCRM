@@ -349,12 +349,33 @@ function paresDeTrigger(sql: string): Par[] {
  * privilégio até o revoke; uma atualização que morra no meio deixa o papel com
  * ele (autocommit, como as regras de isolamento do update.sh).
  *
+ * A chave é objeto CANÔNICO + papel. O canônico ignora a FORMA do alvo — aspas,
+ * o tipo (`table`/`function`) e o schema `public.` —, porque o dump escreve
+ * `on table "public"."x"` e o apêndice escreve `on public.x` (ou `on x`): sem
+ * isso as duas pontas da MESMA concessão não se encontram (issue #2251).
+ *
  * Fora do escopo, de propósito: `alter default privileges` (não é concessão a
  * um objeto) e `execute format('grant …')` de laço (não nomeia objeto).
- * A chave é objeto + papel, e só os papéis alcançáveis de fora entram — `anon`
- * (chave pública do browser) e `public` (todo mundo).
+ * Só os papéis alcançáveis de fora entram — `anon` (chave pública do browser) e
+ * `public` (todo mundo).
  */
-function concessoesTransitorias(sql: string): string[] {
+interface ConcessaoTransitoria {
+  chave: string;
+  linhaDoGrant: number;
+  linhaDoRevoke: number;
+}
+
+function objetoCanonico(bruto: string): string {
+  return bruto
+    .replace(/"/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase()
+    .replace(/^(?:tables?|functions?|sequences?|schemas?)\s+/, "")
+    .replace(/^public\./, "");
+}
+
+function concessoesTransitorias(sql: string): ConcessaoTransitoria[] {
   const historico = new Map<string, { tipo: "grant" | "revoke"; linha: number }[]>();
   for (const m of sql.matchAll(/\b(grant|revoke)\b[^;]*;/gi)) {
     const linhaIni = sql.lastIndexOf("\n", m.index!) + 1;
@@ -363,7 +384,7 @@ function concessoesTransitorias(sql: string): string[] {
     if (/alter\s+default\s+privileges/i.test(texto)) continue;
     const alvo = /\bon\s+([\s\S]*?)\s+(?:to|from)\s+([\s\S]*)$/i.exec(texto.replace(/;\s*$/, ""));
     if (!alvo) continue;
-    const objeto = alvo[1]!.replace(/"/g, "").replace(/\s+/g, " ").trim().toLowerCase();
+    const objeto = objetoCanonico(alvo[1]!);
     for (const papel of alvo[2]!.toLowerCase().split(",").map((x) => x.replace(/"/g, "").trim())) {
       if (papel !== "anon" && papel !== "public") continue;
       const chave = `${objeto} :: ${papel}`;
@@ -373,17 +394,35 @@ function concessoesTransitorias(sql: string): string[] {
       ]);
     }
   }
-  const achadas: string[] = [];
+  const achadas: ConcessaoTransitoria[] = [];
   for (const [chave, seq] of historico) {
     const ultimo = seq[seq.length - 1]!;
     if (ultimo.tipo !== "revoke") continue; // estado final concedido: a concessão é real
-    const primeira = seq.find((x) => x.tipo === "grant");
-    if (primeira) {
-      achadas.push(`${chave}: concedido na linha ${primeira.linha}, revogado na ${ultimo.linha}`);
+    const primeiro = seq.find((x) => x.tipo === "grant");
+    if (primeiro) {
+      achadas.push({ chave, linhaDoGrant: primeiro.linha, linhaDoRevoke: ultimo.linha });
     }
   }
-  return achadas;
+  return achadas.sort((a, b) => a.chave.localeCompare(b.chave));
 }
+
+/**
+ * Concessões transitórias ACEITAS, com o motivo escrito — o mesmo desenho do
+ * `DIVERGENCIAS_CONHECIDAS` do manifest. A cerca as VÊ (o caso do arquivo real
+ * exige que continuem aparecendo); esta lista é a decisão, não o esquecimento.
+ * Resolveu? Remova daqui — a asserção de que as declaradas continuam existindo
+ * fica vermelha.
+ */
+const CONCESSOES_ACEITAS = new Map<string, string>([
+  [
+    "idempotency_keys :: anon",
+    "O snapshot concede ALL e o hardening revoga TRUNCATE (que a RLS não alcança). Estreitar a concessão " +
+      "mudaria o ACL FINAL " +
+      "(REFERENCES/TRIGGER nas duas majors, MAINTAIN no pg17), e o invariante " +
+      "organizacoes-recibo-confiavel prova o contrato final com TRUNCATE negado. A revogação passou a " +
+      "acompanhar a concessão (issue #2251): a forma fica, com esta justificativa, e a janela some.",
+  ],
+]);
 
 /**
  * O comando `create policy … ;` a partir da posição, normalizado para comparar
@@ -525,6 +564,9 @@ grant all on table public.t2 to anon;
 -- revogação antes da concessão: estado final concedido (permitida)
 revoke all on table public.t3 from anon;
 grant all on table public.t3 to anon;
+-- as MESMAS pontas em grafias diferentes: o canônico tem de casar (issue #2251)
+grant all on table public.t5 to anon;
+grant all on t6 to anon;
 
 -- ---- apêndice (migration 9999) ----
 drop index if exists public.velho_idx;
@@ -551,6 +593,8 @@ drop trigger if exists trg_velho on public.t;
 drop trigger if exists trg_mesmo on public.t;
 drop trigger if exists trg_guardado on public.t;
 revoke all on table public.t2 from anon;
+revoke truncate on public.t5 from anon;
+revoke all on public.t6 from anon;
 `;
 
 describe("o instrumento, contra formas conhecidas", () => {
@@ -615,10 +659,10 @@ describe("o instrumento, contra formas conhecidas", () => {
     );
   });
 
-  it("concessão transitória: acusa o grant revogado adiante e poupa o re-grant", () => {
+  it("concessão transitória: casa as três grafias de alvo e poupa o re-grant", () => {
     const achados = concessoesTransitorias(SINTETICO);
-    expect(achados).toHaveLength(1);
-    expect(achados[0]).toMatch(/^table public\.t2 :: anon: concedido na linha \d+, revogado na \d+$/);
+    expect(achados.map((c) => c.chave)).toEqual(["t2 :: anon", "t5 :: anon", "t6 :: anon"]);
+    expect(achados.every((c) => c.linhaDoGrant > 0 && c.linhaDoRevoke > c.linhaDoGrant)).toBe(true);
   });
 });
 
@@ -691,12 +735,23 @@ describe("baseline.sql não reconstrói o que ele mesmo derruba ou substitui", (
     ).toEqual([]);
   });
 
-  it("nenhuma concessão a anon/public é transitória", () => {
+  it("concessões transitórias: só as declaradas, e nenhuma declarada envelhece", () => {
+    const chaves = concessoesTransitorias(SQL).map((c) => c.chave);
     expect(
-      concessoesTransitorias(SQL),
-      "Concessão reaplicada a cada install/update só para ser revogada adiante: uma atualização " +
-        "que morra no meio deixa o papel com o privilégio. Tire a concessão.\n",
+      [...chaves].sort(),
+      "Concessão reaplicada a cada install/update só para ser revogada adiante — conserte ou declare " +
+        "com o motivo escrito em CONCESSOES_ACEITAS.\n",
+    ).toEqual([...CONCESSOES_ACEITAS.keys()].sort());
+    expect(
+      [...CONCESSOES_ACEITAS.keys()].filter((k) => !chaves.includes(k)),
+      "a concessão declarada sumiu do arquivo: remova de CONCESSOES_ACEITAS",
     ).toEqual([]);
+    // Declarar não basta: a declaração só vale com o revoke AO LADO do grant. Sem
+    // esta régua, devolver o revoke ao apêndice reabre a janela com a cerca verde.
+    const largas = concessoesTransitorias(SQL)
+      .filter((c) => c.linhaDoRevoke - c.linhaDoGrant > 20)
+      .map((c) => `${c.chave}: grant ${c.linhaDoGrant} → revoke ${c.linhaDoRevoke}`);
+    expect(largas, "concessão aceita só vale com a revogação ao lado do grant (issue #2251)\n").toEqual([]);
   });
 
   it("nenhuma policy é reinstalada numa versão intermediária diferente da final", () => {
