@@ -11560,6 +11560,11 @@ export const DICIONARIO: Traducoes = {
   Links: { es: "Enlaces" },
   "Abrir no WhatsApp": { es: "Abrir en WhatsApp" },
   "Ver ficha completa do contato": { es: "Ver la ficha completa del contacto" },
+  // ─── #1506 F1: as outras pessoas do negócio, abaixo do contato principal ───
+  "Pessoas relacionadas": { es: "Personas relacionadas" },
+  "Não consegui carregar as pessoas relacionadas.": {
+    es: "No pude cargar las personas relacionadas.",
+  },
   "Confira os links marcados: só endereços http(s) valem.": {
     es: "Revisa los enlaces marcados: solo son válidas las direcciones http(s).",
   },
