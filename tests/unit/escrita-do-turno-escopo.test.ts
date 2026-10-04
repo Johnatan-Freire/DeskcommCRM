@@ -20,7 +20,6 @@ const { allTools, getToolByName } = await import("@/lib/mcp/tools");
 const { catalogEntry } = await import("@/lib/mcp/tools/catalog");
 const { ESCOPO_DAS_ESCRITAS, escritaCabeNoTurno } = await import("@/lib/ai/runtime/escopo-das-escritas");
 const { MODULOS_OPCIONAIS } = await import("@/lib/instalacao/modulos");
-const { CAPACIDADES_DA_ORGANIZACAO } = await import("@/lib/organizacao/capacidades");
 
 const ORG = "11111111-1111-4111-8111-111111111111";
 const DO_TURNO = "22222222-2222-4222-8222-222222222222";
@@ -100,7 +99,6 @@ async function executar(nome: string, args: Linha, contatoDoTurno?: string) {
     supabase,
     pipelineIds: [FUNIL],
     modulosLigados: MODULOS_OPCIONAIS,
-    capacidadesLigadas: CAPACIDADES_DA_ORGANIZACAO,
     handoffToolEnabled: true,
     proposalAiDraftEnabled: true,
     handoffSignal: { triggered: false },
@@ -126,13 +124,11 @@ const CASOS: Array<{ nome: string; args: (alvo: string) => Linha; doTurno: strin
     (nome) => ({ nome, args: (a: string) => ({ appointment_id: a }), doTurno: COMPROMISSO_DO_TURNO, deB: COMPROMISSO_DE_B }),
   ),
   ...[
-    "crm_create_conversation_draft",
     "crm_assign_conversation",
     "crm_send_whatsapp_message",
     "crm_request_human_handoff",
     "crm_resume_ai_attendance",
   ].map((nome) => ({ nome, args: (a: string) => ({ conversation_id: a }), doTurno: CONVERSA_DO_TURNO, deB: CONVERSA_DE_B })),
-  { nome: "crm_draft_proposal", args: (a) => ({ lead_id: NEGOCIO_DO_TURNO, conversation_id: a }), doTurno: CONVERSA_DO_TURNO, deB: CONVERSA_DE_B },
   { nome: "crm_cancel_followup", args: (a) => ({ followup_id: a }), doTurno: RETORNO_DO_TURNO, deB: RETORNO_DE_B },
   ...["crm_add_case_note", "crm_close_human_case"].map((nome) => ({
     nome,
