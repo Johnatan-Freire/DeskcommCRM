@@ -363,6 +363,9 @@ function paresDeTrigger(sql: string): Par[] {
 interface ConcessaoTransitoria {
   chave: string;
   linhaDoGrant: number;
+  /** A PRIMEIRA revogação depois da concessão: é ela que fecha a janela. */
+  linhaDaPrimeiraRevogacao: number;
+  /** O último evento da sequência: revogação aqui = estado final não concede. */
   linhaDoRevoke: number;
 }
 
@@ -377,10 +380,13 @@ function objetoCanonico(bruto: string): string {
 }
 
 function concessoesTransitorias(sql: string): ConcessaoTransitoria[] {
+  // `--` vira espaço do MESMO comprimento: posição e linha de cada comando não
+  // mudam, e um `GRANT` CITADO num comentário deixa de engolir o `revoke` real
+  // logo abaixo (issue #2255 — era assim que `ai_budgets` e `api_audit_log`
+  // passavam invisíveis).
+  const semComentarios = sql.replace(/--[^\n]*/g, (m) => " ".repeat(m.length));
   const historico = new Map<string, { tipo: "grant" | "revoke"; linha: number }[]>();
-  for (const m of sql.matchAll(/\b(grant|revoke)\b[^;]*;/gi)) {
-    const linhaIni = sql.lastIndexOf("\n", m.index!) + 1;
-    if (sql.slice(linhaIni, m.index!).includes("--")) continue;
+  for (const m of semComentarios.matchAll(/\b(grant|revoke)\b[^;]*;/gi)) {
     const texto = m[0].replace(/\s+/g, " ");
     if (/alter\s+default\s+privileges/i.test(texto)) continue;
     const alvo = /\bon\s+([\s\S]*?)\s+(?:to|from)\s+([\s\S]*)$/i.exec(texto.replace(/;\s*$/, ""));
@@ -400,8 +406,16 @@ function concessoesTransitorias(sql: string): ConcessaoTransitoria[] {
     const ultimo = seq[seq.length - 1]!;
     if (ultimo.tipo !== "revoke") continue; // estado final concedido: a concessão é real
     const primeiro = seq.find((x) => x.tipo === "grant");
-    if (primeiro) {
-      achadas.push({ chave, linhaDoGrant: primeiro.linha, linhaDoRevoke: ultimo.linha });
+    const primeiraRevogacao = primeiro
+      ? seq.find((x) => x.tipo === "revoke" && x.linha > primeiro.linha)
+      : undefined;
+    if (primeiro && primeiraRevogacao) {
+      achadas.push({
+        chave,
+        linhaDoGrant: primeiro.linha,
+        linhaDaPrimeiraRevogacao: primeiraRevogacao.linha,
+        linhaDoRevoke: ultimo.linha,
+      });
     }
   }
   return achadas.sort((a, b) => a.chave.localeCompare(b.chave));
@@ -415,6 +429,18 @@ function concessoesTransitorias(sql: string): ConcessaoTransitoria[] {
  * fica vermelha.
  */
 const CONCESSOES_ACEITAS = new Map<string, string>([
+  [
+    "ai_budgets :: anon",
+    "O snapshot concede ALL e o bloco da 0160 revoga I/U/D (só o serviço escreve orçamento). Estreitar a " +
+      "concessão mudaria o ACL FINAL — a chave anon fica com SELECT/REFERENCES/TRIGGER/TRUNCATE, e o SELECT " +
+      "é lido pelo PostgREST —; a revogação passou a acompanhar o grant (issue #2255) e a janela some.",
+  ],
+  [
+    "api_audit_log :: anon",
+    "O snapshot concede SELECT/INSERT/REFERENCES/TRIGGER/TRUNCATE e a 0258 revoga U/D/T. O bloco fica no fim " +
+      "por ser a fonte do contrato (extraído por rótulo pelo invariante); a companheira ao lado do grant tira " +
+      "o TRUNCATE desde já — o único desses que a RLS não alcança (issue #2255).",
+  ],
   [
     "idempotency_keys :: anon",
     "O snapshot concede ALL e o hardening revoga TRUNCATE (que a RLS não alcança). Estreitar a concessão " +
@@ -747,12 +773,19 @@ describe("baseline.sql não reconstrói o que ele mesmo derruba ou substitui", (
       [...CONCESSOES_ACEITAS.keys()].filter((k) => !chaves.includes(k)),
       "a concessão declarada sumiu do arquivo: remova de CONCESSOES_ACEITAS",
     ).toEqual([]);
-    // Declarar não basta: a declaração só vale com o revoke AO LADO do grant. Sem
-    // esta régua, devolver o revoke ao apêndice reabre a janela com a cerca verde.
+    // Declarar não basta: a declaração só vale com a revogação AO LADO do grant.
+    // A distância é medida até a PRIMEIRA revogação depois da concessão — é ela
+    // que fecha a janela; o bloco da 0258 pode continuar no fim (é a fonte do
+    // contrato de `api_audit_log`, extraída por rótulo), desde que a companheira
+    // esteja colada no grant. Sem esta régua, devolver o revoke ao apêndice
+    // reabre a janela com a cerca verde.
     const largas = concessoesTransitorias(SQL)
-      .filter((c) => c.linhaDoRevoke - c.linhaDoGrant > 20)
-      .map((c) => `${c.chave}: grant ${c.linhaDoGrant} → revoke ${c.linhaDoRevoke}`);
-    expect(largas, "concessão aceita só vale com a revogação ao lado do grant (issue #2251)\n").toEqual([]);
+      .filter((c) => c.linhaDaPrimeiraRevogacao - c.linhaDoGrant > 20)
+      .map((c) => `${c.chave}: grant ${c.linhaDoGrant} → primeira revogação ${c.linhaDaPrimeiraRevogacao}`);
+    expect(
+      largas,
+      "concessão aceita só vale com a revogação ao lado do grant (issues #2251, #2255)\n",
+    ).toEqual([]);
   });
 
   it("nenhuma policy é reinstalada numa versão intermediária diferente da final", () => {

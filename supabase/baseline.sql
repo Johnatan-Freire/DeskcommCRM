@@ -4522,6 +4522,12 @@ GRANT ALL ON TABLE "public"."ai_budgets" TO "anon";
 GRANT ALL ON TABLE "public"."ai_budgets" TO "authenticated";
 GRANT ALL ON TABLE "public"."ai_budgets" TO "service_role";
 
+-- I/U/D de `anon` e `authenticated` saem junto dos grants: morando no bloco da
+-- 0160, no fim do arquivo, a chave anon recuperava a escrita a cada passada até
+-- a linha de lá — e a mantinha se a passada morresse no meio (issue #2255). A
+-- decisão (só o serviço escreve orçamento) segue comentada no bloco da 0160.
+revoke insert, update, delete on table public.ai_budgets from authenticated, anon;
+
 
 
 GRANT ALL ON TABLE "public"."ai_chunks" TO "authenticated";
@@ -4575,6 +4581,14 @@ GRANT ALL ON TABLE "public"."ai_provider_credentials_safe" TO "service_role";
 GRANT SELECT,INSERT,REFERENCES,TRIGGER,TRUNCATE ON TABLE "public"."api_audit_log" TO "anon";
 GRANT SELECT,INSERT,REFERENCES,TRIGGER,TRUNCATE ON TABLE "public"."api_audit_log" TO "authenticated";
 GRANT SELECT,INSERT,REFERENCES,TRIGGER,TRUNCATE ON TABLE "public"."api_audit_log" TO "service_role";
+
+-- O bloco da 0258, no fim do arquivo, revoga U/D/T destes papéis e continua
+-- sendo a fonte do contrato (o invariante `audit-log-sob-o-default-acl-do-supabase`
+-- o extrai por rótulo). Mas o TRUNCATE que o snapshot concede à chave anon — o
+-- único destes que a RLS não alcança — sai JÁ AQUI: entre o grant e o bloco, a
+-- chave o recuperava a cada passada, e uma passada interrompida o deixaria de pé
+-- (issue #2255).
+revoke update, delete, truncate on table public.api_audit_log from public, anon, authenticated;
 
 
 
@@ -14833,9 +14847,9 @@ notify pgrst, 'reload schema';
 -- tabela com o JWT do usuário.
 --
 -- SELECT fica: ler o próprio orçamento pelo PostgREST continua escopado pela
--- policy de SELECT da 0150. `revoke` é idempotente por natureza — este bloco
--- pode ser re-aplicado à vontade pelo `update.sh`.
-revoke insert, update, delete on table public.ai_budgets from authenticated, anon;
+-- policy de SELECT da 0150. O `revoke` de I/U/D acompanha os grants do snapshot
+-- desde a #2255 — aqui ele era reaplicado a cada passada, e a chave anon
+-- recuperava a escrita até esta linha.
 
 -- ---- o arquivo do webhook pode perder o corpo (migration 0163) ----
 --
