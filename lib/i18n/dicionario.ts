@@ -1794,10 +1794,10 @@ export const DICIONARIO: Traducoes = {
   "Em produção ela seria barrada e o assistente teria que reescrever. Encontrado:": {
     es: "En producción se bloquearía y el asistente tendría que reescribirla. Encontrado:",
   },
-  "O teste não consegue verificar tudo (": { es: "La prueba no puede verificarlo todo (" },
-  "verificações ficam de fora)": { es: "verificaciones quedan afuera)" },
-  "Estas só acontecem numa conversa real, com um cliente de verdade do outro lado. Para ver a lista inteira do que é conferido — e o que cada verificação protege — abra a aba": {
-    es: "Estas solo se ejecutan en una conversación real, con un cliente de verdad al otro lado. Para ver la lista completa de lo que se revisa y qué protege cada verificación, abre la pestaña",
+  "A checagem textual não reavalia todas as regras (": { es: "La verificación textual no reevalúa todas las reglas (" },
+  "verificações fora desta camada)": { es: "verificaciones fuera de esta capa)" },
+  "O motor de prévia pode executar algumas dessas verificações com dados simulados e fazer chamadas ao modelo. Isso não comprova liberação para envio real. Para ver as regras de envio, abra a aba": {
+    es: "El motor de vista previa puede ejecutar algunas de estas verificaciones con datos simulados y hacer llamadas al modelo. Eso no comprueba que el envío real esté liberado. Para ver las reglas de envío, abre la pestaña",
   },
   "Configure e salve uma versão antes de testar.": {
     es: "Configura y guarda una versión antes de probar.",

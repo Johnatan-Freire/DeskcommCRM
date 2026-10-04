@@ -298,7 +298,16 @@ export type GateVerdict =
   // `skipped: 'not_applicable'` (invariante 4 de `docs/doctrine/restricao-de-canal.md`): a
   // restrição não existe NESTE canal. Passa, mas o trace registra que não se aplicava — um
   // `pass` silencioso apagaria a diferença entre "não regrediu" e "provo que não regrediu".
-  | { pass: true; waitMs?: number; amendBody?: string; skipped?: 'not_applicable' }
+  //
+  // `skipped: 'sandbox_send_embargo'` só nasce no Testar do agente (`preview.ts`, kind
+  // `sandbox`): o veto de pacing virou aviso porque ali não existe envio. Nunca na cadeia
+  // de produção.
+  | {
+      pass: true;
+      waitMs?: number;
+      amendBody?: string;
+      skipped?: 'not_applicable' | 'sandbox_send_embargo';
+    }
   | {
       pass: false;
       code: string;
