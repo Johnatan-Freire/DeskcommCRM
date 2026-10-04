@@ -154,10 +154,11 @@ export type InboxDedupe = 'kind' | 'kind_e_ref' | 'kind_e_titulo' | 'kind_ref_e_
  * inserem (issue #880). Onde o grão tem índice, quem fecha a corrida é o BANCO:
  * `agent_inbox_event_dead_aberto_unico` (0491) para o `event_dead` e
  * `agent_inbox_job_dead_conversa_aberto_unico` (0538) para a resposta a caso
- * obsoleto — a segunda linha vira `23505`, capturado abaixo, e a condição deixa
- * de morar só na consulta. Os grãos sem índice (a promessa e o handoff, que os
- * turnos da fila já serializam por contato; o `other`) continuam com a consulta
- * como única guarda — como sempre foram.
+ * obsoleto e `agent_inbox_other_por_titulo_aberto_unico` (0539) para os avisos
+ * `other` de grão título — a segunda linha vira `23505`, capturado abaixo, e a
+ * condição deixa de morar só na consulta. Os grãos sem índice (a promessa e o
+ * handoff, que os turnos da fila já serializam por contato; os `other` de ref
+ * própria) continuam com a consulta como única guarda — como sempre foram.
  *
  * Devolve `null` quando o dedup barrou — a consulta que não achou nada ou o
  * banco que recusou a segunda escrita são o MESMO desfecho. Não lança: "já
@@ -213,8 +214,8 @@ export async function insertInboxItem(
     return rows[0] ?? null;
   } catch (err) {
     // `23505` — o BANCO recusou a segunda linha, e é ele quem fecha a corrida
-    // (migrations 0491 e 0538). O `where not exists` acima vale para os quatro
-    // modos, mas sozinho não separa dois inserts simultâneos: ambos leem "não
+    // (migrations 0491, 0538 e 0539). O `where not exists` acima vale para os
+    // quatro modos, mas sozinho não separa dois inserts simultâneos: ambos leem "não
     // existe" antes de qualquer escrita (issue #880). Quem chega segundo recebe
     // `23505` do índice único parcial — e "o aviso já estava aberto" é o mesmo
     // desfecho de ter achado a linha na consulta, não um erro.

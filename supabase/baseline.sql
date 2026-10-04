@@ -42337,6 +42337,32 @@ create unique index if not exists agent_inbox_job_dead_conversa_aberto_unico
   on public.agent_inbox_items (organization_id, kind, ref_id)
   where status = 'open' and kind = 'job_dead' and ref_kind = 'conversation';
 
+-- ---- dedupe dos avisos other por título: índice único parcial (migration 0539) ----
+-- Os avisos de `kind='other'` cuja chave é o TÍTULO (sem ref própria, ou com a
+-- credencial de IA): os de grão próprio (`lead`, `agent_case`, etc.) ficam fora
+-- pelo `ref_kind`. Cabeçalho da 0539 para o racional inteiro.
+with repetidas as (
+  select id,
+         row_number() over (
+           partition by organization_id, kind, title
+           order by created_at asc, id asc
+         ) as ordem
+    from public.agent_inbox_items
+   where status = 'open'
+     and kind = 'other'
+     and (ref_kind is null or ref_kind = 'ai_provider_credential')
+)
+update public.agent_inbox_items i
+   set status = 'resolved',
+       resolved_at = now()
+  from repetidas r
+ where i.id = r.id
+   and r.ordem > 1;
+
+create unique index if not exists agent_inbox_other_por_titulo_aberto_unico
+  on public.agent_inbox_items (organization_id, kind, title)
+  where status = 'open' and kind = 'other' and (ref_kind is null or ref_kind = 'ai_provider_credential');
+
 -- ---- proteção sob o `ensure_rls`, DEPOIS de toda policy do arquivo (migration 0521) ----
 --
 -- ⚠️ ESTE É O ÚLTIMO BLOCO DO ARQUIVO, e tem de continuar sendo: a régua estreita
