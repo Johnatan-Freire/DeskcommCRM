@@ -2283,7 +2283,7 @@
   "Confirmar reenvio": "Confirm resend",
   "Mandar de novo o link desta reunião para o cliente?": "Send this meeting's link to the client again?",
   "Mandar de novo": "Send again",
-  "O atendimento desta conversa mudou depois que o link foi criado. Escolha a conversa atual e autorize o envio de novo.": "The support handling this conversation changed after the link was created. Choose the current conversation and authorize sending again.",
+  "O atendimento desta conversa mudou. Escolha a conversa atual e autorize o envio de novo.": "The support handling this conversation changed. Choose the current conversation and authorize sending again.",
   "Este cliente está sendo atendido neste instante. Espere alguns segundos e tente de novo.": "This client is being helped right now. Wait a few seconds and try again.",
   "Este compromisso mudou enquanto a tela estava aberta. Atualize a página e tente de novo.": "This appointment changed while the screen was open. Refresh the page and try again.",
   "O Google e o CRM discordam sobre este compromisso. Resolva a diferença antes de enviar o link.": "Google and the CRM disagree about this appointment. Resolve the difference before sending the link.",
