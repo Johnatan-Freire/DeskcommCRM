@@ -400,6 +400,12 @@ avisa as (
        select 1 from agent_inbox_items
         where organization_id = $1 and kind = 'budget_warning' and status = 'open'
      )
+  -- O índice único parcial da 0540 fecha a corrida SEM derrubar a consulta: o
+  -- veredito do orçamento viaja neste mesmo statement, e um 23505 cru faria o
+  -- chamador seguir sem teto. Quem chega segundo simplesmente não insere.
+  on conflict (organization_id, kind)
+    where status = 'open' and kind in ('budget_exceeded','budget_warning')
+    do nothing
   returning 1
 )
 select (select teto from orc)         as teto,
