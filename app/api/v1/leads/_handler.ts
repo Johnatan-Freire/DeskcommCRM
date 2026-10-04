@@ -433,6 +433,19 @@ export async function createLeadHandler(
      */
     retomado_de_lead_id?: string | null;
   },
+  opcoes: {
+    /**
+     * `false` SÓ no webhook de captação (`app/api/v1/webhooks/in/[token]`): o
+     * lead de formulário entra no funil mesmo que a etapa padrão da fonte exija
+     * um campo que o formulário não mandou. Decisão de produto (#2295), não
+     * consequência da régua — reverter é tirar o argumento daquela rota.
+     *
+     * É opção e não `ctx.actor.type`: `webhook_source` também é o ator da
+     * automação `create_or_move_lead` e da prospecção, que continuam na régua.
+     * E não vem do corpo da requisição, como os demais internos.
+     */
+    exigirCamposDaEtapa?: boolean;
+  } = {},
 ): Promise<Record<string, unknown>> {
   // Validate stage belongs to pipeline within active org.
   const { data: stage, error: stageErr } = await supabase
@@ -461,6 +474,50 @@ export async function createLeadHandler(
       ctx.requestId,
       traduzir("Stage não pertence ao pipeline informado.", ctx.idioma ?? "pt-BR"),
     );
+  }
+
+  // ── A ETAPA EM QUE O NEGÓCIO NASCE TAMBÉM É UMA ENTRADA (issue #1710) ──────
+  //
+  // Criar direto numa etapa exigente é o MESMO gatilho do arrasto: o funil que
+  // exige um campo para RECEBER o negócio o exige aqui também. Sem esta pergunta
+  // a criação nascia na coluna com o campo em branco e a exigência só era cobrada
+  // na PRÓXIMA escrita — o negócio já estava lá.
+  //
+  // Este handler é o escritor de criação de TODOS os clientes (REST `POST
+  // /api/v1/leads`, a tool MCP `crm_create_lead`, o `NewLeadDialog` com
+  // `stage_id`, o import de planilha, a automação `create_or_move_lead` — criação
+  // e transferência de funil — e a prospecção), então a régua é a MESMA função de
+  // todos os outros caminhos, e a recusa é o MESMO 422 com `details.faltando`.
+  // A exceção é o webhook de captação, que passa `exigirCamposDaEtapa: false`
+  // (ver `opcoes` acima).
+  //
+  // O `settings` perguntado é o do funil de DESTINO — `input.pipeline_id`, que a
+  // checagem acima acabou de provar ser o da etapa. `desfecho: null`, como no
+  // clone e na retomada: criar não fecha o negócio, então `ao_ganhar`/`ao_perder`
+  // não entram nesta pergunta. O valor que a régua lê é o que o negócio VAI ter:
+  // `custom_fields` do corpo.
+  //
+  // FAIL-OPEN igual ao resto da régua (`settingsDoFunil` devolve `null` quando a
+  // leitura falha): um funil sem `obrigatorio_em` valida `faltando: []` e a
+  // criação acontece byte a byte como antes — a regra continua opt-in.
+  if (opcoes.exigirCamposDaEtapa !== false) {
+    const settingsDaCriacao = await settingsDoFunil(supabase, input.pipeline_id);
+    const vereditoDeCampos = validaCamposExigidos({
+      lead: { custom_fields: input.custom_fields ?? {} },
+      settingsDoFunil: settingsDaCriacao,
+      destino: { stageId: stage.id, desfecho: null },
+      motivoDeGanho: null,
+    });
+    if (vereditoDeCampos.faltando.length > 0) {
+      const recusa = recusaDeCamposObrigatorios(vereditoDeCampos.faltando, ctx.idioma);
+      throw new ApiError(
+        422,
+        recusa.codigo,
+        { faltando: vereditoDeCampos.faltando },
+        ctx.requestId,
+        recusa.mensagem,
+      );
+    }
   }
 
   if (input.contact_id) await contatoDaOrgOrThrow(supabase, ctx, input.contact_id);
