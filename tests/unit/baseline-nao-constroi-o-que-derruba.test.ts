@@ -72,9 +72,10 @@ import { describe, expect, it } from "vitest";
  * recriação, e `grant` a `anon`/`public` revogado adiante sem reconceder, voltam
  * a valer entre os dois pontos em todo install/update. Os `execute format(...)`
  * de laço ficam fora — medidos, são drop+create (e as concessões, grant+revoke)
- * na MESMA iteração. Função fica fora: comparar os corpos das definições
- * intermediárias do apêndice (98 hoje, medido) é a própria história reaplicada,
- * e pede lista congelada própria, não esta régua. Trabalho próprio.
+ * na MESMA iteração. Função: régua PRÓPRIA em
+ * `baseline-funcao-intermediaria-sem-guarda.test.ts` — a intermediária não pode
+ * enfraquecer guarda forte rumo à final (98 intermediárias medidas; 11
+ * declaradas; o portão legado do #2196 corrigido).
  *
  * Lê texto; que o ciclo install→update sai 0 é o job `invariants` quem mede, e
  * `tests/invariants/indices-redundantes-saem.test.ts` mede o estado final.
