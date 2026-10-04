@@ -5,6 +5,10 @@ export interface RouterMemberInput {
   intent_name: string;
   intent_description: string;
   examples: string[];
+  /** Funil de DESTINO do card quando a intenção casa (#2155). `null` = só roteia. */
+  pipeline_id?: string | null;
+  /** Etapa de destino dentro de `pipeline_id`; `null` = primeira etapa aberta. */
+  stage_id?: string | null;
 }
 
 /** Both additive setup and full editor replacement take this same row lock. Caller owns transaction. */
@@ -47,8 +51,8 @@ export async function writeRouterMembers(
       if (existing.rows.length) continue;
     }
     await db.query(
-      `insert into ai_router_members(organization_id,router_id,agent_id,intent_name,intent_description,examples,position)
-       select $1,$2,$3,$4,$5,$6,coalesce(max(position)+1,0) from ai_router_members where organization_id=$1 and router_id=$2`,
+      `insert into ai_router_members(organization_id,router_id,agent_id,intent_name,intent_description,examples,pipeline_id,stage_id,position)
+       select $1,$2,$3,$4,$5,$6,$7,$8,coalesce(max(position)+1,0) from ai_router_members where organization_id=$1 and router_id=$2`,
       [
         orgId,
         routerId,
@@ -56,6 +60,8 @@ export async function writeRouterMembers(
         member.intent_name,
         member.intent_description,
         member.examples,
+        member.pipeline_id ?? null,
+        member.stage_id ?? null,
       ],
     );
   }

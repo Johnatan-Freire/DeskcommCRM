@@ -19,6 +19,9 @@ export interface RouterMember {
   intent_description: string;
   examples: string[];
   position: number;
+  /** Funil de DESTINO do card quando a intenção casa (#2155). `null` = só roteia. */
+  pipeline_id: string | null;
+  stage_id: string | null;
 }
 
 export interface RouterMemberInput {
@@ -26,6 +29,9 @@ export interface RouterMemberInput {
   intent_name: string;
   intent_description: string;
   examples: string[];
+  /** Funil de DESTINO do card quando a intenção casa (#2155). `null` = só roteia. */
+  pipeline_id: string | null;
+  stage_id: string | null;
 }
 
 export interface RouterDetail {

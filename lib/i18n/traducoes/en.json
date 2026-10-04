@@ -8577,6 +8577,7 @@
   "Chamar uma skill": "Call a skill",
   "Iniciar outro fluxo de atendimento": "Start another support flow",
   "O fluxo de atendimento escolhido não existe nesta organização.": "The chosen support flow doesn't exist in this organization.",
+  "O funil ou a etapa de destino não existe nesta organização.": "The destination pipeline or stage doesn't exist in this organization.",
   "Como usar os fluxos de atendimento (guia rápido)": "How to use support flows (quick guide)",
   "É um roteiro de perguntas que a IA segue durante a conversa: ela pergunta uma coisa por vez, entende a resposta e guarda o dado no cadastro do cliente.": "It's a question script the AI follows during the conversation: it asks one thing at a time, understands the answer, and saves the data in the client's record.",
   "Montando o roteiro": "Building the script",

@@ -1628,6 +1628,9 @@ export const DICIONARIO: Traducoes = {
   "Quando o cliente escrever fora do horário, esta mensagem é enviada na hora — uma vez por cliente por período fechado, e nunca para quem pediu para parar. Deixe em branco para não enviar.": {
     es: "Cuando el cliente escriba fuera del horario, este mensaje se envía al instante — una vez por cliente por período cerrado, y nunca para quien pidió dejar de recibir. Déjelo en blanco para no enviar.",
   },
+  "Funil de destino (opcional)": { es: "Embudo de destino (opcional)" },
+  "Sem destino — só escolher o agente": { es: "Sin destino — solo elegir el agente" },
+  "Primeira etapa aberta": { es: "Primera etapa abierta" },
   Início: { es: "Inicio" },
   Fim: { es: "Fin" },
   Dias: { es: "Días" },

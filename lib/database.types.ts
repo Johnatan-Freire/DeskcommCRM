@@ -2388,8 +2388,10 @@ export type Database = {
           intent_description: string
           intent_name: string
           organization_id: string
+          pipeline_id: string | null
           position: number
           router_id: string
+          stage_id: string | null
           updated_at: string
         }
         Insert: {
@@ -2401,8 +2403,10 @@ export type Database = {
           intent_description: string
           intent_name: string
           organization_id: string
+          pipeline_id?: string | null
           position?: number
           router_id: string
+          stage_id?: string | null
           updated_at?: string
         }
         Update: {
@@ -2414,8 +2418,10 @@ export type Database = {
           intent_description?: string
           intent_name?: string
           organization_id?: string
+          pipeline_id?: string | null
           position?: number
           router_id?: string
+          stage_id?: string | null
           updated_at?: string
         }
         Relationships: [
@@ -2446,6 +2452,20 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "ai_routers"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ai_router_members_pipeline_mesma_org"
+            columns: ["organization_id", "pipeline_id"]
+            isOneToOne: false
+            referencedRelation: "crm_pipelines"
+            referencedColumns: ["organization_id", "id"]
+          },
+          {
+            foreignKeyName: "ai_router_members_stage_mesma_org"
+            columns: ["organization_id", "stage_id"]
+            isOneToOne: false
+            referencedRelation: "crm_stages"
+            referencedColumns: ["organization_id", "id"]
           },
         ]
       }

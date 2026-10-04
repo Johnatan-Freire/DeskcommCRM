@@ -107,6 +107,14 @@ export interface TurnAgentResolution {
    * — fallback/sem-router NÃO começam fluxo.
    */
   flowPointerId?: string | null;
+  /**
+   * Funil/etapa de DESTINO da intenção casada (#2155). Valem também em sticky:
+   * o card é levado ao funil do produto na PRIMEIRA mensagem e fica lá — a
+   * transferência idempotente (`ja_no_destino`) não reprocessa os seguintes.
+   * `null`/ausente = sem destino configurado, nada muda.
+   */
+  destinationPipelineId?: string | null;
+  destinationStageId?: string | null;
 }
 
 export interface ResolveTurnAgentDeps {
@@ -255,6 +263,8 @@ export async function resolveTurnAgent(
         // conversa em curso: devolvê-lo recomeçaria o roteiro a cada turno — e,
         // depois de concluído, de novo, para sempre.
         flowPointerId: outcome === 'sticky' ? null : (member.flowPointerId ?? null),
+        destinationPipelineId: member.destinationPipelineId ?? null,
+        destinationStageId: member.destinationStageId ?? null,
       };
     };
 
@@ -450,7 +460,16 @@ async function aplicaEscopoDaEtapa(
       config: config?.serviceScope === 'comercial' ? config : null,
       outcome: 'no_match',
       flowPointerId: null,
+      // A intenção que casou era do agente acadêmico, recusado acima: o destino
+      // de funil dela não vale para o agente comercial que assume (#2155).
+      destinationPipelineId: null,
+      destinationStageId: null,
     };
+  }
+  // Etapa só-humana ou terminal: a IA não responde, e o roteador também não move
+  // o card — quem decide o funil de um contato nessas etapas é a equipe (#2155).
+  if (politica !== 'comercial') {
+    return { ...resolvido, destinationPipelineId: null, destinationStageId: null };
   }
   return resolvido;
 }
