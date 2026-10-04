@@ -312,6 +312,45 @@ export function createFollowupTurnHandler(deps: FollowupTurnDeps) {
     if (targetRows[0].archived_at) throw new Error('canal arquivado');
     const target: ReentrySendTarget = { tenantId, leadId, conversationId: boundary!.conversation_id, channelSessionId: targetRows[0]!.channel_session_id };
 
+    // A INSCRIÇÃO PRECISA ESTAR VIVA ANTES DE QUALQUER EFEITO. O turno já
+    // enfileirado sobrevive ao fluxo: apagar o fluxo pela rota apaga as
+    // inscrições (#1913) e o `cron_jobs` do adiamento para a janela continua de
+    // pé, mas a checagem de atualidade só rodava no `complete` — DEPOIS do
+    // envio. A mensagem de um fluxo apagado saía calada, e o job terminava
+    // `done`. A MESMA régua do caminho inline (`enviarTextoFixoPendente`,
+    // `lib/followup/enviar-texto-fixo.ts`): inscrição existente, no MESMO nó, e
+    // em estado que anda (`active`/`waiting_reply`). Fora disso o turno termina
+    // sem tocar a cadeia; o worker fecha o job como `done` no caminho normal.
+    //
+    // `node_id` ausente NÃO é descartado aqui de propósito: payload de fluxo
+    // sem nó é defeito de programação e segue falhando alto em
+    // `runFlowDrivenTurn`, como falhava.
+    if (payload.followup_enrollment_id !== undefined && payload.node_id !== undefined) {
+      const { rows: inscricaoRows } = await pool.query<{ current_node_id: string; status: string }>(
+        `select current_node_id, status from followup_enrollments where organization_id = $1 and id = $2 limit 1`,
+        [tenantId, payload.followup_enrollment_id],
+      );
+      const inscricao = inscricaoRows[0];
+      const viva =
+        inscricao !== undefined &&
+        inscricao.current_node_id === payload.node_id &&
+        (inscricao.status === 'active' || inscricao.status === 'waiting_reply');
+      if (!viva) {
+        withFields(deps.log, {
+          job_id: job.id,
+          tenant_id: tenantId,
+          lead_id: leadId,
+          enrollment_id: payload.followup_enrollment_id,
+        }).info('turno de fluxo descartado — a inscrição não está mais viva', {
+          motivo: inscricao === undefined ? 'inscricao_ausente' : 'fora_do_no_ou_encerrada',
+          status: inscricao?.status ?? null,
+          no_do_payload: payload.node_id,
+          no_atual: inscricao?.current_node_id ?? null,
+        });
+        return;
+      }
+    }
+
     const clock = deps.clock ?? ((): Date => new Date());
 
     // #490 — a janela PRÓPRIA vale só para envio proativo dirigido por fluxo.
