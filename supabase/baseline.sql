@@ -42087,6 +42087,42 @@ create unique index if not exists agent_inbox_midia_nao_lida_aberto_unico
   on public.agent_inbox_items (organization_id, kind)
   where status = 'open' and kind = 'midia_nao_lida';
 
+-- ---- origem do negócio segue o canal da conversa (migration 0531) ----
+-- Negócio que nasceu de conversa do Instagram/Facebook gravado com
+-- source = 'whatsapp' passa a ter o canal da conversa. Critério e o que não se
+-- toca: cabeçalho da migration 0531. Idempotente.
+update public.crm_leads l
+   set source = c.channel
+  from public.crm_lead_activities a
+  join public.conversations c
+    on c.organization_id = a.organization_id
+   and c.id = a.source_id
+ where a.organization_id = l.organization_id
+   and a.lead_id = l.id
+   and a.type = 'lead_created'
+   and a.source_module = 'canal.ingest'
+   and c.channel <> 'whatsapp'
+   and l.source = 'whatsapp';
+
+-- ---- tipo do envio no trace (migration 0535) ----
+-- O trace passa a dizer se a tentativa vetada era RESPOSTA ou DISPARO (#2112).
+-- NULL-ável de propósito: linha anterior à 0535 é legado e continua lida como
+-- resposta (o que o código de antes assumia); `null` passa no CHECK. CHECK de
+-- vocabulário fechado (`resposta`/`disparo`), espelho de `TipoDeEnvio` em
+-- lib/agent-engine/guardrails/before-send.ts. Idempotente.
+alter table public.before_send_traces
+  add column if not exists tipo_envio text;
+
+do $$ begin
+  if not exists (select 1 from pg_constraint
+                  where conname = 'before_send_traces_tipo_envio_check'
+                    and conrelid = 'public.before_send_traces'::regclass) then
+    alter table public.before_send_traces
+      add constraint before_send_traces_tipo_envio_check
+      check (tipo_envio in ('resposta', 'disparo'));
+  end if;
+end $$;
+
 -- ---- proteção sob o `ensure_rls`, DEPOIS de toda policy do arquivo (migration 0521) ----
 --
 -- ⚠️ ESTE É O ÚLTIMO BLOCO DO ARQUIVO, e tem de continuar sendo: a régua estreita

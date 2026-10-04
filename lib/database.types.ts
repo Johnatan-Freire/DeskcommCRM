@@ -2801,6 +2801,7 @@ export type Database = {
           id: string
           job_id: string
           organization_id: string
+          tipo_envio: string | null
           trace: Json
           vetoed_code: string | null
           vetoed_gate: string | null
@@ -2812,6 +2813,7 @@ export type Database = {
           id?: string
           job_id: string
           organization_id: string
+          tipo_envio?: string | null
           trace: Json
           vetoed_code?: string | null
           vetoed_gate?: string | null
@@ -2823,6 +2825,7 @@ export type Database = {
           id?: string
           job_id?: string
           organization_id?: string
+          tipo_envio?: string | null
           trace?: Json
           vetoed_code?: string | null
           vetoed_gate?: string | null

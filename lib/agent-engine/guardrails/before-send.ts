@@ -1479,6 +1479,27 @@ function emitTrace(log: Logger, channelSessionId: string, trace: GateTraceEntry[
 }
 
 /**
+ * O TIPO do envio que a tentativa representava — vocabulário fechado da coluna
+ * `before_send_traces.tipo_envio` (migration 0535, #2112).
+ *
+ * A cadeia já SABIA o tipo (`RunBeforeSendArgs.resposta`, 0495): o que faltava
+ * era gravá-lo. Sem ele, o aviso de retenção da conversa tratava TODO veto como
+ * resposta e avaliava a janela errada para um disparo de follow-up — e o
+ * histórico não tinha por onde responder "seguramos um DISPARO às 3h".
+ */
+export type TipoDeEnvio = 'resposta' | 'disparo';
+
+/**
+ * `resposta` verdadeiro vira `resposta`; TODO o resto (omitido = disparo, que é
+ * o default da cadeia) vira `disparo`. O `true` explícito porque é a direção
+ * que fecha: um valor inesperado não pode cair no lado que abre a janela de
+ * resposta às 3h para quem não escreveu nada.
+ */
+export function tipoDeEnvio(resposta: boolean | undefined): TipoDeEnvio {
+  return resposta === true ? 'resposta' : 'disparo';
+}
+
+/**
  * Persiste o trace da tentativa em `before_send_traces` para export por run (F4-08 acc 3).
  * Escrita autônoma no pool (não no client sob lock) para sobreviver ao rollback do veto.
  * Sem jobId = pula (testes sem job real). Falha de escrita → log.error + segue: a auditoria
@@ -1493,8 +1514,8 @@ async function persistTrace(
   try {
     const { rows } = await args.pool.query<{ id: string }>(
       `insert into before_send_traces
-         (organization_id, job_id, contact_id, channel_session_id, trace, vetoed_gate, vetoed_code)
-       values ($1, $2, $3, $4, $5, $6, $7)
+         (organization_id, job_id, contact_id, channel_session_id, trace, vetoed_gate, vetoed_code, tipo_envio)
+       values ($1, $2, $3, $4, $5, $6, $7, $8)
        returning id`,
       [
         args.tenantId,
@@ -1504,6 +1525,9 @@ async function persistTrace(
         JSON.stringify(trace),
         veto?.gate ?? null,
         veto?.code ?? null,
+        // #2112: o TIPO da tentativa vai junto com o veto — é o que permite ao
+        // aviso de retenção avaliar a janela certa (resposta × disparo).
+        tipoDeEnvio(args.resposta),
       ],
     );
     return rows[0]?.id ?? null;
