@@ -418,6 +418,48 @@ export function createFollowupTurnHandler(deps: FollowupTurnDeps) {
           no_do_payload: payload.node_id,
           no_atual: inscricao?.current_node_id ?? null,
         });
+        // #2262 — O DESCARTE DURANTE A PAUSA NÃO PODE SER SILÉNCIO.
+        //
+        // Apagada, encerrada ou em outro nó: não há nada a reenfileirar, e o
+        // silêncio acima está certo. PAUSADA é o caso oposto — a inscrição
+        // continua viva no MESMO nó (`paused_handoff` do handoff humano,
+        // `paused_manual` da intervenção), com um consumidor de retomada em
+        // `lib/followup/reactivity.ts` / `lib/followup/intervencao.ts`. Sem
+        // rastro, o último evento da estadia continua sendo o `turn_enqueued`
+        // deste job: na retomada o motor lê `actionEnqueued = waitElapsed &&
+        // !turnoDaAcaoDescartado(...)` como "turno em voo", não enfileira nada
+        // (só recheca) e a sequência fica parada no nó até o dead-man marcá-la
+        // `dead` com `action_turn_never_completed` — motivo falso, porque quem
+        // descartou foi a pausa.
+        //
+        // `turn_discarded` é o rastro que JÁ existe para isto (migration 0501,
+        // mesma chave `…:descartado` que não conta como passo em
+        // `fn_followup_job_current`): o motor enfileira um turno novo no
+        // primeiro tick depois da retomada. Escrito aqui pelo worker — sem
+        // `auth.uid()`, o gatilho `fn_followup_generation_write` deixa o
+        // servidor gravar; pela sessão, um manager continuaria recusado.
+        if (
+          inscricao !== undefined &&
+          inscricao.current_node_id === payload.node_id &&
+          (inscricao.status === 'paused_handoff' || inscricao.status === 'paused_manual') &&
+          payload.purpose === 'send_message'
+        ) {
+          await pool.query(
+            `insert into followup_enrollment_events
+               (organization_id, enrollment_id, node_id, event_type, payload, idempotency_key)
+             values ($1, $2, $3, 'turn_discarded', $4, $5)
+             on conflict (enrollment_id, idempotency_key) where idempotency_key is not null do nothing`,
+            [
+              tenantId,
+              payload.followup_enrollment_id,
+              payload.node_id,
+              { job_id: job.id, motivo: 'inscricao_pausada' },
+              `${typeof job.payload.source_step_key === 'string' && job.payload.source_step_key !== ''
+                ? job.payload.source_step_key
+                : job.id}:descartado`,
+            ],
+          );
+        }
         return;
       }
     }

@@ -84,6 +84,7 @@ function job(): JobRow {
     payload: {
       followup_enrollment_id: INSCRICAO,
       node_id: NO,
+      source_step_key: `${NO}:1`,
       purpose: "send_message",
       fixed_body: "Oi! Passando para retomar.",
       service_boundary: boundary,
@@ -105,8 +106,18 @@ interface Cenario {
   inscricao: { current_node_id: string; status: string } | null;
 }
 
+/**
+ * Os INSERTs em `followup_enrollment_events` que o handler fez — é o rastro
+ * que o #2262 cobra (a retomada só reenfileira se ele existir).
+ */
+let inserts: Array<{ sql: string; params: unknown[] }> = [];
+
 function fakePool(c: Cenario) {
-  const query = vi.fn(async (sql: string): Promise<{ rows: Array<Record<string, unknown>> }> => {
+  const query = vi.fn(async (sql: string, params?: unknown[]): Promise<{ rows: Array<Record<string, unknown>> }> => {
+    if (/insert into followup_enrollment_events/.test(sql)) {
+      inserts.push({ sql, params: params ?? [] });
+      return { rows: [] };
+    }
     // Regra do fork (0403): o turno de follow-up consulta o corte de envio no
     // banco antes de sair. Este arquivo mede a inscrição viva, não o corte —
     // aqui o corte autoriza.
@@ -148,6 +159,7 @@ beforeAll(async () => {
 beforeEach(() => {
   runBeforeSend.mockClear();
   runAgentTurn.mockClear();
+  inserts = [];
 });
 
 describe("o turno de fluxo diante da inscrição que não está mais viva", () => {
@@ -213,5 +225,116 @@ describe("o turno de fluxo diante da inscrição que não está mais viva", () =
     expect(runBeforeSend).toHaveBeenCalledTimes(1);
     expect(send).toHaveBeenCalledTimes(1);
     expect(completeFollowupTurn).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * #2262 — O DESCARTE DURANTE A PAUSA DEIXA RASTRO.
+ *
+ * A pausa (`paused_handoff` do handoff humano, `paused_manual` da intervenção)
+ * tira a inscrição de circulação, mas ela segue VIVA no MESMO nó e tem quem a
+ * retome. O turno que roda durante a pausa cai no mesmo guard da #1913 — e,
+ * antes desta mudança, saía sem gravar nada: o último evento da estadia seguia
+ * sendo o `turn_enqueued` daquele job.
+ *
+ * A retomada (`ai.handoff_resolved` em `lib/followup/reactivity.ts`) então
+ * reavalia o nó e o motor lê `actionEnqueued = waitElapsed &&
+ * !turnoDaAcaoDescartado(...)` como "turno ainda em voo": só recheca, não
+ * enfileira, e a sequência fica parada até o dead-man marcá-la `dead` com
+ * `action_turn_never_completed`.
+ *
+ * O outro lado da mesma moeda (a retomada de fato reenfileira com este rastro)
+ * é medido em `tests/unit/turno-descartado-na-pausa-reenfileira-2262.test.ts`.
+ */
+describe("#2262 — descarte durante a PAUSA grava turn_discarded; os demais desfechos continuam em silêncio", () => {
+  const PARAMS_ESPERADOS = [
+    ORG,
+    INSCRICAO,
+    NO,
+    { job_id: "job-1", motivo: "inscricao_pausada" },
+    `${NO}:1:descartado`,
+  ];
+
+  it("⭐ paused_handoff: não envia nada e grava turn_discarded com a chave …:descartado", async () => {
+    const { d, send, completeFollowupTurn } = deps();
+    await criarHandler(d)(
+      job(),
+      fakePool({ inscricao: { current_node_id: NO, status: "paused_handoff" } }),
+      { workerId: "w1" },
+    );
+
+    expect(send).not.toHaveBeenCalled();
+    expect(completeFollowupTurn).not.toHaveBeenCalled();
+    expect(inserts, "a pausa descartou o turno sem deixar rastro").toHaveLength(1);
+    expect(inserts[0]!.sql).toMatch(/'turn_discarded'/);
+    // `on conflict … do nothing`: idempotente pelo mesmo par (enrollment, chave).
+    expect(inserts[0]!.sql).toContain("on conflict (enrollment_id, idempotency_key)");
+    expect(inserts[0]!.params).toEqual(PARAMS_ESPERADOS);
+    // A chave NÃO termina em `:<n>` — senão `fn_followup_job_current` passaria
+    // a contá-la como passo da estadia.
+    expect(String(PARAMS_ESPERADOS[4])).not.toMatch(/:[0-9]+$/);
+  });
+
+  it("paused_manual (intervenção humana, que também tem retomada): grava o mesmo rastro", async () => {
+    const { d, send } = deps();
+    await criarHandler(d)(
+      job(),
+      fakePool({ inscricao: { current_node_id: NO, status: "paused_manual" } }),
+      { workerId: "w1" },
+    );
+
+    expect(send).not.toHaveBeenCalled();
+    expect(inserts).toHaveLength(1);
+    expect(inserts[0]!.params).toEqual(PARAMS_ESPERADOS);
+  });
+
+  it("pausada, mas o turno não é de ENVIO (classify): sem rastro — quem decide do classify é a carência", async () => {
+    const { d, send } = deps();
+    const classificar = { ...job(), payload: { ...job().payload, purpose: "classify" } };
+    await criarHandler(d)(
+      classificar,
+      fakePool({ inscricao: { current_node_id: NO, status: "paused_handoff" } }),
+      { workerId: "w1" },
+    );
+
+    expect(send).not.toHaveBeenCalled();
+    expect(inserts).toHaveLength(0);
+  });
+
+  it("encerrada (cancelled): sem rastro — não há retomada que reenfileire", async () => {
+    const { d } = deps();
+    await criarHandler(d)(
+      job(),
+      fakePool({ inscricao: { current_node_id: NO, status: "cancelled" } }),
+      { workerId: "w1" },
+    );
+    expect(inserts).toHaveLength(0);
+  });
+
+  it("pausada mas fora do nó (o passo andou antes da pausa): sem rastro", async () => {
+    const { d } = deps();
+    await criarHandler(d)(
+      job(),
+      fakePool({ inscricao: { current_node_id: "outro-no", status: "paused_handoff" } }),
+      { workerId: "w1" },
+    );
+    expect(inserts).toHaveLength(0);
+  });
+
+  it("inscrição apagada: sem rastro — não há linha para gravar", async () => {
+    const { d } = deps();
+    await criarHandler(d)(job(), fakePool({ inscricao: null }), { workerId: "w1" });
+    expect(inserts).toHaveLength(0);
+  });
+
+  it("controle: inscrição VIVA no mesmo nó não grava nada (o envio é o rastro)", async () => {
+    const { d, send } = deps();
+    await criarHandler(d)(
+      job(),
+      fakePool({ inscricao: { current_node_id: NO, status: "active" } }),
+      { workerId: "w1" },
+    );
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(inserts).toHaveLength(0);
   });
 });

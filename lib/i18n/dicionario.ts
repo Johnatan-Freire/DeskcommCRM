@@ -6715,6 +6715,14 @@ export const DICIONARIO: Traducoes = {
   "Esperando a resposta do cliente": { es: "Esperando la respuesta del cliente" },
   "O cliente não respondeu dentro do prazo": { es: "El cliente no respondió dentro del plazo" },
   "Conferiu se a mensagem já tinha saído": { es: "Verificó si el mensaje ya había salido" },
+  "O envio deste passo foi descartado antes de sair": {
+    es: "El envío de este paso se descartó antes de salir",
+  },
+  "sai num envio novo quando o fluxo voltar a andar": { es: "sale en un envío nuevo cuando el flujo vuelva a avanzar" },
+  "O envio deste passo foi descartado porque a inscrição está pausada": {
+    es: "El envío de este paso se descartó porque la inscripción está pausada",
+  },
+  "sai num envio novo quando a inscrição for retomada": { es: "sale en un envío nuevo cuando se reanude la inscripción" },
   "Mensagem enviada": { es: "Mensaje enviado" },
   "O agente interpretou a resposta": { es: "El agente interpretó la respuesta" },
   "Fluxo concluído": { es: "Flujo concluido" },
