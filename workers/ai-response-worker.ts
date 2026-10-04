@@ -580,11 +580,20 @@ async function abrirItemDeOrcamento(
     ref_id: orgId,
   });
   if (error) {
-    logger.warn("[ai-response] item de orçamento não pôde ser aberto na Central", {
-      organization_id: orgId,
-      kind: item.kind,
-      causa: error.message,
-    });
+    // `23505` = o índice único parcial da 0540 recusou a segunda linha: o item
+    // JÁ estava aberto (outro processo chegou primeiro). É desfecho normal, não
+    // falha — o log separa os dois para não caçar fantasma.
+    const jaEstavaAberto = error.code === "23505";
+    logger.warn(
+      jaEstavaAberto
+        ? "[ai-response] item de orçamento já estava aberto — segunda linha recusada"
+        : "[ai-response] item de orçamento não pôde ser aberto na Central",
+      {
+        organization_id: orgId,
+        kind: item.kind,
+        causa: error.message,
+      },
+    );
   }
 }
 

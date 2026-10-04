@@ -390,6 +390,26 @@ describe("o teto de orçamento nasce desarmado, e o gate faz o que promete", () 
       expect(itensAbertos(ORG_GATE, "budget_warning"), "abriu aviso com gasto zero").toBe(0);
     });
 
+    it("(j0) não depende do índice da 0540 existir: a forma sem alvo não infere nada", () => {
+      // A forma com alvo (`on conflict (organization_id, kind) where ...`) só
+      // resolve se o índice único parcial existir: num clone cuja atualização
+      // aplicou o código antes do banco, `SQL_ORCAMENTO` falharia com 42P10 e o
+      // chamador seguiria SEM TETO (o `catch` de leitura é fail-open de
+      // propósito). Este caso derruba o índice dentro de uma transação desfeita
+      // e mede que o statement continua avaliando — o texto vem do módulo,
+      // como no `rodarGate`.
+      const texto = SQL_ORCAMENTO.replace(/\$1/g, `'${ORG_GATE}'::uuid`)
+        .replace(/\$2/g, `'Titulo do aviso'`)
+        .replace(/\$3/g, `'Corpo do aviso'`);
+      const saida = sql(
+        `begin; drop index public.agent_inbox_budget_aberto_unico; ${texto}; rollback;`,
+      );
+      const linha = saida.split("\n").find((l) => l.includes("|")) ?? "";
+      const [teto = "", modo = ""] = linha.split("|");
+      expect(teto, "o statement não avaliou sem o índice (42P10 na forma com alvo?)").toBe("1000");
+      expect(modo).toBe("avisar");
+    });
+
     it("(j) gasto entre limiar e teto abre UM aviso, e a segunda passada não duplica", () => {
       gastar(ORG_GATE, 850); // 85% de 1000 — acima do limiar, abaixo do teto
       rodarGate(ORG_GATE);

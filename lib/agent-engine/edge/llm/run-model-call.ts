@@ -382,13 +382,13 @@ async function aplicarOrcamento(d: {
        select 1 from agent_inbox_items
        where organization_id = $1 and kind = 'budget_exceeded' and status = 'open'
      )
-     -- Índice da 0540: se outro processo abriu o mesmo item entre a guarda e o
-     -- insert, a linha não entra — e a RECUSA (o erro lançado abaixo) continua
-     -- valendo. Sem isto, o 23505 substituiria o erro de orçamento e o
-     -- chamador não saberia que a IA parou de propósito.
-     on conflict (organization_id, kind)
-       where status = 'open' and kind in ('budget_exceeded','budget_warning')
-       do nothing`,
+     -- on conflict SEM ALVO pela mesma razão do statement do orçamento
+     -- (SQL_ORCAMENTO): a forma com alvo exige que o índice da 0540 já exista,
+     -- e um clone fora de ordem falharia aqui com 42P10 — trocando a RECUSA (o
+     -- erro lançado abaixo) por um erro de banco. Sem alvo, se outro processo
+     -- abriu o mesmo item entre a guarda e o insert, a linha não entra e a
+     -- recusa continua valendo.
+     on conflict do nothing`,
     [d.organizationId, BLOQUEIO_TITULO, corpoDoBloqueio(gastoCents, tetoCents)],
   );
   // A recusa vira LINHA em llm_calls. A tela /app/ai/runs nasceu porque
