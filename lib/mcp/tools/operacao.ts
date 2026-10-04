@@ -44,6 +44,7 @@ import {
 import { listarMarcadores, listarTime } from "@/lib/operacao/marcadores-e-time";
 import { resolveUserNames } from "./_users";
 import {
+  contatoDoNegocio,
   listarModelosDeMensagem,
   preencherModeloDeMensagem,
 } from "@/lib/operacao/modelos-de-mensagem";
@@ -263,15 +264,40 @@ export const crmRenderMessageTemplate: McpToolDefinition<typeof renderTemplateSh
   description:
     "Preenche uma resposta pronta com os dados do contato/lead informados e devolve o TEXTO — não envia nada. " +
     "Devolve também `lacunas`: as marcações que ficaram sem valor. Se vier lacuna, NÃO mande o texto como está: " +
-    "'Olá , tudo bem?' chega assim no cliente.",
+    "'Olá , tudo bem?' chega assim no cliente." +
+    " Em conversa de atendimento, preenche apenas com os dados do contato desta conversa (sem " +
+    "contact_id nem lead_id, usa ele).",
   inputSchema: renderTemplateShape,
   category: "read",
   requiresRole: "agent",
   requiresScope: "mcp:read",
   handler: async (input, ctx) => {
+    // ── O TEXTO MONTADO É DO CONTATO DESTA CONVERSA ─────────────────────────
+    //
+    // Mesmo escopo das demais leituras do turno: `ctx.contatoDoTurno` é
+    // contexto de CONFIANÇA (injetado pelo runtime, nunca escrito pelo
+    // modelo). Com ele, `contact_id` de outro contato e `lead_id` cujo dono
+    // não é o do turno caem no MESMO `fora_da_conversa` — negócio inexistente
+    // e negócio sem contato inclusive. Sem nenhum dos dois, o contato do turno
+    // preenche. Sem contato do turno (integrador, pessoa), nada muda.
+    const doTurno = ctx.contatoDoTurno;
+    if (doTurno) {
+      const foraDoTurno =
+        (input.contact_id !== undefined && input.contact_id !== doTurno) ||
+        (input.lead_id !== undefined && (await contatoDoNegocio(deps(ctx), input.lead_id)) !== doTurno);
+      if (foraDoTurno) {
+        return {
+          permitido: false,
+          motivo: "fora_da_conversa",
+          mensagem:
+            "esta conversa é com outra pessoa — preencher uma resposta pronta com os dados de quem " +
+            "não é este cliente não é seu para fazer; siga a conversa com quem está falando.",
+        };
+      }
+    }
     return preencherModeloDeMensagem(deps(ctx), {
       templateId: input.template_id,
-      contactId: input.contact_id,
+      contactId: input.contact_id ?? doTurno,
       leadId: input.lead_id,
     });
   },

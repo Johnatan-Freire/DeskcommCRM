@@ -47,6 +47,7 @@ const { listConversationsHandler, getConversationHandler } = await import(
 const { listMessagesHandler } = await import("@/app/api/v1/messages/_handler");
 const { auditMcpToolCall } = await import("@/lib/mcp/audit");
 const { pickToolsFromMcp } = await import("@/lib/ai/runtime/tools");
+const { ApiError } = await import("@/lib/api/types");
 
 const ORG = "11111111-1111-4111-8111-111111111111";
 /** Quem está do outro lado DO LADO DE CÁ — o contato que este turno atende. */
@@ -372,5 +373,40 @@ describe("sem contato do turno, nada muda", () => {
   it("os pedidos de qualquer contato continuam vindo", async () => {
     const r = await executar(["crm_list_contact_orders"], { contact_id: DE_OUTRO_CLIENTE });
     expect(r).toMatchObject({ pedidos: [{ id: "pp-1", tracking_code: RASTREIO_DE_B }] });
+  });
+});
+
+// `crm_get_conversation` com turno: uuid inexistente (o handler responde 404,
+// o mesmo de "é de outra organização") recebe a MESMA recusa da conversa de
+// outro cliente. Sem turno, o 404 segue como antes.
+describe("crm_get_conversation: o 404 não abre um estado distinto no turno", () => {
+  const NAO_EXISTE = () => new ApiError(404, "not_found", undefined, "req-1", "Conversa não encontrada.");
+
+  it("⭐ uuid inexistente recebe a mesma recusa da conversa de outro cliente", async () => {
+    const deOutro = await executar(["crm_get_conversation"], { conversation_id: CONVERSA_DE_B }, DA_CONVERSA);
+    vi.mocked(getConversationHandler).mockRejectedValue(NAO_EXISTE());
+    const inexistente = await executar(
+      ["crm_get_conversation"],
+      { conversation_id: "aaaaaaaa-9999-4999-8999-999999999999" },
+      DA_CONVERSA,
+    );
+    expect(deOutro).toMatchObject({ permitido: false, motivo: "fora_da_conversa" });
+    expect(inexistente).toEqual(deOutro);
+  });
+
+  it("erro que não é 404 continua subindo no turno", async () => {
+    vi.mocked(getConversationHandler).mockRejectedValue(
+      new ApiError(500, "internal_error", undefined, "req-1", "banco caiu"),
+    );
+    const r = await executar(["crm_get_conversation"], { conversation_id: CONVERSA_DE_B }, DA_CONVERSA);
+    expect(r).not.toMatchObject({ motivo: "fora_da_conversa" });
+    expect(r).toHaveProperty("error");
+  });
+
+  it("CONTROLE: sem contato do turno, o 404 continua sendo 404", async () => {
+    vi.mocked(getConversationHandler).mockRejectedValue(NAO_EXISTE());
+    const r = await executar(["crm_get_conversation"], { conversation_id: CONVERSA_DE_B });
+    expect(r).not.toMatchObject({ motivo: "fora_da_conversa" });
+    expect(r).toHaveProperty("error");
   });
 });

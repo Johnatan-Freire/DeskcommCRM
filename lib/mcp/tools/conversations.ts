@@ -177,7 +177,14 @@ export const crmGetConversation: McpToolDefinition<typeof getInputShape> = {
         requestId: ctx.requestId,
       },
       input.conversation_id,
-    );
+    ).catch((e: unknown) => {
+      // Com turno, o `404` (não existe, ou é de outra organização) vira a
+      // MESMA recusa da conversa de outro cliente, como no histórico: um uuid
+      // não ganha veredito sobre existência. Sem turno, sobe como antes; erro
+      // que não é `404` sobe sempre.
+      if (ctx.contatoDoTurno && e instanceof ApiError && e.status === 404) return null;
+      throw e;
+    });
     // ── A CONVERSA DE QUEM NÃO É DESTA CONVERSA NÃO ABRE AQUI (#2178) ────────
     //
     // RECUSA, e não tradução: trocar o uuid pedido pelo da conversa do turno
@@ -195,7 +202,7 @@ export const crmGetConversation: McpToolDefinition<typeof getInputShape> = {
     // HTTP, MCP externo, agente sem conversa — qualquer conversa da
     // organização segue abrindo como antes. O Operador recebe o contato do
     // turno e também fica escopado.
-    if (ctx.contatoDoTurno && conv.contact_id !== ctx.contatoDoTurno) {
+    if (!conv || (ctx.contatoDoTurno && conv.contact_id !== ctx.contatoDoTurno)) {
       return {
         permitido: false,
         motivo: "fora_da_conversa",
