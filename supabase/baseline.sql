@@ -40389,6 +40389,168 @@ comment on function public.fn_lead_anotar_campos(uuid, uuid, jsonb) is
 
 notify pgrst, 'reload schema';
 
+-- ---- conversão da Meta por etapa do funil (migration 0524) ----
+--
+-- Racional inteiro na migration 0524. Cria função, então fica ANTES da varredura de anon.
+create table if not exists public.meta_ads_conversion_rules (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  stage_id uuid not null,
+  event_name text not null,
+  meta_event text not null,
+  enabled boolean not null default true,
+  configured_at timestamptz not null default now(),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  updated_by uuid,
+  constraint meta_ads_conversion_rules_evento_do_livro
+    check (event_name ~ '^MetaEtapa:[0-9a-f-]{36}$'),
+  constraint meta_ads_conversion_rules_evento_conhecido
+    check (meta_event in (
+      'LeadSubmitted', 'QualifiedLead', 'InitiateCheckout', 'AddToCart', 'ViewContent'
+    ))
+);
+
+alter table public.meta_ads_conversion_rules
+  drop constraint if exists meta_ads_conversion_rules_stage_org_fk;
+alter table public.meta_ads_conversion_rules
+  add constraint meta_ads_conversion_rules_stage_org_fk
+  foreign key (organization_id, stage_id)
+  references public.crm_stages (organization_id, id)
+  on delete cascade;
+
+create unique index if not exists meta_ads_conversion_rules_org_stage_uk
+  on public.meta_ads_conversion_rules (organization_id, stage_id);
+create unique index if not exists meta_ads_conversion_rules_org_event_uk
+  on public.meta_ads_conversion_rules (organization_id, event_name);
+
+comment on table public.meta_ads_conversion_rules is
+  'Qual evento padrão da Meta cada etapa do funil envia quando um negócio entra nela. event_name (MetaEtapa:<uuid>) é a chave do livro-razão ad_conversion_dispatches. Server-side only: RLS sem policy e grants revogados de anon/authenticated.';
+comment on column public.meta_ads_conversion_rules.configured_at is
+  'Trava de retroatividade: só movimentos de etapa posteriores enviam. Regravada pelo gatilho quando a etapa ou o evento mudam, ou quando a regra é religada.';
+
+alter table public.meta_ads_conversion_rules enable row level security;
+revoke all on public.meta_ads_conversion_rules from anon, authenticated;
+grant select, insert, update, delete on public.meta_ads_conversion_rules to service_role;
+
+drop trigger if exists trg_meta_ads_conversion_rules_updated_at on public.meta_ads_conversion_rules;
+create trigger trg_meta_ads_conversion_rules_updated_at
+  before update on public.meta_ads_conversion_rules
+  for each row execute function public.fn_set_updated_at();
+
+create or replace function public.fn_marcar_configuracao_regra_meta()
+returns trigger language plpgsql set search_path = public as $$
+begin
+  if tg_op = 'INSERT' then
+    new.configured_at := coalesce(new.configured_at, now());
+  elsif new.stage_id is distinct from old.stage_id
+     or new.meta_event is distinct from old.meta_event
+     or (new.enabled and not old.enabled) then
+    new.configured_at := now();
+  else
+    new.configured_at := old.configured_at;
+  end if;
+  return new;
+end;
+$$;
+revoke execute on function public.fn_marcar_configuracao_regra_meta() from public, anon, authenticated;
+grant execute on function public.fn_marcar_configuracao_regra_meta() to service_role;
+
+drop trigger if exists trg_marcar_configuracao_regra_meta on public.meta_ads_conversion_rules;
+create trigger trg_marcar_configuracao_regra_meta
+  before insert or update on public.meta_ads_conversion_rules
+  for each row execute function public.fn_marcar_configuracao_regra_meta();
+
+alter table public.ad_conversion_dispatches
+  add column if not exists meta_event_name text;
+
+comment on column public.ad_conversion_dispatches.meta_event_name is
+  'Retrato do evento de etapa da Meta (0524): o nome que saiu no fio. Reenviar usa este, nunca a regra de agora.';
+
+-- O reenvio passa a aceitar os eventos de etapa da Meta, com a mesma exigência
+-- dos do Google: só reenvia o que tem o retrato (quando + qual evento) gravado.
+create or replace function public.fn_solicitar_reenvio_conversao(p_org uuid, p_lead uuid, p_event text)
+returns boolean language plpgsql set search_path = public as $$
+declare v_linha public.ad_conversion_dispatches%rowtype;
+begin
+  if p_event is null or not (
+    p_event in ('Purchase', 'QualifiedLead')
+    or p_event ~ '^Etapa:[0-9a-f-]{36}$'
+    or p_event ~ '^MetaEtapa:[0-9a-f-]{36}$'
+  ) then
+    return false;
+  end if;
+  select * into v_linha from public.ad_conversion_dispatches
+    where organization_id = p_org and lead_id = p_lead and event_name = p_event for update;
+  if not found or v_linha.status = 'sent' then return false; end if;
+  if p_event ~ '^MetaEtapa:' then
+    if v_linha.event_occurred_at is null or v_linha.meta_event_name is null then return false; end if;
+  elsif p_event <> 'Purchase' and (v_linha.event_occurred_at is null or v_linha.google_action_id is null) then
+    return false;
+  end if;
+  if p_event = 'Purchase' and v_linha.remote_request_id is null and not exists (
+    select 1 from public.crm_leads where id = p_lead and organization_id = p_org and status = 'won'
+  ) then return false; end if;
+  if exists (select 1 from public.event_log where organization_id = p_org and entity_id = p_lead
+    and event_type = 'ad_conversion.retry_requested' and status in ('pending', 'processing')
+    and coalesce(payload->>'event_name', 'Purchase') = p_event) then return false; end if;
+  perform public.emit_event('ad_conversion.retry_requested', 'crm_lead', p_lead,
+    jsonb_build_object('event_name', p_event), '{}'::jsonb, p_org);
+  update public.ad_conversion_dispatches set reason = 'reprocessamento_solicitado', attempted_at = now()
+    where id = v_linha.id and organization_id = p_org;
+  return true;
+end;
+$$;
+revoke execute on function public.fn_solicitar_reenvio_conversao(uuid, uuid, text) from public, anon, authenticated;
+grant execute on function public.fn_solicitar_reenvio_conversao(uuid, uuid, text) to service_role;
+
+-- ---- a remarcação carimba quando o horário foi marcado (migration 0536) ----
+-- Issue #2230, seguimento da #2226/#2223: a régua do degrau vencido na marcação
+-- é `calendar_appointments.created_at`, e `created_at` não muda quando a reunião
+-- é REMARCADA. Reunião criada 3 dias antes e remarcada às 18:30 para as 16h do
+-- dia seguinte mantém a véspera (1440 min) "vencida desde 16:00 de hoje" e a
+-- primeira varredura depois da remarcação manda o aviso — o mesmo defeito da
+-- #2223 com outro gatilho. Medido na issue: varredura às 18:35 → `[1440]`.
+--
+-- A coluna guarda o instante em que o `starts_at` ATUAL foi gravado. As duas
+-- alternativas foram medidas antes de escolher (corpo da migration 0536):
+-- `updated_at` descartaria degraus ARMADOS (o link do Meet e cada revisão o
+-- reescrevem) e `revision_started_at` vira com status e conversa, matando a
+-- véspera de um compromisso confirmado já dentro de 24h.
+--
+-- O carimbo mora num GATILHO: a remarcação entra pela tela, pela ferramenta MCP
+-- e pela reconciliação do Google, e todas passam por `fn_appointment_change_core`
+-- — mas o gatilho é o único ponto que não depende de quem escreve lembrar de
+-- gravar. O guard é `is distinct from` porque o UPDATE do RPC SEMPRE nomeia
+-- `starts_at` no SET, mesmo quando o patch não o traz: nomear não é mudar.
+--
+-- Aditiva e idempotente; sem backfill — linha nunca remarcada fica `NULL` e o
+-- leitor (`app/api/v1/cron/agenda-reminder/route.ts`) cai em `created_at`, que é
+-- o comportamento de antes. A função entra ANTES da varredura anon de propósito.
+alter table public.calendar_appointments
+  add column if not exists starts_at_marked_at timestamptz;
+
+comment on column public.calendar_appointments.starts_at_marked_at is
+  'Instante em que o starts_at ATUAL foi gravado — a régua do degrau de lembrete vencido na marcação (#2223) depois de uma remarcação (#2230). NULL = a linha nunca foi remarcada; quem lê (a rota agenda-reminder) cai em created_at.';
+
+create or replace function public.fn_starts_at_marked_at() returns trigger
+language plpgsql set search_path = '' as $$
+begin
+  if new.starts_at is distinct from old.starts_at then
+    new.starts_at_marked_at := clock_timestamp();
+  end if;
+  return new;
+end;
+$$;
+
+revoke execute on function public.fn_starts_at_marked_at() from public, anon, authenticated;
+grant execute on function public.fn_starts_at_marked_at() to service_role;
+
+drop trigger if exists trg_starts_at_marked_at on public.calendar_appointments;
+create trigger trg_starts_at_marked_at
+  before update of starts_at on public.calendar_appointments
+  for each row execute function public.fn_starts_at_marked_at();
+
 -- ---- VARREDURA anon: função nova nasce exposta em quem ATUALIZA (migration 0116) ----
 --
 -- ⚠️ DE PROPÓSITO, NENHUMA FUNÇÃO É CRIADA DEPOIS DESTE BLOCO. Apêndice que cria
