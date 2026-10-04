@@ -7440,6 +7440,15 @@ export const DICIONARIO: Traducoes = {
     es: "Muestra limitada: esta cifra cubre solo una parte del período.",
   },
   "Falha ao ler o histórico de etapas.": { es: "Error al leer el historial de etapas." },
+  "Falha ao ler os negócios das etapas.": { es: "Error al leer los negocios de las etapas." },
+  // ─── Tempo na etapa ATUAL (#2032), ao lado da taxa da #1753 ──────────────
+  "nesta etapa agora": { es: "en esta etapa ahora" },
+  "mediana de {horas} h desde a entrada (stage_changed_at)": {
+    es: "mediana de {horas} h desde la entrada (stage_changed_at)",
+  },
+  "Amostra limitada: este número cobre só parte dos negócios abertos do funil.": {
+    es: "Muestra limitada: esta cifra cubre solo una parte de los negocios abiertos del embudo.",
+  },
   "Ver o porquê.": { es: "Ver el porqué." },
   "ver a mensagem": { es: "ver el mensaje" },
   "registro que sustenta": { es: "registro que sustenta" },
