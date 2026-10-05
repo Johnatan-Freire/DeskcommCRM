@@ -40634,6 +40634,37 @@ create trigger trg_demanda_marca_proximo_passo_com_o_caso
 
 notify pgrst, 'reload schema';
 
+-- ---- teto do nome de sessão WAHA recusado pelo banco (migration 0543, #686) ----
+--
+-- O `@MaxLength(54)` do WAHA ficava conferido no teste de banco, no teste
+-- unitário e na guarda antes do transporte — em nenhum deles dentro do INSERT.
+-- Um INSERT direto gravava `waha_session_name` acima do teto sem que nada
+-- recusasse, e o 400 só aparecia contra o WAHA de verdade no primeiro Conectar.
+--
+-- A recusa olha o nome que está sendo ESCRITO: linha antiga acima do teto segue
+-- atualizável (status, metadata, lease) enquanto o nome não muda; o que cai é
+-- nome NOVO acima de 54, inclusive um rename para cima. Idempotente — `create
+-- or replace` + `drop trigger if exists` — porque o kit self-host aplica este
+-- arquivo de novo a cada update.
+create or replace function public.fn_teto_nome_de_sessao_waha() returns trigger
+language plpgsql security definer set search_path=public as $$
+begin
+ if length(coalesce(new.waha_session_name,'')) > 54 then
+  if tg_op = 'INSERT' then
+   raise exception 'waha_session_name_acima_do_teto: % caracteres; o WAHA aceita no máximo 54', length(new.waha_session_name) using errcode='22023';
+  elsif new.waha_session_name is distinct from old.waha_session_name then
+   raise exception 'waha_session_name_acima_do_teto: % caracteres; o WAHA aceita no máximo 54', length(new.waha_session_name) using errcode='22023';
+  end if;
+ end if;
+ return new;
+end;$$;
+revoke all on function public.fn_teto_nome_de_sessao_waha() from public,anon,authenticated;
+drop trigger if exists trg_teto_nome_de_sessao_waha on public.channel_sessions;
+create trigger trg_teto_nome_de_sessao_waha before insert or update on public.channel_sessions
+ for each row execute function public.fn_teto_nome_de_sessao_waha();
+
+notify pgrst,'reload schema';
+
 -- ---- VARREDURA anon: função nova nasce exposta em quem ATUALIZA (migration 0116) ----
 --
 -- ⚠️ DE PROPÓSITO, NENHUMA FUNÇÃO É CRIADA DEPOIS DESTE BLOCO. Apêndice que cria
