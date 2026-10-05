@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { HandlerCtx } from "@/lib/api/handlers/types";
+import { ApiError } from "@/lib/api/types";
 
 // A transferência é o EFEITO observável: mockada aqui, e SEMPRE a mesma que a
 // automação chama — se este teste passasse com outra implementação, seria papel
@@ -12,6 +13,7 @@ vi.mock("@/lib/leads/transfere-para-o-funil", () => ({
 
 import { transfereParaOFunil } from "@/lib/leads/transfere-para-o-funil";
 
+import { TITULO_AVISO_DE_DESTINO_RECUSADO, tituloDoAvisoDeDestinoRecusado } from "./aviso-de-destino-recusado";
 import { aplicaDestinoDaIntencao } from "./destino-da-intencao";
 
 const transferir = vi.mocked(transfereParaOFunil);
@@ -124,5 +126,145 @@ describe("aplicaDestinoDaIntencao (#2155 — o card vai para o funil da intenç�
     );
 
     expect(transferir.mock.calls[0]![5]).toBeNull();
+  });
+});
+
+// ─── #2297, caminho 1: a recusa da régua NÃO morre no `runLog.warn` ─────────
+//
+// Com a régua na criação, `transfereParaOFunil` LANÇA quando a etapa de destino
+// exige campo em branco: o 422 `required_fields_missing` do `createLeadHandler`
+// sobe intacto. Antes do conserto a exceção subia até o `catch` de
+// `inbound-turn.ts` — que faz certo em não derrubar a resposta ao lead, mas só
+// conseguia um `runLog.warn`: negócio de origem aberto (nada se perde) e
+// ninguém sabendo. Agora `aplicaDestinoDaIntencao` captura, devolve `recusado`
+// com o MESMO código e abre o aviso na Central apontando para o negócio de
+// origem — o único id que ele conhece e o `catch` de inbound não conhecia.
+//
+// Sabotagens que separam os desenhos: tirar o `.catch` faz o primeiro caso
+// LANÇAR (vermelho por exceção); tirar a chamada do aviso deixa os dois
+// primeiros sem item inserido. O último caso é o controle — um aviso na
+// transferência que PASSA transformaria a Central em ruído.
+
+/** Supabase com as duas superfícies: leitura de negócio E escrita de aviso. */
+function adminComAvisos(
+  linhas: unknown[],
+  { jaAberto = false, locale = null }: { jaAberto?: boolean; locale?: string | null } = {},
+) {
+  const inseridos: Record<string, unknown>[] = [];
+  const from = (tabela: string) => {
+    if (tabela === "organizations") {
+      return {
+        select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: { locale }, error: null }) }) }),
+      };
+    }
+    if (tabela !== "agent_inbox_items") {
+      return {
+        select: () => ({
+          eq: () => ({ eq: () => ({ eq: async () => ({ data: linhas, error: null }) }) }),
+        }),
+      };
+    }
+    const cadeia: Record<string, unknown> = {};
+    const encadeia = () => cadeia;
+    for (const nome of ["select", "eq", "limit"]) cadeia[nome] = encadeia;
+    cadeia.maybeSingle = async () => ({ data: jaAberto ? { id: "aviso-aberto" } : null, error: null });
+    cadeia.insert = (linha: Record<string, unknown>) => {
+      inseridos.push(linha);
+      return { error: null };
+    };
+    return cadeia;
+  };
+  return { cliente: { from } as never, inseridos };
+}
+
+describe("recusa da transferência abre o aviso na Central (#2297, caminho 1)", () => {
+  it("a régua LANÇA → recusado com o código, origem apontada e aviso aberto", async () => {
+    transferir.mockRejectedValueOnce(
+      new ApiError(422, "required_fields_missing", { faltando: [] }, "job-1", "Preencha os campos"),
+    );
+    const { cliente, inseridos } = adminComAvisos([negocio("lead-1", "pipe-entrada")]);
+
+    const r = await aplicaDestinoDaIntencao(deps(cliente));
+
+    expect(r.status).toBe("recusado");
+    expect(r.error).toBe("required_fields_missing");
+    expect(r.origemId).toBe("lead-1");
+    expect(inseridos).toHaveLength(1);
+    expect(inseridos[0]).toMatchObject({
+      organization_id: "org-1",
+      kind: "other",
+      severity: "warn",
+      ref_kind: "lead",
+      ref_id: "lead-1",
+      title: TITULO_AVISO_DE_DESTINO_RECUSADO,
+    });
+    expect(String(inseridos[0]!.body)).toContain("campos obrigatórios");
+  });
+
+  it("a recusa que NÃO lança ({ok:false}) abre o MESMO aviso", async () => {
+    transferir.mockResolvedValueOnce({ ok: false, error: "origem_sem_etapa_de_perda" });
+    const { cliente, inseridos } = adminComAvisos([negocio("lead-1", "pipe-entrada")]);
+
+    const r = await aplicaDestinoDaIntencao(deps(cliente));
+
+    expect(r.status).toBe("recusado");
+    expect(inseridos).toHaveLength(1);
+    expect(String(inseridos[0]!.body)).toContain("origem_sem_etapa_de_perda");
+  });
+
+  it("já existe aviso aberto para este negócio → não empilha o segundo", async () => {
+    transferir.mockResolvedValueOnce({ ok: false, error: "required_fields_missing" });
+    const { cliente, inseridos } = adminComAvisos([negocio("lead-1", "pipe-entrada")], {
+      jaAberto: true,
+    });
+
+    const r = await aplicaDestinoDaIntencao(deps(cliente));
+
+    expect(r.status).toBe("recusado");
+    expect(inseridos).toHaveLength(0);
+  });
+
+  it("fork Capital Code: etapa permanente (`etapa_travada`) → recusado SEM aviso na Central", async () => {
+    transferir.mockResolvedValueOnce({ ok: false, error: "etapa_travada" });
+    const { cliente, inseridos } = adminComAvisos([negocio("lead-1", "pipe-entrada")]);
+
+    const r = await aplicaDestinoDaIntencao(deps(cliente));
+
+    expect(r).toMatchObject({ status: "recusado", error: "etapa_travada", origemId: "lead-1" });
+    expect(inseridos).toHaveLength(0);
+  });
+
+  it("transferência que PASSA → nenhum aviso (controle)", async () => {
+    const { cliente, inseridos } = adminComAvisos([negocio("lead-1", "pipe-entrada")]);
+
+    const r = await aplicaDestinoDaIntencao(deps(cliente));
+
+    expect(r.status).toBe("transferido");
+    expect(inseridos).toHaveLength(0);
+  });
+
+  it("organização em espanhol → título e corpo em espanhol, e a dedup compara o título traduzido", async () => {
+    transferir.mockRejectedValueOnce(
+      new ApiError(422, "required_fields_missing", { faltando: [] }, "job-1", "Preencha os campos"),
+    );
+    const { cliente, inseridos } = adminComAvisos([negocio("lead-1", "pipe-entrada")], { locale: "es" });
+
+    await aplicaDestinoDaIntencao(deps(cliente));
+
+    expect(tituloDoAvisoDeDestinoRecusado("es")).not.toBe(TITULO_AVISO_DE_DESTINO_RECUSADO);
+    expect(inseridos[0]!.title).toBe(tituloDoAvisoDeDestinoRecusado("es"));
+    expect(String(inseridos[0]!.body)).toContain("campos obligatorios");
+  });
+
+  it("falha que NÃO é a régua (ex.: `encerraDemanda`, depois do clone) volta ao chamador, sem aviso", async () => {
+    // O clone já existe quando `encerraDemanda` lança: um aviso dizendo "não
+    // move nada" seria falso. A falha sobe ao `catch` de `inbound-turn.ts`.
+    transferir.mockRejectedValueOnce(
+      new ApiError(422, "lost_reason_invalid", undefined, "job-1", "Motivo fora da lista"),
+    );
+    const { cliente, inseridos } = adminComAvisos([negocio("lead-1", "pipe-entrada")]);
+
+    await expect(aplicaDestinoDaIntencao(deps(cliente))).rejects.toMatchObject({ code: "lost_reason_invalid" });
+    expect(inseridos).toHaveLength(0);
   });
 });

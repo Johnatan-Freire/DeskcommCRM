@@ -1,12 +1,14 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { HandlerCtx } from "@/lib/api/handlers/types";
+import { ApiError } from "@/lib/api/types";
 import { resolveActiveLeadForContact, type LeadCandidate } from "@/lib/leads/active-lead";
 import {
   COLUNAS_DA_ORIGEM,
   transfereParaOFunil,
   type OrigemDaTransferencia,
 } from "@/lib/leads/transfere-para-o-funil";
+import { abreAvisoDeDestinoRecusado } from "./aviso-de-destino-recusado";
 
 export type StatusDoDestino =
   /** A intenção não declarou funil — o roteamento de sempre (#2155). */
@@ -57,6 +59,12 @@ export interface DestinoDaIntencaoDeps {
  * (não duplica o card do cliente), sem negócio aberto e alvo ambíguo — a única
  * coisa visível ao cliente final que este caminho pode causar é mover o card
  * errado.
+ *
+ * A QUINTA — `recusado`, quando a transferência é barrada (a régua de campos
+ * obrigatórios do destino, entre outras) — NÃO é silenciosa desde o #2297: ela
+ * abre um aviso na Central apontando para o negócio de origem, que continua
+ * aberto. Silenciar uma recusa é diferente de não mover nada: aqui o card não
+ * foi para onde a intenção mandou, e alguém precisa saber.
  */
 export async function aplicaDestinoDaIntencao(
   deps: DestinoDaIntencaoDeps,
@@ -101,8 +109,40 @@ export async function aplicaDestinoDaIntencao(
     deps.destinoPipelineId,
     deps.destinoStageId,
     "Levado para outro funil pelo roteador de intenção",
+  ).catch(
+    // A régua LANÇA (#2297, caminho 1): `createLeadHandler` joga o 422
+    // `required_fields_missing` para cima, `transfereParaOFunil` não o captura e
+    // a exceção subia até o `catch` de `inbound-turn.ts` — que faz certo em não
+    // derrubar a resposta ao lead, mas só conseguia registrar em `runLog`. Aqui
+    // o negócio de ORIGEM é conhecido, então a recusa vira o MESMO `{ok:false}`
+    // de sempre e o aviso da Central nasce junto.
+    //
+    // SÓ a recusa da régua (#2302): `encerraDemanda` roda DEPOIS do clone e
+    // lança por conta própria (motivo inválido, falha de banco). Capturar tudo
+    // fazia o aviso dizer "não move nada" com o card já criado no destino —
+    // essas falhas voltam ao `catch` de `inbound-turn.ts`, como antes.
+    // Resíduo conhecido: a etapa de PERDA da origem com campo exigido também
+    // lança `required_fields_missing`, depois do clone, e cai aqui — o código
+    // não distingue de onde ele veio.
+    (err: unknown): { ok: false; error: string } => {
+      if (err instanceof ApiError && err.code === "required_fields_missing") {
+        return { ok: false, error: err.code };
+      }
+      throw err;
+    },
   );
   if (!transferencia.ok) {
+    // Fork Capital Code: etapa permanente (`exit_locked`) não é recusa a
+    // resolver — é a regra da etapa funcionando. Avisar na Central a cada
+    // mensagem do contato seria ruído sobre uma decisão já tomada pela equipe.
+    if (transferencia.error === "etapa_travada") {
+      return { status: "recusado", error: transferencia.error, origemId: origem.id };
+    }
+    await abreAvisoDeDestinoRecusado(deps.admin, {
+      organizationId: deps.organizationId,
+      leadId: origem.id,
+      motivo: transferencia.error,
+    });
     return { status: "recusado", error: transferencia.error, origemId: origem.id };
   }
   return {

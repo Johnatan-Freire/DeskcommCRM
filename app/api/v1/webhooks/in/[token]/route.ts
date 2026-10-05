@@ -35,7 +35,12 @@ import {
   type RdStationMapped,
 } from "@/lib/webhooks/rdstation";
 import { isElementorPayload, mapElementorPayload, type ElementorMapped } from "@/lib/webhooks/elementor";
-import { origemDaPagina, registrarCaptacao, type MotivoDaRecusa } from "@/lib/webhooks/captacao";
+import {
+  motivoDaRecusaDaCriacao,
+  origemDaPagina,
+  registrarCaptacao,
+  type MotivoDaRecusa,
+} from "@/lib/webhooks/captacao";
 import { ipDoClienteParaInet } from "@/lib/http/ip-do-cliente";
 import { decryptWebhookSecret } from "@/lib/webhooks/secrets";
 import { ApiError } from "@/lib/api/types";
@@ -588,7 +593,10 @@ export async function POST(req: NextRequest, ctx: RouteCtx): Promise<NextRespons
         ...dadosDaCaptacao,
         contactId: contactId ?? null,
         outcome: "recusado",
-        rejectReason: "erro_ao_criar_lead",
+        // O rótulo diz o que REALMENTE falhou (#2297, caminho 4): o mesmo
+        // `erro_ao_criar_lead` para tudo mentia sobre qualquer recusa que não
+        // fosse de funil ou de etapa.
+        rejectReason: motivoDaRecusaDaCriacao(err),
       });
       return fail(err.code, err.message ?? "erro", err.status, { requestId });
     }

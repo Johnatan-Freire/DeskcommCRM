@@ -3377,6 +3377,8 @@
   "A assinatura não conferiu. Quem enviou não usou o segredo configurado nesta fonte.": "The signature didn't match. Whoever sent it didn't use the secret configured for this source.",
   "O segredo de assinatura desta fonte não pôde ser lido nesta instalação, então nada entra por ela. Cadastre a assinatura de novo na fonte.": "This source's signing secret couldn't be read on this installation, so nothing comes in through it. Set up the signature again on the source.",
   "Os dados chegaram, mas o lead não pôde ser criado — confira se o funil e a etapa da fonte ainda existem.": "The data arrived, but the lead couldn't be created — check that the source's pipeline and stage still exist.",
+  "Os dados chegaram, mas a régua de campos obrigatórios recusou o negócio: a etapa do funil exige um campo que o formulário não trouxe.": "The data arrived, but the required-fields rule rejected the deal: the pipeline stage requires a field the form didn't send.",
+  "Os dados chegaram, mas a criação do negócio falhou por outro motivo — não é nem o funil nem a etapa da fonte.": "The data arrived, but creating the deal failed for another reason — it's not the source's pipeline or stage.",
   "Virou lead": "Became a lead",
   "Reenvio": "Resend",
   "Não entrou": "Didn't enter",

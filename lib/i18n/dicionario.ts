@@ -4270,6 +4270,12 @@ export const DICIONARIO: Traducoes = {
   "Os dados chegaram, mas o lead não pôde ser criado — confira se o funil e a etapa da fonte ainda existem.": {
     es: "Los datos llegaron, pero no se pudo crear el lead. Revisa que el embudo y la etapa de la fuente sigan existiendo.",
   },
+  "Os dados chegaram, mas a régua de campos obrigatórios recusou o negócio: a etapa do funil exige um campo que o formulário não trouxe.": {
+    es: "Los datos llegaron, pero la regla de campos obligatorios rechazó el negocio: la etapa del embudo exige un campo que el formulario no trajo.",
+  },
+  "Os dados chegaram, mas a criação do negócio falhou por outro motivo — não é nem o funil nem a etapa da fonte.": {
+    es: "Los datos llegaron, pero la creación del negocio falló por otro motivo: no es el embudo ni la etapa de la fuente.",
+  },
   "Virou lead": { es: "Se convirtió en lead" },
   Reenvio: { es: "Reenvío" },
   "Não entrou": { es: "No entró" },
@@ -8824,6 +8830,16 @@ export const DICIONARIO: Traducoes = {
     es: "Las respuestas a los clientes están esperando. Recarga el saldo en la cuenta del proveedor: salen solas cuando vuelva el saldo, durante hasta 6 horas. Después de eso, la conversación que no se respondió aparece aquí en la Central.",
   },
   "Revisar credencial": { es: "Revisar credencial" },
+  // ─── lib/agent-engine/agent/aviso-de-destino-recusado.ts (#2297) ───
+  "Transferência para o funil da intenção recusada": {
+    es: "Transferencia al embudo de la intención rechazada",
+  },
+  "O negócio continua ABERTO no funil de origem: a recusa não encerra nem move nada.": {
+    es: "El negocio sigue ABIERTO en el embudo de origen: el rechazo no lo cierra ni lo mueve.",
+  },
+  "A etapa de destino exige campos obrigatórios que este negócio não tem. Abra o negócio, preencha o que falta e refaça a ação.": {
+    es: "La etapa de destino exige campos obligatorios que este negocio no tiene. Abre el negocio, completa lo que falta y repite la acción.",
+  },
   // ─── lib/leads/aviso-de-etapa.ts + editor de etapas (migration 0440) ───
   "Negócio entrou em": { es: "Negocio entró en" },
   "Abra o negócio para dar o próximo passo. Este aviso foi pedido na configuração da etapa.": {

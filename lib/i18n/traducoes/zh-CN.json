@@ -2135,6 +2135,8 @@
   "A assinatura não conferiu. Quem enviou não usou o segredo configurado nesta fonte.": "签名不匹配。发送方未使用此来源中配置的密钥。",
   "O segredo de assinatura desta fonte não pôde ser lido nesta instalação, então nada entra por ela. Cadastre a assinatura de novo na fonte.": "此安装无法读取该来源的签名密钥，因此任何内容都无法通过它进入。请在该来源中重新设置签名。",
   "Os dados chegaram, mas o lead não pôde ser criado — confira se o funil e a etapa da fonte ainda existem.": "数据已到达，但无法创建销售线索——请检查该来源的销售漏斗和阶段是否仍然存在。",
+  "Os dados chegaram, mas a régua de campos obrigatórios recusou o negócio: a etapa do funil exige um campo que o formulário não trouxe.": "数据已到达，但必填字段规则拒绝了该商机：销售漏斗的阶段要求一个表单未提供的字段。",
+  "Os dados chegaram, mas a criação do negócio falhou por outro motivo — não é nem o funil nem a etapa da fonte.": "数据已到达，但商机创建因其他原因失败——不是该来源的销售漏斗或阶段的问题。",
   "Virou lead": "已转为销售线索",
   "Reenvio": "重新发送",
   "Não entrou": "未进入",

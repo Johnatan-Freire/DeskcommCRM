@@ -2288,6 +2288,12 @@ async function executarTurnoDoAgente(
       });
     } catch (err) {
       // Nunca derruba a resposta ao lead por causa do destino do card.
+      //
+      // A recusa da RÉGUA (#2297, caminho 1) não chega mais aqui: ela é
+      // capturada dentro de `aplicaDestinoDaIntencao`, que conhece o negócio de
+      // origem e abre o aviso na Central antes de devolver `recusado` — este
+      // `catch` é a rede para o que não é recusa prevista (falha de banco na
+      // leitura, por exemplo), e segue sem aviso porque não há negócio a apontar.
       runLog.warn('destino da intenção não aplicado', {
         error: (err instanceof Error ? err.message : String(err)).slice(0, 160),
         pipeline_id: destinoPipelineId,
