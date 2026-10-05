@@ -336,6 +336,7 @@ export function createSupabaseSilenceSweepDb(admin: SupabaseClient): SilenceSwee
           const metadata = row.sessao?.metadata ?? {};
           const acesso = decidirElegibilidade(
             montarEstadoDeElegibilidade({
+              canalDesativado: metadata.disabled,
               aiGate: metadata.ai_gate,
               aiGateMode: metadata.ai_gate_mode,
               aiTestPhoneNumbers: metadata.ai_test_phone_numbers,
