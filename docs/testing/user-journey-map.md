@@ -205,6 +205,14 @@ entrega desses quatro convites nas caixas finais, todos os provedores e uma nova
 jornada Playwright em instalação fresca. Nenhum endereço ou token real é necessário
 para reproduzir o teste local.
 
+### J5.16 `[P0]` — O link de senha, convite e cadastro resiste ao verificador do Hotmail/Outlook (#2183)
+
+O verificador de links do Outlook/Hotmail abre o link do e-mail antes da pessoa e gastava o token de uso único: quem clicava depois recebia "link expirado". O link agora leva à tela **Confirmar acesso** (`/login/continuar`), e só o botão **Continuar** (POST) gasta o token. Prova pela tela, num build de produção com o `baseline.sql` (contribuição de @fabianmartinelli-fm):
+
+- `evidence/2026-10-03-link-resiste-a-verificador/01-confirmar-acesso.png` — a tela que o link abre, depois que o verificador já seguiu o link;
+- `evidence/2026-10-03-link-resiste-a-verificador/02-definir-nova-senha.png` — o Continuar leva à definição de senha com o token ainda válido;
+- `evidence/2026-10-03-link-resiste-a-verificador/03-confirmar-acesso-celular.png` — a mesma tela no celular.
+
 ## J6 — Webhooks: receber, automatizar, provar `[P0]`
 
 | # | Caso | Expectativa |
