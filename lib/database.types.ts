@@ -8974,6 +8974,14 @@ export type Database = {
         }
         Returns: Json
       }
+      fn_escopo_de_conversas: {
+        Args: never
+        Returns: {
+          organization_id: string
+          ve_nao_atribuidas: boolean
+          ve_todas: boolean
+        }[]
+      }
       fn_extensions_admit_catalog: {
         Args: {
           p_actor: string
