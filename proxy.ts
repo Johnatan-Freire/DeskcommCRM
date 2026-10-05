@@ -64,10 +64,20 @@ export async function proxy(request: NextRequest) {
   } = await supabase.auth.getUser();
 
   if (!user) {
+    // ⚠️ A resposta deste ramo é um objeto NOVO — e o que o cliente do Supabase
+    // gravou em `response` pelo `setAll` (em especial o APAGAMENTO do cookie de uma
+    // sessão que o GoTrue recusou renovar) tem de ir junto. Sem isso o navegador
+    // guarda o cookie morto e toda consulta seguinte tenta a mesma renovação: foi o
+    // que medimos depois da troca de projeto, ~8 erros/min por horas.
+    // Vigiado por tests/unit/proxy-sessao-invalida-limpa-cookie.test.ts.
+    const comOsCookiesDaSessao = (res: NextResponse) => {
+      for (const cookie of response.cookies.getAll()) res.cookies.set(cookie);
+      return res;
+    };
     // API routes must respond with JSON envelope (contract: {error:{code,message}})
     // — never redirect HTML to JSON consumers. UI routes redirect to /login as before.
     if (pathname.startsWith("/api/")) {
-      return new NextResponse(
+      return comOsCookiesDaSessao(new NextResponse(
         JSON.stringify({
           error: {
             code: "unauthenticated",
@@ -81,11 +91,11 @@ export async function proxy(request: NextRequest) {
             "x-request-id": requestId,
           },
         },
-      );
+      ));
     }
     const loginUrl = new URL("/login", request.url);
     loginUrl.searchParams.set("next", pathname + search);
-    return NextResponse.redirect(loginUrl);
+    return comOsCookiesDaSessao(NextResponse.redirect(loginUrl));
   }
 
   // EPIC-11 S-11.07: validate impersonate cookie on /app/* paths. Middleware
