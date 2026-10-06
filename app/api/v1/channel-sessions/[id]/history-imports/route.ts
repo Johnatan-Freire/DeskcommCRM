@@ -3,8 +3,8 @@
  *
  * GET  lista os recibos do número (admin).
  * POST pede uma importação (admin): cria o recibo `pendente`, que o cron
- *      `whatsapp-history-import` avança. Esta rota não fala com o WAHA e não
- *      envia nada; quem importa só LÊ (ver lib/whatsapp-historico/).
+ *      `whatsapp-history-import` avança. Esta rota não fala com o transporte
+ *      e não envia nada; quem importa só LÊ (ver lib/channels/historico/).
  *
  * A organização vem da SESSÃO do admin (nunca do corpo), e o número tem de ser
  * dela. `Idempotency-Key` repetida devolve o mesmo recibo; um pedido com outra
@@ -22,7 +22,8 @@ import { traduzir } from "@/lib/i18n/dicionario";
 import { requireSupportWrite } from "@/lib/impersonate/support";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
-import { COLUNAS_DO_RECIBO, janelaDoPedido, pedidoDeImportacaoSchema } from "@/lib/whatsapp-historico/pedido";
+import { numeroTemHistoricoLegivel } from "@/lib/channels/historico/da-instalacao";
+import { COLUNAS_DO_RECIBO, janelaDoPedido, pedidoDeImportacaoSchema } from "@/lib/channels/historico/pedido";
 
 export const dynamic = "force-dynamic";
 
@@ -107,7 +108,7 @@ export async function POST(
   if (erroSessao) return fail("internal_error", erroSessao.message, 500, { requestId });
   if (!sessao) return fail("not_found", t("Número não encontrado."), 404, { requestId });
   const linha = sessao as { provider: string | null; first_connected_at: string | null };
-  if (linha.provider && linha.provider !== "waha") {
+  if (!numeroTemHistoricoLegivel(linha.provider)) {
     return fail("unsupported", t("A importação do histórico só existe para números do WhatsApp conectados pelo QR."), 422, { requestId });
   }
   if (!linha.first_connected_at) {

@@ -14,7 +14,7 @@ import { requireRole } from "@/lib/auth/require-role";
 import { traduzir } from "@/lib/i18n/dicionario";
 import { requireSupportWrite } from "@/lib/impersonate/support";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { COLUNAS_DO_RECIBO } from "@/lib/whatsapp-historico/pedido";
+import { COLUNAS_DO_RECIBO } from "@/lib/channels/historico/pedido";
 
 export const dynamic = "force-dynamic";
 

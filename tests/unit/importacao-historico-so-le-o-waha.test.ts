@@ -2,7 +2,7 @@
  * A importação do histórico do WhatsApp é INCAPAZ de enviar — e isto é medido
  * no grafo de imports, não no nome dos arquivos.
  *
- * A partir de todo arquivo da importação (lib/whatsapp-historico, o cron e as
+ * A partir de todo arquivo da importação (lib/channels/historico, o cron e as
  * rotas da tela), percorre os imports TRANSITIVOS de runtime e reprova se algum
  * caminho alcançar um módulo capaz de mandar mensagem ou de acordar quem manda:
  * o cliente do WAHA, o envio, o motor do agente, os workers, follow-up,
@@ -18,7 +18,7 @@ import { dirname, join, normalize } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { caminhoPermitido } from "@/lib/whatsapp-historico/leitor-waha";
+import { caminhoPermitido } from "@/lib/channels/historico/leitor-waha";
 
 const IMPORT =
   /(?:import|export)\s+(type\s+)?(?:[^'"]*?\sfrom\s+)?['"]([^'"]+)['"]|import\(\s*['"]([^'"]+)['"]\s*\)/g;
@@ -61,7 +61,7 @@ function arquivosDe(dir: string): string[] {
 }
 
 const ENTRADAS = [
-  ...arquivosDe("lib/whatsapp-historico"),
+  ...arquivosDe("lib/channels/historico"),
   ...arquivosDe("app/api/v1/cron/whatsapp-history-import"),
   ...arquivosDe("app/api/v1/channel-sessions/[id]/history-imports"),
 ];
@@ -84,13 +84,13 @@ const PROIBIDOS: readonly RegExp[] = [
 
 describe("a importação do histórico só LÊ o WAHA", () => {
   it("o instrumento enxerga o que diz enxergar (guarda de vacuidade)", () => {
-    expect(ENTRADAS).toContain("lib/whatsapp-historico/leitor-waha.ts");
-    expect(ENTRADAS).toContain("lib/whatsapp-historico/importador.ts");
+    expect(ENTRADAS).toContain("lib/channels/historico/leitor-waha.ts");
+    expect(ENTRADAS).toContain("lib/channels/historico/importador.ts");
     expect(ENTRADAS).toContain("app/api/v1/cron/whatsapp-history-import/route.ts");
     // O grafo atravessa de fato: chega à leitura de payload e ao repositório.
     const alcancados = [...grafo(ENTRADAS).keys()];
     expect(alcancados).toContain("lib/waha/payload.ts");
-    expect(alcancados).toContain("lib/whatsapp-historico/repositorio.ts");
+    expect(alcancados).toContain("lib/channels/historico/repositorio.ts");
     // E o detector reconhece um módulo que envia quando o vê.
     expect(PROIBIDOS.some((r) => r.test("lib/waha/client.ts"))).toBe(true);
   });
@@ -112,7 +112,7 @@ describe("a importação do histórico só LÊ o WAHA", () => {
   });
 
   it("o leitor do WAHA só faz GET, e só nos dois caminhos de leitura", () => {
-    const src = readFileSync("lib/whatsapp-historico/leitor-waha.ts", "utf8");
+    const src = readFileSync("lib/channels/historico/leitor-waha.ts", "utf8");
     const metodos = [...src.matchAll(/method:\s*["']([A-Z]+)["']/g)].map((m) => m[1]);
     expect(metodos).toEqual(["GET"]);
     expect(src).not.toMatch(/body:\s*JSON\.stringify/);

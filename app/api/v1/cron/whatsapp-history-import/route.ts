@@ -3,9 +3,10 @@
  * rodada, em lotes, até o orçamento de tempo. Agendado no `scheduler`
  * (`docker/scheduler/entrypoint.sh`).
  *
- * Não envia nada, por construção: as únicas portas são o leitor do WAHA (só
- * GET) e o recibo/`fn_importar_conversa_historica` — ver `lib/whatsapp-historico/`.
- * Sem importação pendente, a rodada não toca no WAHA nem audita.
+ * Não envia nada, por construção: as únicas portas são o leitor do histórico
+ * (só GET) e o recibo/`fn_importar_conversa_historica` — ver
+ * `lib/channels/historico/`. Sem importação pendente, a rodada não toca no
+ * transporte nem audita.
  */
 import { randomUUID } from "node:crypto";
 import type { NextRequest } from "next/server";
@@ -15,9 +16,9 @@ import { audit } from "@/lib/audit";
 import { autorizaCron } from "@/lib/auth/cron-auth";
 import { logger } from "@/lib/logger";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { avancarImportacao } from "@/lib/whatsapp-historico/importador";
-import { criarLeitorDeHistorico } from "@/lib/whatsapp-historico/leitor-waha";
-import { criarRepositorioDaImportacao } from "@/lib/whatsapp-historico/repositorio";
+import { avancarImportacao } from "@/lib/channels/historico/importador";
+import { leitorDoHistoricoDaInstalacao } from "@/lib/channels/historico/da-instalacao";
+import { criarRepositorioDaImportacao } from "@/lib/channels/historico/repositorio";
 
 export const dynamic = "force-dynamic";
 
@@ -30,17 +31,14 @@ async function handle(req: NextRequest): Promise<Response> {
     return fail("forbidden", "Cron secret missing or invalid.", 403, { requestId });
   }
 
-  const url = process.env.WAHA_API_BASE_URL;
-  const key = process.env.WAHA_API_KEY;
-  if (!url || !key || key === "dev_plaintext_change_me") {
-    return ok({ desfecho: "waha_nao_configurado" }, { requestId });
-  }
+  const leitor = leitorDoHistoricoDaInstalacao();
+  if (!leitor) return ok({ desfecho: "transporte_nao_configurado" }, { requestId });
 
   const admin = createAdminClient();
   try {
     const resumo = await avancarImportacao({
       repo: criarRepositorioDaImportacao(admin),
-      leitor: criarLeitorDeHistorico({ baseUrl: url, apiKey: key }),
+      leitor,
       orcamentoMs: ORCAMENTO_MS,
     });
 

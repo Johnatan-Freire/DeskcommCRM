@@ -3,7 +3,7 @@
  * corpo, mídia, data e telefone alternativo.
  *
  * Mora fora de `ingest.ts` por um motivo só: quem lê histórico
- * (`lib/whatsapp-historico/`) precisa da MESMA régua da ingestão ao vivo sem
+ * (`lib/channels/historico/`) precisa da MESMA régua da ingestão ao vivo sem
  * levar junto, pelo grafo de imports, nenhum cliente capaz de enviar mensagem.
  * `ingest.ts` reexporta tudo o que já exportava; ninguém que o importava muda.
  * Este módulo não pode importar cliente do WAHA nem nada que envie — vigiado

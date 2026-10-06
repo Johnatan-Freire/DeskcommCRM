@@ -12,7 +12,7 @@ import { expect, test } from "./helpers/test";
  *
  * Banco e auth reais, sem interceptar a API da feature. Esta spec NÃO dispara o
  * cron e NÃO fala com WAHA nenhum: a leitura do histórico é provada contra um
- * WAHA simulado (lib/whatsapp-historico/importador.test.ts) e o efeito no banco
+ * WAHA simulado (lib/channels/historico/importador.test.ts) e o efeito no banco
  * pelo invariante de 10.000 mensagens. Aqui se prova a porta: quem pede, o que
  * a tela promete, e que o pedido sozinho não produz mensagem nem evento.
  */

@@ -40173,7 +40173,7 @@ revoke execute on function public.fn_proteger_tabelas_sob_ensure_rls() from publ
 --   5. a importação nunca grava status de envio (`queued`/`sending`), então
 --      nenhum redrive nem recuperação de mensagem presa a alcança.
 -- No código, o dreno de eventos e cada consumidor de mensagem recusam histórico
--- também (lib/whatsapp-historico/), e o leitor do WAHA só tem métodos GET.
+-- também (lib/channels/historico/), e o leitor do WAHA só tem métodos GET.
 -- Vigiado por tests/invariants/importacao-historico-nao-dispara-nada.test.ts.
 
 alter table public.messages add column if not exists origem text not null default 'ao_vivo';

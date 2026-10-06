@@ -12,7 +12,7 @@ import {
   MENSAGEM_QUE_NAO_ENTROU,
 } from "@/lib/event-log/aviso-de-evento-morto";
 import { dispatchEvent, getRegisteredHandlers, type EventRow } from "@/lib/event-log/dispatcher";
-import { desfechoDaBarreira, origemDasMensagensDoLote } from "@/lib/whatsapp-historico/barreira-de-eventos";
+import { desfechoDaBarreira, origemDasMensagensDoLote } from "@/lib/channels/historico/barreira-de-eventos";
 import { logger } from "@/lib/logger";
 
 const MAX_ATTEMPTS = 5;

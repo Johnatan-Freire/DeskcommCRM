@@ -27,7 +27,7 @@ import {
   JANELA_MAXIMA_DIAS,
   JANELA_PADRAO_DIAS,
   type ReciboDaImportacao,
-} from "@/lib/whatsapp-historico/pedido";
+} from "@/lib/channels/historico/pedido";
 
 const VIVOS = new Set(["pendente", "em_andamento"]);
 
