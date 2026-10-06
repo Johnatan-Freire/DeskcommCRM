@@ -63,21 +63,39 @@ export async function buscarCandidatos(
   // inflada, que é exatamente o número que o operador confere antes de apertar.
   let idsPorNegocio: string[] | null = null;
   if (usaNegocio(filtro)) {
-    let negocios = admin
-      .from("crm_leads")
-      .select("contact_id")
-      .eq("organization_id", organizationId)
-      .not("contact_id", "is", null)
-      .limit(TETO_DE_IDS_DE_NEGOCIO);
-    if (filtro.funis.length > 0) negocios = negocios.in("pipeline_id", filtro.funis);
-    if (filtro.etapas.length > 0) negocios = negocios.in("stage_id", filtro.etapas);
-    if (filtro.responsaveis.length > 0) negocios = negocios.in("owner_user_id", filtro.responsaveis);
-    if (filtro.situacoes_do_negocio.length > 0) {
-      negocios = negocios.in("status", filtro.situacoes_do_negocio);
+    // A consulta pede até `TETO_DE_IDS_DE_NEGOCIO` LINHAS e o PostgREST corta
+    // TODA resposta em `max_rows` (1.000): sem paginar, um recorte com mais de
+    // mil negócios devolvia só os primeiros mil — audiência parcial e calada
+    // (#2402). Mesmo padrão de `leadsMaisRecentes`: páginas de
+    // `PAGINA_DO_POSTGREST`, com ordem ESTÁVEL (sem `order`, duas páginas
+    // podem repetir ou pular linha), parando na página curta ou no teto.
+    const linhasDeNegocio: Array<{ contact_id: string }> = [];
+    for (let de = 0; ; de += PAGINA_DO_POSTGREST) {
+      let pagina = admin
+        .from("crm_leads")
+        .select("contact_id")
+        .eq("organization_id", organizationId)
+        .not("contact_id", "is", null)
+        .order("created_at", { ascending: true })
+        .order("id", { ascending: true })
+        .range(de, de + PAGINA_DO_POSTGREST - 1);
+      if (filtro.funis.length > 0) pagina = pagina.in("pipeline_id", filtro.funis);
+      if (filtro.etapas.length > 0) pagina = pagina.in("stage_id", filtro.etapas);
+      if (filtro.responsaveis.length > 0) pagina = pagina.in("owner_user_id", filtro.responsaveis);
+      if (filtro.situacoes_do_negocio.length > 0) {
+        pagina = pagina.in("status", filtro.situacoes_do_negocio);
+      }
+      const { data, error } = await pagina;
+      if (error) throw new Error(`audiência: negócios — ${error.message}`);
+      const lidas = (data ?? []) as unknown as Array<{ contact_id: string }>;
+      linhasDeNegocio.push(...lidas);
+      if (lidas.length < PAGINA_DO_POSTGREST || linhasDeNegocio.length >= TETO_DE_IDS_DE_NEGOCIO) {
+        break;
+      }
     }
-    const { data, error } = await negocios;
-    if (error) throw new Error(`audiência: negócios — ${error.message}`);
-    idsPorNegocio = [...new Set((data ?? []).map((l) => (l as { contact_id: string }).contact_id))];
+    idsPorNegocio = [
+      ...new Set(linhasDeNegocio.slice(0, TETO_DE_IDS_DE_NEGOCIO).map((l) => l.contact_id)),
+    ];
     // Recorte de negócio que não achou ninguém é recorte vazio, não recorte
     // ausente: seguir sem o `in` devolveria a organização inteira.
     if (idsPorNegocio.length === 0) return [];

@@ -37,6 +37,16 @@ function json(corpo: unknown): Response {
 /** Um PostgREST de mentira, com o comportamento que importa aqui. */
 function bancoFalso(contatos: string[], negocios: Negocio[], criados: Record<string, string> = {}) {
   const urls: string[] = [];
+  /** Ordem ordinal — a mesma do `ORDER BY` do Postgres para estes campos. */
+  const ord = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+  // Ordenações pré-computadas: o handler roda uma vez por página/lote, e
+  // reordenar a base inteira a cada requisição deixaria os casos grandes lentos.
+  const contatosOrdenados = contatos
+    .map((id, i) => ({ id, created_at: criados[id] ?? quando(i) }))
+    .sort((a, b) => ord(a.created_at, b.created_at) || ord(a.id, b.id));
+  const negociosOrdenados = [...negocios].sort(
+    (a, b) => ord(a.created_at, b.created_at) || ord(a.id, b.id),
+  );
   const sb = createClient("http://127.0.0.1:54321", "x".repeat(200), {
     global: {
       fetch: async (entrada: RequestInfo | URL) => {
@@ -53,10 +63,8 @@ function bancoFalso(contatos: string[], negocios: Negocio[], criados: Record<str
           const permitidos = filtroIds ? new Set(filtroIds.slice(4, -1).split(",")) : null;
           const offset = Number(url.searchParams.get("offset") ?? 0);
           const limite = Math.min(Number(url.searchParams.get("limit") ?? MAX_ROWS), MAX_ROWS);
-          const linhas = contatos
-            .map((id, i) => ({ id, created_at: criados[id] ?? quando(i) }))
+          const linhas = contatosOrdenados
             .filter((c) => !permitidos || permitidos.has(c.id))
-            .sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id))
             .slice(offset, offset + limite)
             .map((c) => ({
               id: c.id,
@@ -72,17 +80,23 @@ function bancoFalso(contatos: string[], negocios: Negocio[], criados: Record<str
         }
         const filtroIn = url.searchParams.getAll("contact_id").find((v) => v.startsWith("in."));
         if (!filtroIn) {
-          // A consulta de IDs de negócio do recorte (`select=contact_id`, sem
-          // `in (…)`): devolve o contato de cada negócio, sem repetir.
-          const vistos = [...new Set(negocios.map((n) => n.contact_id))];
-          return json(vistos.map((contact_id) => ({ contact_id })));
+          // A consulta dos IDs de negócio do recorte (`select=contact_id`, sem
+          // `in (…)`): devolve LINHAS — com repetição — ordenadas e paginadas
+          // como o PostgREST faz. O corte de `max_rows` é o que o #2402 mede.
+          const offset = Number(url.searchParams.get("offset") ?? 0);
+          const limite = Math.min(Number(url.searchParams.get("limit") ?? MAX_ROWS), MAX_ROWS);
+          return json(
+            negociosOrdenados
+              .slice(offset, offset + limite)
+              .map((n) => ({ contact_id: n.contact_id })),
+          );
         }
         const ids = new Set(filtroIn.slice(4, -1).split(","));
         const offset = Number(url.searchParams.get("offset") ?? 0);
         const limite = Math.min(Number(url.searchParams.get("limit") ?? MAX_ROWS), MAX_ROWS);
         const linhas = negocios
           .filter((n) => ids.has(n.contact_id))
-          .sort((a, b) => b.created_at.localeCompare(a.created_at) || b.id.localeCompare(a.id))
+          .sort((a, b) => ord(b.created_at, a.created_at) || ord(b.id, a.id))
           .slice(offset, offset + limite)
           .map(({ contact_id, custom_fields }) => ({ contact_id, custom_fields }));
         return json(linhas);
@@ -331,6 +345,62 @@ describe("recorte de funil grande não estoura a URL (#2358)", () => {
     });
 
     expect(lista.map((c) => c.contactId)).toEqual([contatos[120]]);
+    cercaDeOrganizacao(banco);
+  });
+});
+
+describe("a consulta de ids de negócio pagina pelo max_rows (#2402)", () => {
+  const comFunil = (extra: Partial<FiltroDeAudiencia>) => ({
+    ...FILTRO_VAZIO,
+    funis: [uuid(900, "8888")],
+    ...extra,
+  });
+
+  it("funil com 1.200 negócios: duas páginas e a audiência sai inteira", async () => {
+    const contatos = Array.from({ length: 1200 }, (_, i) => uuid(i));
+    const negocios = contatos.map((c, i) => ({
+      id: uuid(i, "2222"),
+      contact_id: c,
+      created_at: quando(i),
+      custom_fields: {},
+    }));
+    const banco = bancoFalso(contatos, negocios);
+
+    const lista = await buscarCandidatos(banco.sb, {
+      organizationId: ORG,
+      filtro: comFunil({ limite: 1200 }),
+      agora: new Date(Date.UTC(2026, 5, 1)),
+    });
+
+    const urls = banco.urlsDeNegocio();
+    expect(urls, "a consulta de ids não paginou").toHaveLength(2);
+    expect(urls[0]).toContain("offset=0");
+    expect(urls[1]).toContain("offset=1000");
+    expect(lista.map((c) => c.contactId)).toEqual(contatos);
+    cercaDeOrganizacao(banco);
+  });
+
+  it("o teto de 20.000 LINHAS continua teto: para na 20ª página, e não no max_rows", async () => {
+    // 20.001 linhas para 100 contatos: o teto é por LINHA de negócio (o
+    // `.limit(20_000)` de antes), não por contato distinto. Sem o corte no
+    // teto, sairia uma 21ª página; com ele, a união para na vigésima.
+    const contatos = Array.from({ length: 100 }, (_, i) => uuid(i));
+    const negocios = Array.from({ length: 20_001 }, (_, i) => ({
+      id: uuid(i, "2020"),
+      contact_id: contatos[i % 100]!,
+      created_at: quando(i),
+      custom_fields: {},
+    }));
+    const banco = bancoFalso(contatos, negocios);
+
+    const lista = await buscarCandidatos(banco.sb, {
+      organizationId: ORG,
+      filtro: comFunil({ limite: 5000 }),
+      agora: new Date(Date.UTC(2026, 5, 1)),
+    });
+
+    expect(banco.urlsDeNegocio(), "paginou além do teto").toHaveLength(20);
+    expect(lista).toHaveLength(100);
     cercaDeOrganizacao(banco);
   });
 });
