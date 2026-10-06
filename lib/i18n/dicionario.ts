@@ -8814,6 +8814,16 @@ export const DICIONARIO: Traducoes = {
   "Ver o que ele aprendeu": { es: "Ver lo que aprendió" },
   "O que o agente sabe": { es: "Lo que el agente sabe" },
   "Não publicado": { es: "No publicado" },
+  // Editor da jornada (Equipe › Atendimento) — issue #2312.
+  "Copiar estes horários para os outros dias úteis": {
+    es: "Copiar estos horarios a los otros días hábiles",
+  },
+  "Limite de 50 janelas por atendente: remova algumas antes de copiar.": {
+    es: "Límite de 50 franjas por atendente: elimina algunas antes de copiar.",
+  },
+  "É isto que ficou gravado — confira os dias e os horários antes de sair.": {
+    es: "Esto es lo que quedó guardado: revisa los días y los horarios antes de salir.",
+  },
   "Conexão do WhatsApp caiu — precisa escanear o QR de novo": {
     es: "Se cayó la conexión de WhatsApp: escanea el QR de nuevo",
   },
