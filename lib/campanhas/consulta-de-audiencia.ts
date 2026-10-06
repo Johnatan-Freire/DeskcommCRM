@@ -19,14 +19,21 @@ import { recusouMarketing, type CandidatoDaAudiencia } from "./elegibilidade";
 import { camposUsadosNoTexto, type CamposPersonalizados } from "./renderizador";
 import { buscaEmLotes } from "@/lib/supabase/em-lotes";
 
-/** O teto de linhas por resposta do PostgREST (`max_rows` em `supabase/config.toml`). */
-const PAGINA_DE_NEGOCIOS = 1000;
+/**
+ * O teto de linhas por resposta do PostgREST (`max_rows` em `supabase/config.toml`).
+ *
+ * É a página dos DOIS caminhos: os negócios de `{{lead.x}}` e a consulta de
+ * contatos sem recorte de negócio (que pagina até juntar `filtro.limite`).
+ */
+const PAGINA_DO_POSTGREST = 1000;
 
 /** Teto de ids que um filtro de negócio devolve antes de virar `in (...)`. */
 const TETO_DE_IDS_DE_NEGOCIO = 20_000;
 
 interface LinhaDeContato {
   id: string;
+  /** Carimbado porque a ordem GLOBAL do recorte é (`created_at`, `id`). */
+  created_at: string;
   name: string | null;
   display_name: string | null;
   phone_number: string | null;
@@ -76,62 +83,107 @@ export async function buscarCandidatos(
     if (idsPorNegocio.length === 0) return [];
   }
 
-  let consulta = admin
-    .from("contacts")
-    .select(COLUNAS_DO_CONTATO + colunasDeContato)
-    .eq("organization_id", organizationId)
-    // Cadastro mesclado é fantasma: quem responde é o sobrevivente.
-    .is("is_merged_into", null)
-    .order("created_at", { ascending: true })
-    .order("id", { ascending: true })
-    .limit(filtro.limite);
+  // ─── A consulta de contatos ───
+  // Dois filtros deste módulo crescem com a organização e não cabem na URL: os
+  // ids de negócio do recorte (até 20.000) e a lista de excluídos (até 5.000).
+  // O gateway na frente do PostgREST devolve `414` acima de ~8.192 B (#2358, a
+  // mesma família do #2357 em `leadsMaisRecentes`). Por isso:
+  //   * a exclusão sai da URL e vira filtro em MEMÓRIA, ANTES do corte — é o
+  //     que o `.not("id","in",…)` fazia no servidor;
+  //   * com recorte de negócio, a consulta é fatiada por `buscaEmLotes`;
+  //   * sem ele, a consulta é única e paginada por `max_rows`, parando cedo.
+  const excluidos = new Set(filtro.excluir_contatos);
+  const consultaDeContatos = () => {
+    let consulta = admin
+      .from("contacts")
+      .select(COLUNAS_DO_CONTATO + colunasDeContato + ", created_at")
+      .eq("organization_id", organizationId)
+      // Cadastro mesclado é fantasma: quem responde é o sobrevivente.
+      .is("is_merged_into", null)
+      .order("created_at", { ascending: true })
+      .order("id", { ascending: true });
+    if (filtro.com_todas_tags.length > 0) consulta = consulta.contains("tags", filtro.com_todas_tags);
+    if (filtro.com_alguma_tag.length > 0) consulta = consulta.overlaps("tags", filtro.com_alguma_tag);
+    if (filtro.sem_tags.length > 0) {
+      consulta = consulta.not("tags", "ov", `{${filtro.sem_tags.map(citar).join(",")}}`);
+    }
+    if (filtro.origens.length > 0) consulta = consulta.in("source", filtro.origens);
+    if (filtro.sem_interacao_ha_dias !== null) {
+      const limite = limiteDeSilencio(filtro.sem_interacao_ha_dias, agora).toISOString();
+      // Quem nunca interagiu ENTRA no recorte de silêncio: `last_activity_at` nulo
+      // é o silêncio mais longo que existe, e deixá-lo de fora tiraria justamente
+      // a lista fria — que é o caso de uso principal da campanha.
+      consulta = consulta.or(`last_activity_at.is.null,last_activity_at.lt.${limite}`);
+    }
+    if (filtro.com_interacao_ha_dias !== null) {
+      consulta = consulta.gte(
+        "last_activity_at",
+        limiteDeSilencio(filtro.com_interacao_ha_dias, agora).toISOString(),
+      );
+    }
+    if (filtro.cadastrado_de) consulta = consulta.gte("created_at", filtro.cadastrado_de);
+    if (filtro.cadastrado_ate) consulta = consulta.lte("created_at", filtro.cadastrado_ate);
+    return consulta;
+  };
 
-  if (idsPorNegocio) consulta = consulta.in("id", idsPorNegocio);
-  if (filtro.com_todas_tags.length > 0) consulta = consulta.contains("tags", filtro.com_todas_tags);
-  if (filtro.com_alguma_tag.length > 0) consulta = consulta.overlaps("tags", filtro.com_alguma_tag);
-  if (filtro.sem_tags.length > 0) {
-    consulta = consulta.not("tags", "ov", `{${filtro.sem_tags.map(citar).join(",")}}`);
-  }
-  if (filtro.origens.length > 0) consulta = consulta.in("source", filtro.origens);
-  if (filtro.sem_interacao_ha_dias !== null) {
-    const limite = limiteDeSilencio(filtro.sem_interacao_ha_dias, agora).toISOString();
-    // Quem nunca interagiu ENTRA no recorte de silêncio: `last_activity_at` nulo
-    // é o silêncio mais longo que existe, e deixá-lo de fora tiraria justamente
-    // a lista fria — que é o caso de uso principal da campanha.
-    consulta = consulta.or(`last_activity_at.is.null,last_activity_at.lt.${limite}`);
-  }
-  if (filtro.com_interacao_ha_dias !== null) {
-    consulta = consulta.gte(
-      "last_activity_at",
-      limiteDeSilencio(filtro.com_interacao_ha_dias, agora).toISOString(),
-    );
-  }
-  if (filtro.cadastrado_de) consulta = consulta.gte("created_at", filtro.cadastrado_de);
-  if (filtro.cadastrado_ate) consulta = consulta.lte("created_at", filtro.cadastrado_ate);
-  if (filtro.excluir_contatos.length > 0) {
-    consulta = consulta.not("id", "in", `(${filtro.excluir_contatos.join(",")})`);
-  }
-
-  const { data, error } = await consulta;
-  if (error) throw new Error(`audiência: contatos — ${error.message}`);
   // O select é DINÂMICO (a coluna `custom_fields` só entra quando o texto pede),
   // então o PostgREST não infere as colunas e devolve o tipo genérico: o `unknown`
   // é o preço, e `LinhaDeContato` continua sendo conferido por quem monta a linha.
-  const linhas = (data ?? []) as unknown as LinhaDeContato[];
+  let linhas: LinhaDeContato[];
+  if (idsPorNegocio) {
+    // Cada lote traz no MÁXIMO 100 linhas (um id por contato, e os lotes do
+    // `buscaEmLotes` têm 100 ids), então a união é o recorte inteiro — a
+    // exclusão e o corte global acontecem UMA vez, no fim. Um `.limit` por lote
+    // cortaria a união antes da exclusão em memória: um lote com muitas linhas
+    // excluídas empurraria para fora quem deveria entrar.
+    const { data, error } = await buscaEmLotes<LinhaDeContato>(idsPorNegocio, async (lote) => {
+      const { data: pagina, error: erro } = await consultaDeContatos().in("id", lote);
+      return { data: (pagina ?? null) as unknown as LinhaDeContato[] | null, error: erro };
+    });
+    if (error) throw new Error(`audiência: contatos — ${error.message}`);
+    linhas = data.filter((l) => !excluidos.has(l.id));
+    // Comparação ORDINAL, não `localeCompare`: a colação ICU põe `.` antes de
+    // `+`, e um `…56+00:00` (segundo exato) cairia DEPOIS de um `…56.5+00:00`,
+    // o contrário do `ORDER BY` do Postgres. Com timestamp em UTC no formato do
+    // PostgREST e uuid em hex minúsculo, a ordem de bytes é a do banco.
+    linhas.sort((a, b) => ordinal(a.created_at, b.created_at) || ordinal(a.id, b.id));
+  } else {
+    // Sem recorte de negócio não há por onde fatiar: uma consulta, paginada
+    // pelo `max_rows`, até juntar `filtro.limite` linhas VÁLIDAS. Excluir em
+    // memória e parar cedo mantém o desfecho do `.not(…)` no servidor.
+    linhas = [];
+    for (let de = 0; ; de += PAGINA_DO_POSTGREST) {
+      const { data, error } = await consultaDeContatos().range(de, de + PAGINA_DO_POSTGREST - 1);
+      if (error) throw new Error(`audiência: contatos — ${error.message}`);
+      const pagina = (data ?? []) as unknown as LinhaDeContato[];
+      for (const l of pagina) if (!excluidos.has(l.id)) linhas.push(l);
+      if (linhas.length >= filtro.limite || pagina.length < PAGINA_DO_POSTGREST) break;
+    }
+  }
+  if (linhas.length > filtro.limite) linhas = linhas.slice(0, filtro.limite);
 
   // ─── Os incluídos à mão ───
   // Entram mesmo fora do recorte, e por isso vêm em consulta própria; os vetos
   // por pessoa continuam valendo para eles (incluir à mão não fura opt-out).
   const jaTem = new Set(linhas.map((l) => l.id));
-  const faltam = filtro.incluir_contatos.filter((id) => !jaTem.has(id));
+  // Deduplicado ANTES dos lotes: o mesmo id em dois lotes voltaria duas vezes,
+  // e a gravação da campanha esbarraria no contato único por campanha.
+  const faltam = [...new Set(filtro.incluir_contatos)].filter((id) => !jaTem.has(id));
   if (faltam.length > 0) {
-    const { data: extras, error: erroExtras } = await admin
-      .from("contacts")
-      .select(COLUNAS_DO_CONTATO + colunasDeContato)
-      .eq("organization_id", organizationId)
-      .in("id", faltam);
+    // Em lotes pela mesma razão do recorte: até 5.000 ids não cabem numa URL.
+    const { data: extras, error: erroExtras } = await buscaEmLotes<LinhaDeContato>(
+      faltam,
+      async (lote) => {
+        const { data: pagina, error: erro } = await admin
+          .from("contacts")
+          .select(COLUNAS_DO_CONTATO + colunasDeContato + ", created_at")
+          .eq("organization_id", organizationId)
+          .in("id", lote);
+        return { data: (pagina ?? null) as unknown as LinhaDeContato[] | null, error: erro };
+      },
+    );
     if (erroExtras) throw new Error(`audiência: incluídos — ${erroExtras.message}`);
-    linhas.push(...((extras ?? []) as unknown as LinhaDeContato[]));
+    linhas.push(...(extras ?? []));
   }
 
   // ─── Os campos personalizados que o TEXTO usa ───
@@ -212,7 +264,7 @@ async function leadsMaisRecentes(
   if (contactIds.length === 0) return mapa;
   const { data, error } = await buscaEmLotes(contactIds, async (lote) => {
     const linhas: Array<{ contact_id: string; custom_fields: unknown }> = [];
-    for (let de = 0; ; de += PAGINA_DE_NEGOCIOS) {
+    for (let de = 0; ; de += PAGINA_DO_POSTGREST) {
       const { data: pagina, error: erro } = await admin
         .from("crm_leads")
         .select("contact_id, custom_fields")
@@ -221,10 +273,10 @@ async function leadsMaisRecentes(
         .not("contact_id", "is", null)
         .order("created_at", { ascending: false })
         .order("id", { ascending: false })
-        .range(de, de + PAGINA_DE_NEGOCIOS - 1);
+        .range(de, de + PAGINA_DO_POSTGREST - 1);
       if (erro) return { data: null, error: erro };
       linhas.push(...((pagina ?? []) as typeof linhas));
-      if ((pagina ?? []).length < PAGINA_DE_NEGOCIOS) return { data: linhas, error: null };
+      if ((pagina ?? []).length < PAGINA_DO_POSTGREST) return { data: linhas, error: null };
     }
   });
   if (error) throw new Error(`audiência: negócios dos contatos — ${error.message}`);
@@ -272,6 +324,10 @@ export async function contatosJaEmCampanha(
     .in("campaign_id", ids);
   if (erroDest) throw new Error(`audiência: comprometidos — ${erroDest.message}`);
   return new Set((data ?? []).map((r) => (r as { contact_id: string }).contact_id));
+}
+
+function ordinal(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
 }
 
 /** Aspas para o literal de array do Postgres — etiqueta com vírgula quebraria o `{a,b}`. */
