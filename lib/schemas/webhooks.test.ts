@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   createWebhookSourceSchema,
+  updateWebhookSourceSchema,
   createAutomationRuleSchema,
   updateAutomationRuleSchema,
   conditionSchema,
