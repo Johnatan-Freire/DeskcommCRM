@@ -5376,10 +5376,44 @@ revoke execute on function public.fn_can_view_conversation(uuid, uuid) from anon
 grant execute on function public.fn_can_view_conversation(uuid, uuid)
   to authenticated, service_role;
 
+-- 0560: a policy lê o escopo do usuário UMA vez por consulta (subconsultas não
+-- correlacionadas), não `fn_can_view_conversation` por linha — definer não é
+-- embutida, e cada chamada rodava `fn_user_role_in_org` duas vezes (com
+-- `fn_support_context`). Medido em produção: 609 ms → 18 ms para contar 86
+-- conversas como admin comum. Semântica idêntica à função, que não muda e segue
+-- nas policies/RPCs de UMA conversa. Esta é a versão FINAL, no lugar da 0035:
+-- reinstalar a antiga e trocá-la depois deixaria a intermediária valendo a cada
+-- update. Vigiado por tests/invariants/conversas-escopo-uma-vez-por-consulta.test.ts.
+create or replace function public.fn_escopo_de_conversas()
+returns table (organization_id uuid, ve_todas boolean, ve_nao_atribuidas boolean)
+language sql stable security definer
+set search_path = public
+as $$
+  select o.org,
+         r.role in ('viewer', 'manager', 'admin')
+           or coalesce(g.settings->>'visibility_mode', 'own_and_unassigned') = 'all',
+         coalesce(g.settings->>'visibility_mode', 'own_and_unassigned') = 'own_and_unassigned'
+    from (select distinct x as org from public.fn_user_org_ids() x) o
+    cross join lateral (select public.fn_user_role_in_org(o.org) as role) r
+    left join public.organizations g on g.id = o.org
+   where r.role is not null;
+$$;
+
+revoke execute on function public.fn_escopo_de_conversas() from public, anon;
+grant execute on function public.fn_escopo_de_conversas() to authenticated, service_role;
+
 drop policy if exists "conversations_select" on public.conversations;
 create policy "conversations_select" on public.conversations
   for select using (
-    public.fn_can_view_conversation(organization_id, assigned_to_user_id)
+    (select public.fn_is_platform_admin())
+    or organization_id in (
+      select e.organization_id from public.fn_escopo_de_conversas() e where e.ve_todas)
+    or (assigned_to_user_id = (select auth.uid())
+        and organization_id in (
+          select e.organization_id from public.fn_escopo_de_conversas() e))
+    or (assigned_to_user_id is null
+        and organization_id in (
+          select e.organization_id from public.fn_escopo_de_conversas() e where e.ve_nao_atribuidas))
   );
 
 drop policy if exists "conversations_agent_write" on public.conversations;
