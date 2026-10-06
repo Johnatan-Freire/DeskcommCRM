@@ -12394,6 +12394,32 @@ export const DICIONARIO: Traducoes = {
   "A janela de esfriando vai de 1 hora a 8760 horas (365 dias).": {
     es: "La ventana de enfriamiento va de 1 hora a 8760 horas (365 días).",
   },
+  // ─── #2387, ação em lote de pausa/retomada — Central de Conexões ─────────
+  // Os rótulos dos dois botões e as frases de `frasesDoLoteDePausa`
+  // (components/connections/ConnectionsClient.tsx). As contagens passam por
+  // `contar()`/`enumerar()`, cuja chave o guarda de tela NÃO resolve (é o cego
+  // C: `t(singular)` com o argumento vindo do call site) — por isto cada palavra
+  // avulsa vive aqui com a entrada dela: sem ela, quem escolheu espanhol vê
+  // "3 canais pausados agora" em português no meio de uma frase traduzida.
+  "Pausar todas": { es: "Pausar todas" },
+  "Retomar todas": { es: "Reanudar todas" },
+  "Não foi possível mudar o estado dos canais.": { es: "No se pudo cambiar el estado de los canales." },
+  "Não foi possível pausar": { es: "No se pudo pausar" },
+  "Não foi possível retomar": { es: "No se pudo reanudar" },
+  "Feito:": { es: "Hecho:" },
+  "Nada mudou:": { es: "Nada cambió:" },
+  canal: { es: "canal" },
+  canais: { es: "canales" },
+  "canal pausado agora": { es: "canal pausado ahora" },
+  "canais pausados agora": { es: "canales pausados ahora" },
+  "canal reativado agora": { es: "canal reactivado ahora" },
+  "canais reativados agora": { es: "canales reactivados ahora" },
+  "canal já estava pausado": { es: "canal ya estaba pausado" },
+  "canais já estavam pausados": { es: "canales ya estaban pausados" },
+  "canal já estava reativado": { es: "canal ya estaba reactivado" },
+  "canais já estavam reativados": { es: "canales ya estaban reactivados" },
+  "canal arquivado fica de fora": { es: "canal archivado queda fuera" },
+  "canais arquivados ficam de fora": { es: "canales archivados quedan fuera" },
 };
 
 /**
