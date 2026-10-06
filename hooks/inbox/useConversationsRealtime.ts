@@ -3,6 +3,7 @@ import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useMemo } from "react";
 import { useRealtimeChannel } from "@/hooks/realtime/useRealtimeChannel";
 import { useRefetchDeSeguranca } from "@/hooks/realtime/useRefetchDeSeguranca";
+import { agendarRecargaDasConversas } from "@/hooks/inbox/recargaDasConversas";
 import { apiClient } from "@/lib/api/client";
 import { showApiError } from "@/components/feedback/ApiErrorToast";
 import {
@@ -170,9 +171,7 @@ export function useConversationsRealtime(
     refetchOnWindowFocus: true,
   });
 
-  const onChange = useCallback(() => {
-    qc.invalidateQueries({ queryKey: ["conversations"] });
-  }, [qc]);
+  const onChange = useCallback(() => agendarRecargaDasConversas(qc), [qc]);
 
   // G4-01 (visibility_mode): a subscription postgres_changes HERDA a RLS de
   // SELECT de `conversations` — o Supabase Realtime avalia as policies do usuário
