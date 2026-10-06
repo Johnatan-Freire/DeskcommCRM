@@ -149,6 +149,19 @@ function makeSupabase(preexistentes: Row[] = []) {
             filtros.push((r) => vals.includes(r[col]));
             return q;
           },
+          // LIKE do Postgres, aplicado (#2468): `%` qualquer sequência, `_` um
+          // caractere, `\_` o sublinhado literal — a remoção do eco por sufixo.
+          like(col: string, padrao: string) {
+            const re = new RegExp(
+              '^' +
+                padrao.replace(/\\_|%|_|[.*+?^${}()|[\]\\]/g, (t) =>
+                  t === '\\_' ? '_' : t === '%' ? '.*' : t === '_' ? '.' : `\\${t}`,
+                ) +
+                '$',
+            );
+            filtros.push((r) => typeof r[col] === 'string' && re.test(r[col] as string));
+            return q;
+          },
           then(resolve: (v: { error: null }) => unknown) {
             for (const alvo of filtrar(filtros)) messages.splice(messages.indexOf(alvo), 1);
             return Promise.resolve({ error: null }).then(resolve);
@@ -236,6 +249,32 @@ describe('eco do próprio envio na janela em que a linha ainda não tem external
     expect(messages).toHaveLength(1);
     expect(messages[0]!.external_id).toBe(BARE);
     expect(messages[0]!.status).toBe('sent');
+  });
+});
+
+describe('eco com OUTRO formato de chat (@lid × @c.us) — medido em 06/10/2026', () => {
+  it('o envio foi pelo número e o eco voltou pelo @lid: a duplicata sai mesmo assim', async () => {
+    // O composto que o envio constrói usa o chat do ENVIO (`…@c.us`); o NOWEB
+    // ecoou pelo outro formato do mesmo contato. Antes, este eco ficava.
+    wahaRespondendo(BARE);
+    const { supabase, messages } = makeSupabase([
+      ecoDoWebhook({ external_id: `true_65721790906556@lid_${BARE}` }),
+    ]);
+
+    await sendMessageHandler(supabase, ctx, input);
+
+    expect(messages, 'o eco pelo @lid sobreviveu e a frase ficou duas vezes').toHaveLength(1);
+    expect(messages[0]!.external_id).toBe(BARE);
+  });
+
+  it('o sufixo é o id INTEIRO: outra mensagem que só termina parecido não é tocada', async () => {
+    wahaRespondendo(BARE);
+    const outra = ecoDoWebhook({ id: 'celular-1', external_id: `true_65721790906556@lid_XX${BARE}`, body: 'outra' });
+    const { supabase, messages } = makeSupabase([outra]);
+
+    await sendMessageHandler(supabase, ctx, input);
+
+    expect(messages.map((m) => m.id)).toContain('celular-1');
   });
 });
 

@@ -997,6 +997,44 @@ async function handleOutboundFromUserPhone(
     return;
   }
 
+  // ── A CORRIDA COM O ENVIO — re-checar DEPOIS do insert ─────────────────
+  //
+  // `jaRegistrada` lê ANTES do insert, e o envio pode gravar o id do canal no
+  // meio: entre aquela leitura e o insert desta linha. Medido em 06/10/2026
+  // (campanha da Rodaê): o eco chegou 14 s depois do envio, a ingestão levou
+  // 4 s, e o envio confirmou dentro dessa janela. As duas guardas erraram ao
+  // mesmo tempo — `jaRegistrada` viu a linha sem id, `ehEcoDeEnvioNosso` a viu
+  // já `sent` (fora de "em voo") — e a IA foi pausada por 1 h por ter falado.
+  // A remoção do lado do envio também não alcançou: ela rodou antes desta
+  // linha existir.
+  //
+  // Aqui o id já está gravado, se o envio confirmou. Achando uma linha NOSSA
+  // com ele, esta é eco: sai a duplicata e não há pausa. A linha do envio nunca
+  // nasce `external_device`, e o `neq` do id protege a recém-inserida.
+  if (insertedOutbound?.id) {
+    const { data: nossa } = await admin
+      .from("messages")
+      .select("id")
+      .eq("organization_id", session.organization_id)
+      .in("external_id", idCandidates)
+      .neq("sent_via", "external_device")
+      .neq("id", insertedOutbound.id)
+      .limit(1)
+      .maybeSingle();
+    if (nossa) {
+      await admin
+        .from("messages")
+        .delete()
+        .eq("organization_id", session.organization_id)
+        .eq("id", insertedOutbound.id);
+      logger.info("waha.ingest: eco reconhecido depois do insert (corrida com o envio)", {
+        organization_id: session.organization_id,
+        external_id: p.id,
+      });
+      return;
+    }
+  }
+
   await markConversation(admin, session.organization_id, conversationId, "outbound", previewFromMessage(p), now);
 
   // ── CONTROLE DO AUTOMÁTICO NESTA CONVERSA ─────────────────────────────────
