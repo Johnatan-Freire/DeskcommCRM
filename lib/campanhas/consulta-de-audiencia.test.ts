@@ -20,7 +20,7 @@ import { buscarCandidatos } from "./consulta-de-audiencia";
  *    (`created_at`, `id`), e só a página VAZIA prova o fim.
  *
  * Aqui a URL sai do `postgrest-js` de verdade e um PostgREST falso aplica
- * filtro, `order` (e a AUSÊNCIA dele), `or` do keyset e o corte de `max_rows`.
+ * filtro, `order` (e a AUSÊNCIA dele), todo `or` (keyset inclusive) e o corte de `max_rows`.
  */
 
 const MURO_DO_GATEWAY = 8_192;
@@ -66,31 +66,53 @@ function aplicarOrdem<T extends Record<string, unknown>>(linhas: T[], order: str
   });
 }
 
+/** Separa `a,and(b,c),d` nas vírgulas de fora dos parênteses. */
+function termosDoOr(filtro: string): string[] {
+  const termos: string[] = [];
+  let nivel = 0;
+  let inicio = 0;
+  for (let i = 0; i < filtro.length; i++) {
+    if (filtro[i] === "(") nivel++;
+    else if (filtro[i] === ")") nivel--;
+    else if (filtro[i] === "," && nivel === 0) {
+      termos.push(filtro.slice(inicio, i));
+      inicio = i + 1;
+    }
+  }
+  termos.push(filtro.slice(inicio));
+  return termos;
+}
+
+function atende(linha: Record<string, unknown>, termo: string): boolean {
+  if (termo.startsWith("and(") && termo.endsWith(")")) {
+    return termosDoOr(termo.slice(4, -1)).every((t) => atende(linha, t));
+  }
+  const [col, op, ...resto] = termo.split(".");
+  const valor = resto.join(".");
+  const atual = linha[col!];
+  if (op === "is" && valor === "null") return atual == null;
+  if (atual == null) return false;
+  const c = ord(String(atual), valor);
+  if (op === "eq") return c === 0;
+  if (op === "gt") return c > 0;
+  if (op === "lt") return c < 0;
+  // Operador que o dublê não conhece não pode virar "passa tudo" em silêncio.
+  throw new Error(`dublê: operador desconhecido em or=${termo}`);
+}
+
 /**
- * O keyset que o código emite — `created_at.gt.…,and(created_at.eq.…,id.gt.…)`
- * (asc) e a variante `lt` (desc). Os outros `or` da consulta (silêncio) ficam
- * de fora de propósito: aqui só o cursor interessa.
+ * TODO `or=` da consulta (`getAll`, não só o último), termo a termo — o keyset
+ * `created_at.gt.…,and(created_at.eq.…,id.gt.…)` e o de silêncio inclusive.
+ * Um dublê que só reconhecesse o keyset INTEIRO ignoraria o `or` mutilado (sem
+ * o ramo `and(…)`) e devolveria tudo; o vermelho viria da guarda de "não
+ * avançou", e não da perda de contatos que é o defeito real.
  */
-function aplicarKeyset<T extends { created_at: string; id: string }>(
-  linhas: T[],
-  orParam: string | null,
-): T[] {
-  if (!orParam) return linhas;
-  const filtro = orParam.startsWith("(") && orParam.endsWith(")") ? orParam.slice(1, -1) : orParam;
-  const asc = filtro.match(
-    /^created_at\.gt\.([^,]+),and\(created_at\.eq\.([^,]+),id\.gt\.(.+)\)$/,
-  );
-  const desc = filtro.match(
-    /^created_at\.lt\.([^,]+),and\(created_at\.eq\.([^,]+),id\.lt\.(.+)\)$/,
-  );
-  if (!asc && !desc) return linhas;
-  const [, cursorTempo, , cursorId] = (asc ?? desc)!;
-  const querMaior = Boolean(asc);
-  return linhas.filter((l) => {
-    const c = ord(l.created_at, cursorTempo!);
-    if (c !== 0) return querMaior ? c > 0 : c < 0;
-    return querMaior ? ord(l.id, cursorId!) > 0 : ord(l.id, cursorId!) < 0;
-  });
+function aplicarOr<T extends Record<string, unknown>>(linhas: T[], ors: string[]): T[] {
+  return ors.reduce((acc, orParam) => {
+    const filtro = orParam.startsWith("(") && orParam.endsWith(")") ? orParam.slice(1, -1) : orParam;
+    const termos = termosDoOr(filtro);
+    return acc.filter((l) => termos.some((t) => atende(l, t)));
+  }, linhas);
 }
 
 /** Um PostgREST de mentira, com o comportamento que importa aqui. */
@@ -109,7 +131,7 @@ function bancoFalso(
         urls.push(bruta);
         const url = new URL(bruta);
         const order = url.searchParams.get("order");
-        const or = url.searchParams.get("or");
+        const or = url.searchParams.getAll("or");
         const limite = Math.min(Number(url.searchParams.get("limit") ?? maxRows), maxRows);
         if (url.pathname.endsWith("/contacts")) {
           // Filtro de `id=in.(…)`, `order`, keyset e o teto de `max_rows`: é o
@@ -119,7 +141,7 @@ function bancoFalso(
           const filtroIds = url.searchParams.getAll("id").find((v) => v.startsWith("in."));
           const permitidos = filtroIds ? new Set(filtroIds.slice(4, -1).split(",")) : null;
           const linhas = aplicarOrdem(
-            aplicarKeyset(
+            aplicarOr(
               contatosBase.filter((c) => !permitidos || permitidos.has(c.id)),
               or,
             ),
@@ -148,7 +170,7 @@ function bancoFalso(
             created_at: n.created_at,
             id: n.id,
           }));
-          return json(aplicarOrdem(aplicarKeyset(base, or), order).slice(0, limite));
+          return json(aplicarOrdem(aplicarOr(base, or), order).slice(0, limite));
         }
         const ids = new Set(filtroIn.slice(4, -1).split(","));
         const base = negocios
@@ -159,7 +181,7 @@ function bancoFalso(
             created_at: n.created_at,
             id: n.id,
           }));
-        const linhas = aplicarOrdem(aplicarKeyset(base, or), order)
+        const linhas = aplicarOrdem(aplicarOr(base, or), order)
           .slice(0, limite)
           .map(({ contact_id, custom_fields, created_at, id }) => ({
             contact_id,
@@ -429,7 +451,10 @@ describe("keyset: página curta não encerra a leitura (#2404)", () => {
   it("max_rows=500: a consulta de ids de negócio segue até a página VAZIA (1.200 negócios)", async () => {
     const contatos = Array.from({ length: 1200 }, (_, i) => uuid(i));
     // Inserção na ordem REVERSA do `created_at`: sem o `.order(…)` da consulta,
-    // o keyset anda para trás e a guarda de "não avançou" derruba o teste.
+    // cada página vem na ordem de inserção e termina no negócio MAIS VELHO dela;
+    // o cursor avança de um em um (500, 499, 498…), os mais velhos ficam de fora
+    // e a leitura só para no teto. A guarda de "não avançou" nunca dispara —
+    // quem fica vermelho é a contagem de páginas (medido: 43 em vez de 4).
     const negocios = [...contatos].reverse().map((c, k) => ({
       id: uuid(1199 - k, "2222"),
       contact_id: c,
@@ -466,6 +491,27 @@ describe("keyset: página curta não encerra a leitura (#2404)", () => {
 
     expect(banco.urlsDeContatos()).toHaveLength(4);
     expect(lista.map((c) => c.contactId)).toEqual(contatosRev);
+    cercaDeOrganizacao(banco);
+  });
+
+  it("max_rows=500: 1.200 contatos com o MESMO created_at são lidos uma vez cada", async () => {
+    // Todo mundo importado no mesmo instante. Só o ramo `and(created_at.eq.…,
+    // id.gt.…)` do keyset desempata: sem ele a segunda página pede
+    // `created_at > X`, volta vazia, e 700 contatos somem sem erro nenhum.
+    const contatos = Array.from({ length: 1200 }, (_, i) => uuid(i));
+    const criados = Object.fromEntries(contatos.map((c) => [c, quando(0)]));
+    const banco = bancoFalso([...contatos].reverse(), [], criados, 500);
+
+    const { candidatos: lista } = await buscarCandidatos(banco.sb, {
+      organizationId: ORG,
+      filtro: { ...FILTRO_VAZIO, com_alguma_tag: ["vip"], limite: 5000 },
+      agora: new Date(Date.UTC(2026, 5, 1)),
+    });
+
+    const ids = lista.map((c) => c.contactId);
+    expect(new Set(ids).size, "algum contato foi lido duas vezes").toBe(ids.length);
+    expect(ids, "algum contato ficou de fora").toEqual(contatos);
+    expect(banco.urlsDeContatos()).toHaveLength(4);
     cercaDeOrganizacao(banco);
   });
 
