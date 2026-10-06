@@ -30,6 +30,32 @@ const PAGINA_DO_POSTGREST = 1000;
 /** Teto de ids que um filtro de negócio devolve antes de virar `in (...)`. */
 const TETO_DE_IDS_DE_NEGOCIO = 20_000;
 
+/** Cursor de keyset: a última linha LIDA — não a última guardada (a exclusão é depois). */
+interface CursorDeLeitura {
+  created_at: string;
+  id: string;
+}
+
+/**
+ * O filtro `.or()` do PostgREST para "depois (ou antes) deste cursor", na ordem
+ * (`created_at`, `id`) — o mesmo desenho de `lib/agenda/protecao-followup.ts` e
+ * dos cursores de `app/api/v1/campaigns/[id]/recipients`.
+ */
+function filtroDepoisDoCursor(cursor: CursorDeLeitura, ordem: "asc" | "desc"): string {
+  const op = ordem === "asc" ? "gt" : "lt";
+  return `created_at.${op}.${cursor.created_at},and(created_at.eq.${cursor.created_at},id.${op}.${cursor.id})`;
+}
+
+/**
+ * O cursor AVANÇOU? Se não, a página repetiu linhas e a leitura entraria em
+ * laço — melhor falhar alto que servir audiência duplicada em silêncio.
+ * (Molde: `agenda_page_did_not_advance`.)
+ */
+function avancou(anterior: CursorDeLeitura, novo: CursorDeLeitura, ordem: "asc" | "desc"): boolean {
+  const passo = ordinal(novo.created_at, anterior.created_at) || ordinal(novo.id, anterior.id);
+  return ordem === "asc" ? passo > 0 : passo < 0;
+}
+
 interface LinhaDeContato {
   id: string;
   /** Carimbado porque a ordem GLOBAL do recorte é (`created_at`, `id`). */
@@ -47,10 +73,17 @@ interface LinhaDeContato {
 /** As colunas de sempre, mais os campos personalizados quando o TEXTO os usa. */
 const COLUNAS_DO_CONTATO = "id, name, display_name, phone_number, is_blocked, is_anonymized, consent";
 
+/**
+ * Os candidatos do recorte, e o recibo de truncamento.
+ *
+ * `truncado` só é verdadeiro quando o recorte bate o teto de
+ * `TETO_DE_IDS_DE_NEGOCIO` E há pelo menos uma linha além dele — a prévia
+ * avisa o operador em vez de cortar calada (#2404).
+ */
 export async function buscarCandidatos(
   admin: SupabaseClient,
   entrada: { organizationId: string; filtro: FiltroDeAudiencia; agora: Date; corpo?: string },
-): Promise<CandidatoDaAudiencia[]> {
+): Promise<{ candidatos: CandidatoDaAudiencia[]; truncado: boolean }> {
   const { organizationId, filtro, agora } = entrada;
   // O corpo entra SÓ para decidir se as colunas de campo personalizado valem a
   // consulta: texto de `{{nome}}` não puxa jsonb de 5.000 linhas em toda prévia.
@@ -62,43 +95,65 @@ export async function buscarCandidatos(
   // negócios, e o embed devolveria o contato N vezes — contagem de prévia
   // inflada, que é exatamente o número que o operador confere antes de apertar.
   let idsPorNegocio: string[] | null = null;
+  let truncado = false;
   if (usaNegocio(filtro)) {
     // A consulta pede até `TETO_DE_IDS_DE_NEGOCIO` LINHAS e o PostgREST corta
-    // TODA resposta em `max_rows` (1.000): sem paginar, um recorte com mais de
-    // mil negócios devolvia só os primeiros mil — audiência parcial e calada
-    // (#2402). Mesmo padrão de `leadsMaisRecentes`: páginas de
-    // `PAGINA_DO_POSTGREST`, com ordem ESTÁVEL (sem `order`, duas páginas
-    // podem repetir ou pular linha), parando na página curta ou no teto.
-    const linhasDeNegocio: Array<{ contact_id: string }> = [];
-    for (let de = 0; ; de += PAGINA_DO_POSTGREST) {
-      let pagina = admin
+    // TODA resposta em `max_rows` (cuja config da instalação pode ser MENOR que
+    // `PAGINA_DO_POSTGREST`). Paginar por `range` tinha dois defeitos: parar
+    // cedo quando o `max_rows` era menor (a primeira página já volta "curta") e
+    // repetir/perder linha quando um negócio muda de etapa no meio da leitura
+    // (#2404). Por isso o laço é KEYSEET em (`created_at`, `id`), e só a página
+    // VAZIA prova o fim.
+    const consultaDeNegocios = () => {
+      let consulta = admin
         .from("crm_leads")
-        .select("contact_id")
+        .select("contact_id, created_at, id")
         .eq("organization_id", organizationId)
         .not("contact_id", "is", null)
         .order("created_at", { ascending: true })
-        .order("id", { ascending: true })
-        .range(de, de + PAGINA_DO_POSTGREST - 1);
-      if (filtro.funis.length > 0) pagina = pagina.in("pipeline_id", filtro.funis);
-      if (filtro.etapas.length > 0) pagina = pagina.in("stage_id", filtro.etapas);
-      if (filtro.responsaveis.length > 0) pagina = pagina.in("owner_user_id", filtro.responsaveis);
+        .order("id", { ascending: true });
+      if (filtro.funis.length > 0) consulta = consulta.in("pipeline_id", filtro.funis);
+      if (filtro.etapas.length > 0) consulta = consulta.in("stage_id", filtro.etapas);
+      if (filtro.responsaveis.length > 0) consulta = consulta.in("owner_user_id", filtro.responsaveis);
       if (filtro.situacoes_do_negocio.length > 0) {
-        pagina = pagina.in("status", filtro.situacoes_do_negocio);
+        consulta = consulta.in("status", filtro.situacoes_do_negocio);
       }
+      return consulta;
+    };
+    const linhasDeNegocio: Array<{ contact_id: string; created_at: string; id: string }> = [];
+    let cursor: CursorDeLeitura | null = null;
+    for (;;) {
+      let pagina = consultaDeNegocios().limit(PAGINA_DO_POSTGREST);
+      if (cursor) pagina = pagina.or(filtroDepoisDoCursor(cursor, "asc"));
       const { data, error } = await pagina;
       if (error) throw new Error(`audiência: negócios — ${error.message}`);
-      const lidas = (data ?? []) as unknown as Array<{ contact_id: string }>;
+      const lidas = (data ?? []) as unknown as typeof linhasDeNegocio;
+      if (lidas.length === 0) break;
+      const ultima = lidas[lidas.length - 1]!;
+      const novo = { created_at: ultima.created_at, id: ultima.id };
+      if (cursor && !avancou(cursor, novo, "asc")) {
+        throw new Error("audiência: audiencia_page_did_not_advance");
+      }
+      cursor = novo;
       linhasDeNegocio.push(...lidas);
-      if (lidas.length < PAGINA_DO_POSTGREST || linhasDeNegocio.length >= TETO_DE_IDS_DE_NEGOCIO) {
+      if (linhasDeNegocio.length >= TETO_DE_IDS_DE_NEGOCIO) {
+        // O teto é por LINHA: corta o excesso da última página e sonda UMA
+        // linha além do teto — o aviso da prévia não pode mentir num recorte
+        // de exatamente 20.000.
+        linhasDeNegocio.length = TETO_DE_IDS_DE_NEGOCIO;
+        const ultimaDoTeto = linhasDeNegocio[linhasDeNegocio.length - 1]!;
+        const { data: sobra, error: erroSobra } = await consultaDeNegocios()
+          .or(filtroDepoisDoCursor({ created_at: ultimaDoTeto.created_at, id: ultimaDoTeto.id }, "asc"))
+          .limit(1);
+        if (erroSobra) throw new Error(`audiência: negócios — ${erroSobra.message}`);
+        truncado = (sobra ?? []).length > 0;
         break;
       }
     }
-    idsPorNegocio = [
-      ...new Set(linhasDeNegocio.slice(0, TETO_DE_IDS_DE_NEGOCIO).map((l) => l.contact_id)),
-    ];
+    idsPorNegocio = [...new Set(linhasDeNegocio.map((l) => l.contact_id))];
     // Recorte de negócio que não achou ninguém é recorte vazio, não recorte
     // ausente: seguir sem o `in` devolveria a organização inteira.
-    if (idsPorNegocio.length === 0) return [];
+    if (idsPorNegocio.length === 0) return { candidatos: [], truncado };
   }
 
   // ─── A consulta de contatos ───
@@ -166,16 +221,28 @@ export async function buscarCandidatos(
     // PostgREST e uuid em hex minúsculo, a ordem de bytes é a do banco.
     linhas.sort((a, b) => ordinal(a.created_at, b.created_at) || ordinal(a.id, b.id));
   } else {
-    // Sem recorte de negócio não há por onde fatiar: uma consulta, paginada
-    // pelo `max_rows`, até juntar `filtro.limite` linhas VÁLIDAS. Excluir em
-    // memória e parar cedo mantém o desfecho do `.not(…)` no servidor.
+    // Sem recorte de negócio não há por onde fatiar: uma consulta, por keyset em
+    // (`created_at`, `id`) — a página CURTA não prova nada quando o `max_rows`
+    // da instalação é menor que `PAGINA_DO_POSTGREST`; só a VAZIA prova
+    // (#2404). O cursor é a última linha LIDA, não a última guardada: a
+    // exclusão acontece depois da leitura.
     linhas = [];
-    for (let de = 0; ; de += PAGINA_DO_POSTGREST) {
-      const { data, error } = await consultaDeContatos().range(de, de + PAGINA_DO_POSTGREST - 1);
+    let cursorContatos: CursorDeLeitura | null = null;
+    for (;;) {
+      let consulta = consultaDeContatos().limit(PAGINA_DO_POSTGREST);
+      if (cursorContatos) consulta = consulta.or(filtroDepoisDoCursor(cursorContatos, "asc"));
+      const { data, error } = await consulta;
       if (error) throw new Error(`audiência: contatos — ${error.message}`);
       const pagina = (data ?? []) as unknown as LinhaDeContato[];
+      if (pagina.length === 0) break;
+      const ultima = pagina[pagina.length - 1]!;
+      const novo = { created_at: ultima.created_at, id: ultima.id };
+      if (cursorContatos && !avancou(cursorContatos, novo, "asc")) {
+        throw new Error("audiência: audiencia_page_did_not_advance");
+      }
+      cursorContatos = novo;
       for (const l of pagina) if (!excluidos.has(l.id)) linhas.push(l);
-      if (linhas.length >= filtro.limite || pagina.length < PAGINA_DO_POSTGREST) break;
+      if (linhas.length >= filtro.limite) break;
     }
   }
   if (linhas.length > filtro.limite) linhas = linhas.slice(0, filtro.limite);
@@ -212,16 +279,19 @@ export async function buscarCandidatos(
     ? await leadsMaisRecentes(admin, organizationId, linhas.map((l) => l.id))
     : null;
 
-  return linhas.map((l) => ({
-    contactId: l.id,
-    nome: nomeDoContato(l),
-    telefone: l.phone_number,
-    bloqueado: l.is_blocked,
-    anonimizado: l.is_anonymized,
-    recusouMarketing: recusouMarketing(l.consent),
-    ...(camposDoTexto.contato ? { contato: mapaDeJson(l.custom_fields) } : {}),
-    ...(leads ? { lead: leads.get(l.id) ?? null } : {}),
-  }));
+  return {
+    candidatos: linhas.map((l) => ({
+      contactId: l.id,
+      nome: nomeDoContato(l),
+      telefone: l.phone_number,
+      bloqueado: l.is_blocked,
+      anonimizado: l.is_anonymized,
+      recusouMarketing: recusouMarketing(l.consent),
+      ...(camposDoTexto.contato ? { contato: mapaDeJson(l.custom_fields) } : {}),
+      ...(leads ? { lead: leads.get(l.id) ?? null } : {}),
+    })),
+    truncado,
+  };
 }
 
 /**
@@ -281,20 +351,38 @@ async function leadsMaisRecentes(
   const mapa = new Map<string, CamposPersonalizados | null>();
   if (contactIds.length === 0) return mapa;
   const { data, error } = await buscaEmLotes(contactIds, async (lote) => {
-    const linhas: Array<{ contact_id: string; custom_fields: unknown }> = [];
-    for (let de = 0; ; de += PAGINA_DO_POSTGREST) {
-      const { data: pagina, error: erro } = await admin
+    const linhas: Array<{
+      contact_id: string;
+      custom_fields: unknown;
+      created_at: string;
+      id: string;
+    }> = [];
+    // Keyset em (`created_at`, `id`) DECRESCENTE, como a ordem pedida: a página
+    // curta não prova nada quando o `max_rows` da instalação é menor que
+    // `PAGINA_DO_POSTGREST`; só a VAZIA prova (#2404).
+    let cursor: CursorDeLeitura | null = null;
+    for (;;) {
+      let consulta = admin
         .from("crm_leads")
-        .select("contact_id, custom_fields")
+        .select("contact_id, custom_fields, created_at, id")
         .eq("organization_id", organizationId)
         .in("contact_id", lote)
         .not("contact_id", "is", null)
         .order("created_at", { ascending: false })
         .order("id", { ascending: false })
-        .range(de, de + PAGINA_DO_POSTGREST - 1);
+        .limit(PAGINA_DO_POSTGREST);
+      if (cursor) consulta = consulta.or(filtroDepoisDoCursor(cursor, "desc"));
+      const { data: pagina, error: erro } = await consulta;
       if (erro) return { data: null, error: erro };
-      linhas.push(...((pagina ?? []) as typeof linhas));
-      if ((pagina ?? []).length < PAGINA_DO_POSTGREST) return { data: linhas, error: null };
+      const lidas = (pagina ?? []) as unknown as typeof linhas;
+      if (lidas.length === 0) return { data: linhas, error: null };
+      const ultima = lidas[lidas.length - 1]!;
+      const novo = { created_at: ultima.created_at, id: ultima.id };
+      if (cursor && !avancou(cursor, novo, "desc")) {
+        return { data: null, error: { message: "audiencia_page_did_not_advance" } };
+      }
+      cursor = novo;
+      linhas.push(...lidas);
     }
   });
   if (error) throw new Error(`audiência: negócios dos contatos — ${error.message}`);
