@@ -21,6 +21,21 @@ import type {
 } from "@/lib/instalacao/comportamento";
 import type { ModuloOpcional } from "@/lib/instalacao/modulos";
 
+/** O marcador das frases da assinatura; fora do JSX porque não é prosa. */
+const MOMENTO = "{momento}";
+
+/**
+ * O que as últimas entregas do WhatsApp disseram sobre a assinatura (doc 99,
+ * opção A), com os instantes já formatados pelo servidor. `null` = a leitura
+ * falhou, e a tela não diz nada. A regra do "sim" mora em
+ * `lib/channels/assinatura-das-entregas.ts`.
+ */
+export interface AssinaturaNaTela {
+  readonly assinadas: boolean | null;
+  readonly ultimaAssinada: string | null;
+  readonly ultimaSemAssinatura: string | null;
+}
+
 /**
  * Cada interruptor salva na hora, sem botão de confirmar — mesmo desenho do
  * formulário da política de cadastro, e pelo mesmo motivo: é reversível com um
@@ -31,7 +46,13 @@ import type { ModuloOpcional } from "@/lib/instalacao/modulos";
  * um `upsert` de uma linha só, e mandar o estado todo evita que duas telas
  * abertas se sobrescrevam em campos que ninguém tocou.
  */
-export function FormularioDeComportamento({ inicial }: { inicial: ComportamentoDaInstalacao }) {
+export function FormularioDeComportamento({
+  inicial,
+  assinatura = null,
+}: {
+  inicial: ComportamentoDaInstalacao;
+  assinatura?: AssinaturaNaTela | null;
+}) {
   const t = useT();
   const [valores, setValores] = useState<ComportamentoDaInstalacao>(inicial);
   const [erro, setErro] = useState<string | null>(null);
@@ -104,6 +125,41 @@ export function FormularioDeComportamento({ inicial }: { inicial: ComportamentoD
                 "Ligado, toda entrega de webhook precisa vir assinada com o segredo da sessão. Desligado por padrão porque nem todo servidor de canal assina: ligar sem que ele assine corta a entrada de mensagens.",
               )}
             </p>
+            {assinatura && (
+              <div className="space-y-1 text-sm" data-testid="assinatura-das-entregas">
+                {assinatura.assinadas === null ? (
+                  <p className="text-muted-foreground">
+                    {t("Nenhuma entrega do WhatsApp na última semana para conferir a assinatura.")}
+                  </p>
+                ) : assinatura.assinadas ? (
+                  <p>
+                    {t("As últimas entregas do WhatsApp chegaram assinadas: sim (última em {momento}).").replace(
+                      MOMENTO,
+                      assinatura.ultimaAssinada ?? "",
+                    )}
+                  </p>
+                ) : (
+                  <>
+                    <p>{t("As últimas entregas do WhatsApp chegaram assinadas: não.")}</p>
+                    {assinatura.ultimaAssinada && (
+                      <p className="text-muted-foreground">
+                        {t("Última assinada: {momento}.").replace(MOMENTO, assinatura.ultimaAssinada)}
+                      </p>
+                    )}
+                  </>
+                )}
+                {assinatura.ultimaSemAssinatura && (
+                  <p className="text-muted-foreground">
+                    {t("Última sem assinatura: {momento}.").replace(MOMENTO, assinatura.ultimaSemAssinatura)}
+                  </p>
+                )}
+                {assinatura.assinadas === true && !valores.exigir_assinatura_no_webhook && (
+                  <p className="font-medium" role="status">
+                    {t("Pode ligar: o WhatsApp já assina.")}
+                  </p>
+                )}
+              </div>
+            )}
           </div>
           <Switch
             id="assinatura-do-webhook"
