@@ -90,6 +90,7 @@ fonte só (`lib/onboarding/passos.ts`) — eram três listas que discordavam. Ga
 | J2.5 | WAHA derrubado (docker stop) | banner claro, botões desabilitados, 503 amigável |
 | J2.6 | Atendente (role agent) não vê botão de conectar | gate admin respeitado na UI |
 | J2.7 | AntiBanSheet: editar ritmo/janela/teto | salva, persiste em `channel_knobs`, validação de janela |
+| J2.8 | Importar o histórico do WhatsApp (admin, cartão do número) | painel diz que nada é enviado; pedido com janela em dias vira recibo «na fila»; cancelar vira «cancelada»; zero mensagem e zero evento de mensagem — `tests/e2e/importacao-historico-whatsapp.spec.ts`. A leitura do WAHA e as 10.000 mensagens sem efeito são provadas fora da tela (WAHA simulado e invariante de banco). Store desligado é explicado sem oferecer mexer na sessão. |
 
 ## J3 — Agentes de IA `[P0]` (criação) / `[P1]` (rotina)
 

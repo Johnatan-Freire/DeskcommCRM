@@ -1058,6 +1058,7 @@ jobs:
 
       SPECS_PARTE_5: >-
         inbox-busca-e-filtros-dizem-a-verdade.spec.ts
+        importacao-historico-whatsapp.spec.ts
         extensoes-da-instalacao.spec.ts
         admin-credencial-google.spec.ts
         agenda-primeira-pintura-no-fuso.spec.ts

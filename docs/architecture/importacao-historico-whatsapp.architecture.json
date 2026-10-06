@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Importação do histórico do WhatsApp",
+    "subtitle": "Histórico é dado, nunca evento: só GET no WAHA, recusa em três camadas, nada é enviado",
+    "output": "importacao-historico-whatsapp.html",
+    "quality_profile": "standard"
+  },
+  "lanes": [
+    { "id": "humano", "label": "Pessoa" },
+    { "id": "app", "label": "Aplicativo" },
+    { "id": "waha", "label": "WAHA (só leitura)" },
+    { "id": "db", "label": "Banco" }
+  ],
+  "mainPath": ["tela", "pedido", "recibo", "cron", "leitor", "rpc", "mensagens"],
+  "nodes": [
+    { "id": "tela", "lane": "humano", "col": 0, "type": "ui", "label": "Conexões › cartão do número: «Importar histórico» (só admin, ChannelHistoryImport)" },
+    { "id": "pedido", "lane": "app", "col": 1, "type": "service", "label": "POST/GET/DELETE /api/v1/channel-sessions/{id}/history-imports: admin, MFA, suporte, Idempotency-Key, auditoria" },
+    { "id": "recibo", "lane": "db", "col": 2, "type": "database", "label": "whatsapp_history_imports: recibo, cursor, contadores; uma viva por número; RLS leitura admin (0561)" },
+    { "id": "cron", "lane": "app", "col": 3, "type": "service", "label": "cron whatsapp-history-import → avancarImportacao: lotes, cursor, orçamento de tempo" },
+    { "id": "leitor", "lane": "waha", "col": 4, "type": "service", "label": "leitor-waha: GET /chats e /chats/{id}/messages, mídia nunca baixada; Store desligado = store_desligado" },
+    { "id": "payload", "lane": "app", "col": 4, "type": "service", "label": "lib/waha/payload.ts: a MESMA leitura de payload da ingestão ao vivo, sem cliente que envia" },
+    { "id": "rpc", "lane": "db", "col": 5, "type": "database", "label": "fn_importar_conversa_historica: antes da 1ª conexão e na janela; conversa nova FECHADA; dedupe; LGPD" },
+    { "id": "mensagens", "lane": "db", "col": 6, "type": "database", "label": "messages.origem = 'historico' (0561)" },
+    { "id": "gatilhos", "lane": "db", "col": 7, "type": "database", "label": "Gatilhos de messages ignoram histórico: sem message.received, sem atendimento/demanda" },
+    { "id": "barreira", "lane": "app", "col": 7, "type": "service", "label": "Dreno de eventos: barreira-de-eventos antes de dispatchEvent; dúvida = volta à fila" },
+    { "id": "ia", "lane": "db", "col": 8, "type": "database", "label": "fn_ia_pode_responder_mensagem → mensagem_historica (recusa antes de qualquer regra)" },
+    { "id": "consumidores", "lane": "app", "col": 8, "type": "service", "label": "IA, sentimento, follow-up, automação, campanha, push, webhooks de saída: nunca acionados" },
+    { "id": "inbox", "lane": "humano", "col": 6, "type": "ui", "label": "Inbox › Fechadas: a conversa histórica para consulta" },
+    { "id": "auditoria", "lane": "db", "col": 3, "type": "database", "label": "api_audit_log: channel.history_import_{requested,cancelled,progressed}" }
+  ],
+  "edges": [
+    { "from": "tela", "to": "pedido", "label": "pede, acompanha, cancela" },
+    { "from": "pedido", "to": "recibo", "label": "cria pendente (org da sessão)" },
+    { "from": "pedido", "to": "auditoria", "label": "pedido e cancelamento" },
+    { "from": "recibo", "to": "tela", "label": "progresso e motivo da falha" },
+    { "from": "cron", "to": "recibo", "label": "lê a viva, salva cursor, conclui ou falha" },
+    { "from": "cron", "to": "auditoria", "label": "só quando houve efeito" },
+    { "from": "cron", "to": "leitor", "label": "páginas de chats e mensagens" },
+    { "from": "leitor", "to": "payload", "label": "mapeia com a régua do ao vivo" },
+    { "from": "payload", "to": "rpc", "label": "lote do chat" },
+    { "from": "cron", "to": "rpc", "label": "service role" },
+    { "from": "rpc", "to": "mensagens", "label": "INSERT origem=historico" },
+    { "from": "mensagens", "to": "gatilhos", "label": "AFTER/BEFORE INSERT" },
+    { "from": "gatilhos", "to": "barreira", "label": "não emite; se emitir, a barreira recusa" },
+    { "from": "barreira", "to": "consumidores", "label": "skipped: mensagem_historica" },
+    { "from": "mensagens", "to": "ia", "label": "decisão do agente" },
+    { "from": "ia", "to": "consumidores", "label": "recusa a resposta" },
+    { "from": "mensagens", "to": "inbox", "label": "leitura" }
+  ]
+}
