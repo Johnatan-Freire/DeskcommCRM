@@ -41,7 +41,10 @@ describe("o horário do webhook, nos pontos de chamada", () => {
   it("o instrumento enxerga o arquivo que diz enxergar (guarda de vacuidade)", () => {
     // Sem isto, um caminho errado ou um arquivo vazio faria os dois casos acima
     // passarem por ausência de dado.
-    expect(INGEST).toContain("export function dataDoTimestamp");
+    // A definição mora em `lib/waha/payload.ts` (leitura pura do payload, que a
+    // importação do histórico reaproveita); `ingest.ts` a importa de lá.
+    expect(readFileSync("lib/waha/payload.ts", "utf8")).toContain("export function dataDoTimestamp");
+    expect(INGEST).toMatch(/import \{[^}]*\bdataDoTimestamp\b[^}]*\} from "@\/lib\/waha\/payload"/);
     expect(INGEST.length).toBeGreaterThan(10_000);
   });
 });

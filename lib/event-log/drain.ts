@@ -12,6 +12,7 @@ import {
   MENSAGEM_QUE_NAO_ENTROU,
 } from "@/lib/event-log/aviso-de-evento-morto";
 import { dispatchEvent, getRegisteredHandlers, type EventRow } from "@/lib/event-log/dispatcher";
+import { desfechoDaBarreira, origemDasMensagensDoLote } from "@/lib/whatsapp-historico/barreira-de-eventos";
 import { logger } from "@/lib/logger";
 
 const MAX_ATTEMPTS = 5;
@@ -268,6 +269,11 @@ export async function drainEventLog(
     return summary;
   }
 
+  // Barreira do histórico (0561): evento de mensagem importada do histórico
+  // não chega a NENHUM consumidor — uma pergunta ao banco por lote. Se ela
+  // falhar, nenhum evento de mensagem do lote é despachado (fail-closed).
+  const origem = await origemDasMensagensDoLote(admin, (rows ?? []) as unknown as EventRow[]);
+
   for (const raw of rows ?? []) {
     const row = raw as unknown as EventRow;
     summary.scanned += 1;
@@ -281,7 +287,15 @@ export async function drainEventLog(
       .select("id");
     if (!claimed?.length) continue;
 
-    const results = await dispatchEvent(row);
+    const results =
+      desfechoDaBarreira(
+        row,
+        origem,
+        getRegisteredHandlers()
+          .filter((h) => h.events.includes(row.event_type) && !row.consumed_by.includes(h.key))
+          .map((h) => h.key),
+        backoffAt(row.attempts + 1),
+      ) ?? (await dispatchEvent(row));
 
     const okKeys = results
       .filter((r) => r.status === "ok" || r.status === "skipped")
