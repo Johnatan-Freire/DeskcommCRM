@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { flushSync } from "react-dom";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { useOrganizationTransition } from "@/components/shell/OrganizationTransitionProvider";
+import { AVISO, useOrganizationTransition } from "@/components/shell/OrganizationTransitionProvider";
 
 export interface ImpersonatingInfo {
   tenantId: string;
@@ -13,7 +13,7 @@ export interface ImpersonatingInfo {
   accessMode?: "full" | "support_readonly";
 }
 export function notifySupportTransition() {
-  localStorage.setItem("support-context-transition", String(Date.now()));
+  localStorage.setItem(AVISO, String(Date.now()));
 }
 export function ImpersonateBanner({ impersonating, ended = false }: {
   impersonating: ImpersonatingInfo | null; ended?: boolean;
