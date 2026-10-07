@@ -1,5 +1,4 @@
-import { assertAgentOperationPg } from '@/lib/ai/agents/operation';
-import type { AgentOperationContext } from '@/lib/ai/agents/operation';
+import { assertAgentOperationPg, type AgentOperationContext } from '@/lib/ai/agents/operation';
 import { assertApprovedReplyPg, type ApprovedReplyContext } from '@/lib/ai/replies/delivery';
 import { assertMeetingDeliveryPg, type MeetingDeliveryContext } from '@/lib/agenda/meet-delivery';
 import type { JobClaim } from '../../queue/claim';
@@ -111,6 +110,8 @@ export async function sendTurnMessage(
   cfg: CrmEdgeConfig,
   input: SendMessageInput,
 ): Promise<SendOutcome> {
+  // Antes do ledger, não só no handler: recusada lá dentro, a bolha deixa uma
+  // linha 'requested' que o disjuntor de saúde conta como envio (total_sends).
   if (input.agentOperation) await assertAgentOperationPg(db, input.agentOperation);
   const { rows: sourceJobs } = await db.query<{ kind: string; payload: Record<string, unknown> }>(
     'select payload,kind from job_queue where id=$1 and organization_id=$2 and contact_id=$3',

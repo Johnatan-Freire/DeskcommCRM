@@ -24,6 +24,14 @@ export interface OpcoesDoDubleDoHandler {
   templateRow?: LinhaDoDuble | null;
   rpcData?: unknown | (() => unknown);
   /**
+   * Fork Capital Code — a checagem de etapa do envio do agente
+   * (`assertEscopoDaEtapaSupabase`, migration 0404) lê a política do contato
+   * por RPC e o escopo da versão em `ai_agent_versions`. Padrão: contato em
+   * etapa comercial e versão comercial — o envio de sempre segue.
+   */
+  politicaDoContato?: string | (() => string);
+  escopoDaVersao?: string;
+  /**
    * Banco em que a migration 0106 ainda não rodou: pedir `archived_at` devolve
    * `42703` e o handler cai na consulta tolerante (desfecho nº 9).
    */
@@ -50,6 +58,12 @@ export interface OpcoesDoDubleDoHandler {
   organizacao?: LinhaDoDuble;
   /** Linhas de `calendar_appointments` lidas pela guarda de agenda. Padrão: `[]`. */
   agenda?: LinhaDoDuble[];
+  /**
+   * A linha de `ai_agents` que a conferência da operação do agente lê pela REST
+   * (`assertAgentOperationSupabase`). Função = estado vivo: o teste pausa o
+   * agente entre uma bolha e outra.
+   */
+  agente?: LinhaDoDuble | null | (() => LinhaDoDuble | null);
 }
 
 export interface RetornoDoDubleDoHandler {
@@ -153,6 +167,7 @@ export function criarDubleDoHandler(
       meta_templates: [],
       channel_sessions: [],
       organizations: [],
+      ai_agents: [],
     },
     rpcs: [],
   };
@@ -302,6 +317,32 @@ export function criarDubleDoHandler(
               resolve,
               reject,
             ),
+        };
+        return cadeia;
+      }
+
+      if (tabela === "ai_agent_versions") {
+        const cadeia = {
+          select: () => cadeia,
+          eq: () => cadeia,
+          maybeSingle: async () => ({ data: { service_scope: opcoes.escopoDaVersao ?? "comercial" }, error: null }),
+        };
+        return cadeia;
+      }
+
+      if (tabela === "ai_agents") {
+        const cadeia = {
+          select: (colunas = "") => {
+            capturas.selects.ai_agents!.push(colunas);
+            return cadeia;
+          },
+          eq: () => {
+            return cadeia;
+          },
+          maybeSingle: async () => ({
+            data: typeof opcoes.agente === "function" ? opcoes.agente() : (opcoes.agente ?? null),
+            error: null,
+          }),
         };
         return cadeia;
       }
@@ -491,6 +532,10 @@ export function criarDubleDoHandler(
     },
     rpc: async (nome: string, args?: Record<string, unknown>) => {
       capturas.rpcs.push({ nome, args: args ?? {} });
+      if (nome === "fn_politica_de_atendimento_do_contato") {
+        const p = opcoes.politicaDoContato;
+        return { data: typeof p === "function" ? p() : (p ?? "comercial"), error: null };
+      }
       return {
         data: typeof opcoes.rpcData === "function" ? opcoes.rpcData() : opcoes.rpcData,
         error: null,
