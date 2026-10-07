@@ -9,6 +9,7 @@
 import { render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AVISO, OrganizationTransitionProvider } from "./OrganizationTransitionProvider";
+import { notifySupportTransition } from "@/components/app/ImpersonateBanner";
 
 vi.mock("@/lib/supabase/browser", () => ({ resetRealtimeAuthentication: vi.fn() }));
 
@@ -19,6 +20,7 @@ const DOCUMENTO_COMECOU_HA_MS = 5000;
 beforeEach(() => {
   reload.mockReset();
   localStorage.clear();
+  sessionStorage.clear();
   vi.spyOn(performance, "now").mockReturnValue(DOCUMENTO_COMECOU_HA_MS);
   // `window.location.reload` não é substituível direto no jsdom.
   Object.defineProperty(window, "location", { configurable: true, value: { ...original, reload } });
@@ -43,6 +45,26 @@ describe("aviso de troca de acompanhamento dado antes da hidratação", () => {
     montar();
     expect(reload).not.toHaveBeenCalled();
     expect(screen.queryByTestId("organization-transition")).toBeNull();
+  });
+
+  // A aba que GRAVA o aviso navega logo em seguida (`window.location.assign`), então o
+  // documento novo dela nasce com o contexto novo. Só que o início dele fica a frações
+  // de milissegundo do carimbo, e `Date.now() - performance.now()` (ms inteiro contra
+  // relógio monotônico) não separa os dois: no CI a inbox se recarregou sozinha depois
+  // de "Sair do acompanhamento" e abortou a navegação seguinte (runs 37559681226 e
+  // 37566458017, #1879). Aqui o relógio diz "aviso posterior", e a aba não pode cair nele.
+  it("aviso gravado por esta mesma aba: não recarrega, mesmo que o relógio diga posterior", () => {
+    notifySupportTransition();
+    montar();
+    expect(reload).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("organization-transition")).toBeNull();
+  });
+
+  it("aviso de outra aba depois do desta: volta a recarregar", () => {
+    notifySupportTransition();
+    localStorage.setItem(AVISO, String(Date.now() + 1));
+    montar();
+    expect(reload).toHaveBeenCalledOnce();
   });
 
   it("sem aviso nenhum: não recarrega", () => {

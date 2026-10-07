@@ -13,7 +13,10 @@ export interface ImpersonatingInfo {
   accessMode?: "full" | "support_readonly";
 }
 export function notifySupportTransition() {
-  localStorage.setItem(AVISO, String(Date.now()));
+  const carimbo = String(Date.now());
+  localStorage.setItem(AVISO, carimbo);
+  // Por aba: o documento que esta aba abre em seguida reconhece o próprio aviso.
+  sessionStorage.setItem(AVISO, carimbo);
 }
 export function ImpersonateBanner({ impersonating, ended = false }: {
   impersonating: ImpersonatingInfo | null; ended?: boolean;

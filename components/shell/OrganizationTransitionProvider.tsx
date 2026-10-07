@@ -8,11 +8,15 @@ export const AVISO = "support-context-transition";
 
 /** Aviso gravado depois de ESTE documento começar a carregar: ele pode ter sido renderizado com o contexto anterior. */
 function avisoPosteriorAoDocumento() {
-  let aviso: number;
+  let aviso: string | null, desta: string | null;
   // Armazenamento bloqueado: ninguém conseguiu gravar o aviso, então não há o que perder.
-  try { aviso = Number(localStorage.getItem(AVISO)); } catch { return false; }
+  try { aviso = localStorage.getItem(AVISO); desta = sessionStorage.getItem(AVISO); } catch { return false; }
+  // Aviso que ESTA aba gravou: ela navegou logo depois, então este documento já é o novo.
+  // O relógio não separa os dois (o início fica a menos de 1 ms do carimbo) e a inbox
+  // se recarregava sozinha ao sair do acompanhamento (#1879).
+  if (aviso === desta) return false;
   // Mesmo relógio (`Date.now`) de quem grava; `performance.timeOrigin` pode divergir dele.
-  return aviso > Date.now() - performance.now();
+  return Number(aviso) > Date.now() - performance.now();
 }
 
 /** Fica acima do limite user/org: a atualização RSC do cookie não remove a guarda. */
