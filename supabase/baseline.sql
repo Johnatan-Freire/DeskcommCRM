@@ -10167,6 +10167,37 @@ alter table public.agent_inbox_items
     -- mesma constraint em N blocos quebra o `update.sh` de todo clone com
     -- vocabulário posterior (lição do #159).
     'canal_mudo_sem_numero',
+    -- (migration 0464) a proposta comercial: vencimento sem decisão, queda da taxa
+    -- de aceite e promessa de proposta que não virou proposta.
+    'proposal_expired_notice', 'proposal_acceptance_rate_drop', 'proposal_promised_not_created',
+    -- (migration 0466, D3) proposta presa em 'enviando' há mais de 5min — o
+    -- mesmo padrão do 'message_send_stuck', cron próprio (proposta-travada).
+    'proposta_travada',
+    -- (migration 0475) a IA rascunhou uma proposta e falta confirmar o modelo
+    -- sugerido (plano N1) ou falta preço de catálogo — a Central acompanha
+    -- até as duas pendências sumirem, ou até a proposta ser enviada/descartada.
+    'proposta_pronta_para_revisao',
+    -- (migration 0501) a organização voltou de uma suspensão e há conversas que
+    -- receberam mensagem enquanto ela estava parada: a IA não respondeu nem vai
+    -- responder sozinha. Um item por reativação, aberto por fn_reativar_organizacao.
+    'org_reativada',
+    -- (migration 0500) O Jev percebeu, numa mensagem em que a regra de hoje não
+    -- viu nada, um pedido para falar com uma pessoa ou para parar de receber
+    -- mensagens, e a empresa escolheu "Avisar a equipe". Um kind por pedido, e
+    -- não `other`: a Central dá rótulo e destino por kind, e o `other` não leva
+    -- a uma conversa (lib/ai/inbox-destino.ts); e o aviso é um por CONVERSA e
+    -- pedido. O Jev só abre o aviso — quem passa a conversa é a regra de hoje
+    -- ou uma pessoa, e quem bloqueia é só o STOP do próprio cliente. NESTA
+    -- lista pelas razões de sempre (#159; a janela do `midia-nao-lida.test.ts`).
+    'jev_pedido_de_humano',
+    'jev_parar_de_receber',
+    -- (migration 0589, issue #2389) A pausa de uma conexão era silenciosa para
+    -- todo mundo menos para quem clicou. O audit registrava `channel.disabled`
+    -- / `channel.enabled`, mas audit é histórico para quem procura, não
+    -- comunicação — a Central é onde a operação inteira olha. O item nasce na
+    -- pausa e se resolve sozinho na retomada ou no arquivamento, com o motivo
+    -- no corpo (laço do canal-mudo-watcher, só que instantâneo).
+    'canal_pausado',
     'other'
   ));
 
@@ -43327,6 +43358,33 @@ grant select on public.external_db_connections_safe to authenticated;
 
 -- ---- proteção sob o `ensure_rls`, DEPOIS de toda policy do arquivo (migration 0521) ----
 --
+-- ---- dedupe do aviso de canal pausado: índice único parcial (migration 0589) ----
+-- Um canal pausado = um aviso aberto, garantido pelo banco: duas pausas
+-- simultâneas leriam "nenhum aberto" e inseririam dois. O segundo INSERT
+-- recebe 23505 e `lib/channels/central-de-pausa.ts` o trata como "a outra
+-- rodada já abriu". O kind entrou no bloco ÚNICO de
+-- `agent_inbox_items_kind_check`; cabeçalho da 0589 para o racional inteiro.
+with repetidas as (
+  select id,
+         row_number() over (
+           partition by organization_id, kind, ref_id
+           order by created_at asc, id asc
+         ) as ordem
+    from public.agent_inbox_items
+   where status = 'open'
+     and kind = 'canal_pausado'
+)
+update public.agent_inbox_items i
+   set status = 'resolved',
+       resolved_at = now()
+  from repetidas r
+ where i.id = r.id
+   and r.ordem > 1;
+
+create unique index if not exists agent_inbox_canal_pausado_aberto_unico
+  on public.agent_inbox_items (organization_id, kind, ref_id)
+  where status = 'open' and kind = 'canal_pausado';
+
 -- ⚠️ ESTE É O ÚLTIMO BLOCO DO ARQUIVO, e tem de continuar sendo: a régua estreita
 -- só é segura quando nenhuma policy falta ser criada (ver o bloco da definição,
 -- antes da varredura de anon). Apêndice novo entra ACIMA daqui. Vigiado por
