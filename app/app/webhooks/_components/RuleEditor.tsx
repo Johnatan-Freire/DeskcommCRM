@@ -27,6 +27,7 @@ import {
   GATILHO_DE_DATA_DO_FUNIL,
   configDoGatilhoDeData,
 } from "@/lib/automation/gatilho-de-data-do-funil";
+import { configAoSalvarDaTela } from "@/lib/automation/config-ao-salvar";
 import { camposDoFunil } from "@/lib/leads/campos-do-funil";
 import {
   useCreateAutomationRule,
@@ -259,12 +260,21 @@ export function RuleEditor({ open, onOpenChange, rule }: Props) {
       // `Number("")` é 0 — o que gravaria "avisar no dia" para quem não
       // digitou nada. O campo vazio vira `NaN`, que o schema recusa com a
       // mensagem certa em vez de aceitar um zero silencioso.
+      //
+      // As duas ramificações preservam o que a tela NÃO edita (issue #2483):
+      // o `pipeline_id`/`stage_id` gravados pela API sobrevivem ao salvar. Ver
+      // `configAoSalvarDaTela`.
       trigger_config: ehGatilhoDeData
-        ? {
-            pipeline_id: configDaData.pipeline_id,
-            campo: configDaData.campo,
-            dias: configDaData.dias.trim() === "" ? Number.NaN : Number(configDaData.dias),
-          }
+        ? configAoSalvarDaTela({
+            gatilhoDaRegra: rule?.trigger_event,
+            configDaRegra: rule?.trigger_config,
+            gatilhoDaTela: triggerEvent,
+            configDaTela: {
+              pipeline_id: configDaData.pipeline_id,
+              campo: configDaData.campo,
+              dias: configDaData.dias.trim() === "" ? Number.NaN : Number(configDaData.dias),
+            },
+          })
         : undefined,
     };
     const parsed = createAutomationRuleSchema.safeParse(payload);
