@@ -89,10 +89,14 @@ export async function recordRunMetrics(
   push('run_llm_latency_ms', agg.llm_latency_ms);
 
   // labels SÓ ids/atribuição (job_id É o run id) — PII jamais.
+  // `$1::uuid` explícito (upstream #2617): dentro de um UNION o Postgres resolve
+  // o parâmetro sem tipo como `text` e o INSERT inteiro cai. O fork não tem o
+  // UNION (as métricas de fila/tempo total do #2129 não foram portadas), mas o
+  // cast fica — é o que impede o defeito de voltar quando elas entrarem.
   const labels = { job_id: job.id, contact_id: job.contact_id, kind: job.kind };
   await db.query(
     `insert into metrics (organization_id, name, labels, value)
-     select $1, t.name, $2::jsonb, t.value
+     select $1::uuid, t.name, $2::jsonb, t.value
      from unnest($3::text[], $4::float8[]) as t(name, value)`,
     [job.organization_id, JSON.stringify(labels), names, values],
   );
