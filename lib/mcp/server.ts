@@ -17,6 +17,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { auditMcpToolCall } from "./audit";
 import { ensureRole, ensureScope, type McpAuthResult } from "./auth";
 import { verificarTetoMcp } from "./rate-limit";
+import { tamanhoDoResultado } from "./resultado-bytes";
 import { allTools } from "./tools";
 import { deModuloDesligado } from "./tools/catalog";
 import { higienizarUuidsDeAterro } from "./uuid-de-aterro";
@@ -108,6 +109,7 @@ export function createMcpServer(
             durationMs,
             success: motivoDoVazio === null,
             resultSummary: summarizeResult(result),
+            resultBytes: tamanhoDoResultado(result),
             ...(motivoDoVazio === null
               ? {}
               : { desfecho: "sem_resultado" as const, motivo: motivoDoVazio }),
