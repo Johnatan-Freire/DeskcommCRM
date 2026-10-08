@@ -7378,6 +7378,14 @@ export const DICIONARIO: Traducoes = {
   "Isso não tem volta: o funil e as etapas dele somem. Se ele já recebeu negócio, a exclusão é recusada e ele continua arquivado.": {
     es: "Esta acción no se puede deshacer: el embudo y sus etapas desaparecen. Si ya recibió negocios, no se puede eliminar y sigue archivado.",
   },
+  // #2559 — as duas recusas novas, ambas com `{nome}` por preencher: a rota
+  // traduz primeiro e só então cola o nome do funil (`t(x).replace("{nome}", …)`).
+  "Já existe um funil ativo chamado «{nome}». Renomeie um dos dois antes de tirar este funil do arquivo.": {
+    es: "Ya existe un embudo activo llamado «{nome}». Renombra uno de los dos antes de desarchivar este embudo.",
+  },
+  "«{nome}» é o funil de clientes: é para ele que vai o lead que já é cliente. Marque OUTRO funil como funil de clientes antes de arquivar este.": {
+    es: "«{nome}» es el embudo de clientes: es hacia él a donde va el lead que ya es cliente. Marca OTRO embudo como embudo de clientes antes de archivar este.",
+  },
   "Novo Lead": { es: "Nuevo Lead" },
   "Rolar estágios para a esquerda": { es: "Desplazar etapas hacia la izquierda" },
   "Rolar estágios para a direita": { es: "Desplazar etapas hacia la derecha" },
