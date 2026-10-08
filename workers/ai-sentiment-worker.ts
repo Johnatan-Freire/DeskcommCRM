@@ -29,6 +29,8 @@ import { AUTORIZADO, iaPodeResponderMensagemViaSupabase } from "@/lib/ai/ativaca
 import type { EventRow } from "@/lib/event-log/dispatcher";
 import { MENSAGEM_REDIGIDA } from "@/lib/lgpd/cascata";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { podeGastarComIa } from "@/lib/ai/budget/pode-gastar";
+import { logger } from "@/lib/logger";
 
 const SENTIMENT_MODEL = DEFAULT_CLASSIFIER_MODEL; // "anthropic/claude-haiku-4-5"
 const CLASSIFY_TIMEOUT_MS = 5_000;
@@ -242,6 +244,25 @@ export async function processSentiment(event: EventRow): Promise<SentimentResult
       typeof agentConfig["sentiment_threshold"] === "number"
         ? agentConfig["sentiment_threshold"]
         : DEFAULT_SENTIMENT_THRESHOLD;
+
+    // ── O teto de gasto de IA, ANTES da chamada paga (upstream #2583) ─────
+    //
+    // Este worker roda a cada mensagem recebida e não passa pelo seam do engine
+    // nem pelo guard do caminho legado — os dois lugares onde o teto vinculava.
+    // Com a organização em "parar a IA" e o teto estourado, o turno ia para a
+    // fila humana e o clima seguia cobrando cada mensagem. Depois dos guards
+    // baratos acima, para a leitura do orçamento não rodar à toa; "só avisar"
+    // e "desligado" seguem, só o veredito `bloquear` pula.
+    const orcamento = await podeGastarComIa(event.organization_id, "sentiment_classify");
+    if (!orcamento.pode) {
+      logger.info("[ai-sentiment-worker] clima não medido: teto de gasto de IA atingido", {
+        organization_id: event.organization_id,
+        message_id: messageId,
+        gasto_cents: orcamento.gastoCents,
+        teto_cents: orcamento.tetoCents,
+      });
+      return { skipped: true, reason: "orcamento_de_ia_estourado" };
+    }
 
     // ── Call LLM ──────────────────────────────────────────────────────────
     const abortController = new AbortController();
