@@ -41570,6 +41570,376 @@ grant execute on function public.fn_channel_metrics(uuid, timestamptz, timestamp
 
 notify pgrst, 'reload schema';
 
+-- ---- as tabelas append-only da IA ganham prazo (migration 0587) ----
+-- llm_calls/metrics/skill_activations/ai_router_decisions (400/100),
+-- pacing_ledger (2/2, a última linha do número fica), outbound_copies (30/7,
+-- as últimas windowSize do número ficam) e lead_checkpoints (180/30, só o
+-- superado e sem job vivo). event_log NÃO entra. Corpo IDÊNTICO ao da
+-- migration 0587, com o racional inteiro lá. ANTES da varredura anon: cria
+-- função.
+-- Índices de poda: sem eles o DELETE por idade vira seq scan diário. Nenhuma
+-- das sete tinha índice começando pelo relógio da poda.
+create index if not exists idx_llm_calls_expurgo_created_at
+  on public.llm_calls (created_at) where legacy_invocation_id is null;
+create index if not exists idx_metrics_expurgo_created_at
+  on public.metrics (created_at);
+create index if not exists idx_skill_activations_expurgo_created_at
+  on public.skill_activations (created_at);
+create index if not exists idx_ai_router_decisions_expurgo_created_at
+  on public.ai_router_decisions (created_at);
+create index if not exists idx_pacing_ledger_expurgo_sent_at
+  on public.pacing_ledger (sent_at);
+create index if not exists idx_outbound_copies_expurgo_sent_at
+  on public.outbound_copies (sent_at);
+create index if not exists idx_lead_checkpoints_expurgo_created_at
+  on public.lead_checkpoints (created_at);
+
+-- 1. Telemetria da IA: quatro tabelas, um prazo. Cada tabela leva até
+--    `p_limite` linhas por chamada e o retorno é a SOMA — "soma < limite"
+--    implica que nenhuma das quatro encheu o lote, que é a condição de parada
+--    do laço do cron.
+create or replace function public.fn_expurgar_telemetria_de_ia_vencida(
+  p_retencao_dias int default null,
+  p_limite int default null
+) returns int
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_dias int := greatest(coalesce(p_retencao_dias, 400), 100);
+  v_limite int := least(greatest(coalesce(p_limite, 1000), 1), 10000);
+  v_corte timestamptz := now() - make_interval(days => v_dias);
+  v_n int;
+  v_total int := 0;
+begin
+  with vencidas as (
+    select c.id from public.llm_calls c
+     where c.created_at < v_corte and c.legacy_invocation_id is null
+     order by c.created_at limit v_limite
+  )
+  delete from public.llm_calls c using vencidas v where c.id = v.id;
+  get diagnostics v_n = row_count;
+  v_total := v_total + v_n;
+
+  with vencidas as (
+    select m.id from public.metrics m
+     where m.created_at < v_corte
+     order by m.created_at limit v_limite
+  )
+  delete from public.metrics m using vencidas v where m.id = v.id;
+  get diagnostics v_n = row_count;
+  v_total := v_total + v_n;
+
+  with vencidas as (
+    select s.id from public.skill_activations s
+     where s.created_at < v_corte
+     order by s.created_at limit v_limite
+  )
+  delete from public.skill_activations s using vencidas v where s.id = v.id;
+  get diagnostics v_n = row_count;
+  v_total := v_total + v_n;
+
+  with vencidas as (
+    select r.id from public.ai_router_decisions r
+     where r.created_at < v_corte
+     order by r.created_at limit v_limite
+  )
+  delete from public.ai_router_decisions r using vencidas v where r.id = v.id;
+  get diagnostics v_n = row_count;
+  v_total := v_total + v_n;
+
+  return v_total;
+end;
+$$;
+revoke execute on function public.fn_expurgar_telemetria_de_ia_vencida(int,int) from public, anon, authenticated;
+grant  execute on function public.fn_expurgar_telemetria_de_ia_vencida(int,int) to service_role;
+
+-- 2. Ritmo de envio: a última linha de cada número nunca sai.
+create or replace function public.fn_expurgar_ritmo_de_envio_vencido(
+  p_retencao_dias int default null,
+  p_limite int default null
+) returns int
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_dias int := greatest(coalesce(p_retencao_dias, 2), 2);
+  v_limite int := least(greatest(coalesce(p_limite, 1000), 1), 10000);
+  v_apagadas int;
+begin
+  -- O "existe um mais novo" fica no `where`, ANTES do `limit` (a lição da
+  -- 0167): filtrar depois faria um lote só de últimas linhas devolver 0 e o
+  -- cron parar com backlog atrás.
+  with vencidas as (
+    select p.id from public.pacing_ledger p
+     where p.sent_at < now() - make_interval(days => v_dias)
+       and exists (
+         select 1 from public.pacing_ledger n
+          where n.organization_id = p.organization_id
+            and n.channel_session_id = p.channel_session_id
+            and n.sent_at > p.sent_at
+       )
+     order by p.sent_at limit v_limite
+  )
+  delete from public.pacing_ledger p using vencidas v where p.id = v.id;
+  get diagnostics v_apagadas = row_count;
+  return v_apagadas;
+end;
+$$;
+revoke execute on function public.fn_expurgar_ritmo_de_envio_vencido(int,int) from public, anon, authenticated;
+grant  execute on function public.fn_expurgar_ritmo_de_envio_vencido(int,int) to service_role;
+
+-- 3. Cópias enviadas: nunca as últimas `windowSize` do número.
+create or replace function public.fn_expurgar_copias_enviadas_vencidas(
+  p_retencao_dias int default null,
+  p_limite int default null
+) returns int
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_dias int := greatest(coalesce(p_retencao_dias, 30), 7);
+  v_limite int := least(greatest(coalesce(p_limite, 1000), 1), 10000);
+  v_apagadas int;
+begin
+  with janelas as (
+    -- A janela de cada número, como `loadSpinningKnobs` a resolveria, nunca
+    -- menor que o padrão de 20 (`SPINNING_DEFAULTS.windowSize`).
+    select ck.organization_id, ck.channel_session_id,
+           -- O `case` repete o filtro de propósito: com a CTE embutida no
+           -- plano, nada garante que o `where` rode antes do cast.
+           greatest(20, case when jsonb_typeof(ck.spinning_knobs->'windowSize') = 'number'
+                             then ceil((ck.spinning_knobs->>'windowSize')::numeric) end) as janela
+      from public.channel_knobs ck
+     where jsonb_typeof(ck.spinning_knobs) = 'object'
+       and jsonb_typeof(ck.spinning_knobs->'windowSize') = 'number'
+  ),
+  vencidas as (
+    select o.id from public.outbound_copies o
+      left join janelas j
+        on j.organization_id = o.organization_id and j.channel_session_id = o.channel_session_id
+     where o.sent_at < now() - make_interval(days => v_dias)
+       and coalesce(j.janela, 20) <= 10000
+       and (
+         select count(*) from (
+           select 1 from public.outbound_copies n
+            where n.organization_id = o.organization_id
+              and n.channel_session_id = o.channel_session_id
+              and n.sent_at > o.sent_at
+            -- `least` ANTES do cast: o Postgres não promete avaliar o `<= 10000`
+            -- acima primeiro, e um knob de 1e20 estouraria o `::int` aqui.
+            limit least(coalesce(j.janela, 20), 10000)::int
+         ) mais_novas
+       ) >= coalesce(j.janela, 20)
+     order by o.sent_at limit v_limite
+  )
+  delete from public.outbound_copies o using vencidas v where o.id = v.id;
+  get diagnostics v_apagadas = row_count;
+  return v_apagadas;
+end;
+$$;
+revoke execute on function public.fn_expurgar_copias_enviadas_vencidas(int,int) from public, anon, authenticated;
+grant  execute on function public.fn_expurgar_copias_enviadas_vencidas(int,int) to service_role;
+
+-- 4. Checkpoints: só o superado, de job morto, passado do prazo.
+create or replace function public.fn_expurgar_checkpoints_superados(
+  p_retencao_dias int default null,
+  p_limite int default null
+) returns int
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_dias int := greatest(coalesce(p_retencao_dias, 180), 30);
+  v_limite int := least(greatest(coalesce(p_limite, 1000), 1), 10000);
+  v_apagadas int;
+begin
+  with jobs_vivos as materialized (
+    -- Como texto: o `origin_job_id` vem de payload jsonb, e um cast para uuid
+    -- derrubaria a poda inteira na primeira linha malformada.
+    select j.id::text as ref from public.job_queue j
+     where j.status in ('pending', 'running')
+    union
+    select j.payload->>'origin_job_id' from public.job_queue j
+     where j.status in ('pending', 'running') and j.payload ? 'origin_job_id'
+  ),
+  vencidas as (
+    select k.id from public.lead_checkpoints k
+     where k.created_at < now() - make_interval(days => v_dias)
+       and exists (
+         select 1 from public.lead_checkpoints n
+          where n.organization_id = k.organization_id
+            and n.contact_id = k.contact_id
+            and n.conversation_id is not distinct from k.conversation_id
+            and n.service_revision is not distinct from k.service_revision
+            and n.demanda_id is not distinct from k.demanda_id
+            and n.demanda_revision is not distinct from k.demanda_revision
+            and n.seq > k.seq
+       )
+       and (k.job_id is null
+            or not exists (select 1 from jobs_vivos v where v.ref = k.job_id::text))
+     order by k.created_at limit v_limite
+  )
+  delete from public.lead_checkpoints k using vencidas v where k.id = v.id;
+  get diagnostics v_apagadas = row_count;
+  return v_apagadas;
+end;
+$$;
+revoke execute on function public.fn_expurgar_checkpoints_superados(int,int) from public, anon, authenticated;
+grant  execute on function public.fn_expurgar_checkpoints_superados(int,int) to service_role;
+
+notify pgrst, 'reload schema';
+
+-- ---- a tela de uso de IA agrega no banco, não em JS sobre uma amostra (migration 0586) ----
+-- Entra ANTES da VARREDURA anon (que proíbe create function depois dela). Por
+-- ser invoker, a varredura nem a alcançaria: os revokes abaixo são a proteção.
+--
+-- `/api/v1/ai/usage` buscava as linhas de `llm_calls` e somava em TypeScript.
+-- O PostgREST corta toda resposta em `max_rows` (1000 no `supabase/config.toml`
+-- do kit), e a consulta era em ordem ASCENDENTE: passada a milésima chamada do
+-- período, os dias MAIS RECENTES sumiam da tela — custo, tokens e latência
+-- calculados sobre o começo do mês. O denominador da taxa de passagem para uma
+-- pessoa (`messages` inbound) e o numerador (`event_log`) cortavam do mesmo jeito.
+--
+-- Esta função devolve UM jsonb, e não linhas: uma função que devolvesse tabela
+-- voltaria a passar pelo `max_rows` assim que o período tivesse dias × tipos
+-- suficientes.
+--
+-- `security invoker`, NÃO `definer`: quem chama é a rota com o cliente da
+-- sessão (`authenticated`), e a RLS de `llm_calls`, `messages` e `event_log`
+-- continua sendo quem isola a organização. `p_org` filtra de novo como defesa em
+-- profundidade — e, por ser invoker, um `p_org` alheio devolve zero, não o gasto
+-- de outra empresa (vigiado por tests/invariants/uso-de-ia-agregado-no-banco.test.ts,
+-- que roda no job `invariants` do CI).
+--
+-- Não substitui `fn_gasto_de_ia_do_mes`: aquela é a régua do MÊS que o teto de
+-- orçamento usa; esta responde "o que aconteceu neste período", com a janela que
+-- quem olha escolher.
+--
+-- "Turnos do agente" = jobs distintos com chamada `agent_turn` de status 'ok'.
+-- A chamada que falhou grava `agent_turn` na mesma tabela (status 'erro', custo
+-- null): contar o job dela como turno inventaria respostas que nunca saíram e
+-- puxaria o custo médio por turno para baixo.
+--
+-- O custo do turno é o do JOB inteiro (checkpoint, classificador de etapa,
+-- compactação), e essas chamadas gravam `agent_id` null. Por isso os turnos NÃO
+-- passam pelos filtros de `p_agent_id`/`p_purpose` das outras somas: o agente
+-- escolhe quais jobs entram (pela chamada `agent_turn` dele), e o custo de cada
+-- job é sempre inteiro. Filtrar antes faria o mesmo cartão mostrar um custo por
+-- turno menor com o filtro ligado, e "sem turnos" ao filtrar por outro tipo.
+--
+-- `llm_calls.job_id` é `on delete set null`, então um turno cujo job a poda da
+-- fila já apagou (`JOB_QUEUE_RETENTION_DAYS`, padrão 90) deixa de ser contado —
+-- e o custo dele sai junto do custo por turno, para a média não ficar inflada.
+create or replace function public.fn_uso_de_ia(
+  p_org uuid,
+  p_desde timestamptz,
+  p_ate timestamptz,
+  p_agent_id uuid default null,
+  p_purpose text default null
+)
+returns jsonb
+  language sql
+  stable
+  security invoker
+  set search_path to 'public', 'pg_temp'
+as $$
+  with chamadas as (
+    select (c.created_at at time zone 'UTC')::date as dia,
+           c.purpose,
+           c.cost_cents,
+           c.input_tokens,
+           c.output_tokens,
+           c.cache_read_tokens,
+           c.cache_write_tokens,
+           c.latency_ms
+      from public.llm_calls c
+     where c.organization_id = p_org
+       and c.created_at >= p_desde
+       and c.created_at <= p_ate
+       and (p_agent_id is null or c.agent_id = p_agent_id)
+       and (p_purpose is null or c.purpose = p_purpose)
+  ),
+  jobs_de_turno as (
+    select distinct c.job_id
+      from public.llm_calls c
+     where c.organization_id = p_org
+       and c.created_at >= p_desde
+       and c.created_at <= p_ate
+       and c.purpose = 'agent_turn'
+       and c.status = 'ok'
+       and c.job_id is not null
+       and (p_agent_id is null or c.agent_id = p_agent_id)
+  ),
+  turnos as (
+    select (select count(*) from jobs_de_turno) as turnos,
+           coalesce(sum(c.cost_cents), 0) as custo_dos_turnos_cents
+      from public.llm_calls c
+      join jobs_de_turno t on t.job_id = c.job_id
+     where c.organization_id = p_org
+       and c.created_at >= p_desde
+       and c.created_at <= p_ate
+  ),
+  agregado as (
+    select grouping(dia) as sem_dia,
+           grouping(purpose) as sem_purpose,
+           dia,
+           purpose,
+           count(*) as chamadas,
+           coalesce(sum(cost_cents), 0) as custo_cents,
+           coalesce(sum(input_tokens), 0) as input_tokens,
+           coalesce(sum(output_tokens), 0) as output_tokens,
+           coalesce(sum(cache_read_tokens), 0) as cache_read_tokens,
+           coalesce(sum(cache_write_tokens), 0) as cache_write_tokens,
+           coalesce(percentile_disc(0.5) within group (order by latency_ms) filter (where latency_ms > 0), 0) as p50_latency_ms,
+           coalesce(percentile_disc(0.95) within group (order by latency_ms) filter (where latency_ms > 0), 0) as p95_latency_ms
+      from chamadas
+     group by grouping sets ((dia), (purpose), ())
+  ),
+  inbounds as (
+    select (m.created_at at time zone 'UTC')::date as dia, count(*) as n
+      from public.messages m
+     where m.organization_id = p_org
+       and m.direction = 'inbound'
+       and m.created_at >= p_desde
+       and m.created_at <= p_ate
+     group by 1
+  ),
+  handoffs as (
+    select (e.created_at at time zone 'UTC')::date as dia, count(*) as n
+      from public.event_log e
+     where e.organization_id = p_org
+       and e.event_type = 'ai.handoff_triggered'
+       and e.created_at >= p_desde
+       and e.created_at <= p_ate
+     group by 1
+  )
+  select jsonb_build_object(
+    'totais', (select (to_jsonb(a) - 'sem_dia' - 'sem_purpose' - 'dia' - 'purpose') || to_jsonb(tr)
+                 from agregado a, turnos tr where a.sem_dia = 1 and a.sem_purpose = 1),
+    'dias', coalesce((select jsonb_agg(to_jsonb(a) - 'sem_dia' - 'sem_purpose' - 'purpose' order by a.dia)
+                        from agregado a where a.sem_dia = 0), '[]'::jsonb),
+    'purposes', coalesce((select jsonb_agg(to_jsonb(a) - 'sem_dia' - 'sem_purpose' - 'dia' order by a.purpose)
+                            from agregado a where a.sem_dia = 1 and a.sem_purpose = 0), '[]'::jsonb),
+    'inbounds', coalesce((select jsonb_object_agg(i.dia::text, i.n) from inbounds i), '{}'::jsonb),
+    'handoffs', coalesce((select jsonb_object_agg(h.dia::text, h.n) from handoffs h), '{}'::jsonb)
+  );
+$$;
+
+comment on function public.fn_uso_de_ia(uuid, timestamptz, timestamptz, uuid, text) is
+  'Uso de IA da organização num período, agregado no banco para a tela Uso de IA (/api/v1/ai/usage): totais, por dia (UTC) e por purpose de llm_calls — custo, tokens, cache, p50/p95 de latência de UMA chamada, turnos do agente (jobs distintos com agent_turn ok, sem os filtros de agente/purpose sobre o custo do job) e o custo desses turnos, só nos totais — mais inbounds e ai.handoff_triggered por dia. Devolve jsonb para não passar pelo max_rows do PostgREST. security invoker: a RLS isola; p_org é defesa em profundidade. Não é a régua do teto mensal (fn_gasto_de_ia_do_mes).';
+
+revoke execute on function public.fn_uso_de_ia(uuid, timestamptz, timestamptz, uuid, text)
+  from public, anon;
+grant  execute on function public.fn_uso_de_ia(uuid, timestamptz, timestamptz, uuid, text)
+  to authenticated, service_role;
+
+notify pgrst, 'reload schema';
+
 -- ---- VARREDURA anon: função nova nasce exposta em quem ATUALIZA (migration 0116) ----
 --
 -- ⚠️ DE PROPÓSITO, NENHUMA FUNÇÃO É CRIADA DEPOIS DESTE BLOCO. Apêndice que cria
