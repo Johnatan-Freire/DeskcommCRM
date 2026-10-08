@@ -3,7 +3,7 @@ import { marcaDaSaida } from "@/lib/branding/saida";
 import { canalDoEventoDesativado } from "@/lib/channels/desativado";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { montarPayloadDeInbound, truncar } from "./push_payload";
-import { enviarPushAoUsuario, enviarPushAosUsuarios, enviarPushDaOrg } from "./web_push";
+import { enviarPushAoUsuario, enviarPushAQuemVeAConversa, enviarPushDaOrg } from "./web_push";
 import { carregarDestinatariosDaMensagem, type DestinatariosDaMensagem } from "./destinatarios-da-mensagem";
 import { logger } from "@/lib/logger";
 import { vapidPronto } from "./vapid";
@@ -23,6 +23,10 @@ async function handleInbound(row: EventRow): Promise<HandlerResult> {
   }
   const conversationId =
     (typeof row.payload.conversation_id === "string" ? row.payload.conversation_id : null) ?? null;
+  // Sem conversa não há como saber quem pode vê-la: ninguém recebe.
+  if (!conversationId) {
+    return { consumer_key: WEB_PUSH_INBOUND_KEY, status: "skipped", detail: "sem_conversa" };
+  }
   const previewRaw = row.payload.body_preview;
   const preview = typeof previewRaw === "string" && previewRaw.trim() ? previewRaw : "Nova mensagem";
   const type = typeof row.payload.type === "string" ? row.payload.type : "text";
@@ -75,12 +79,12 @@ async function handleInbound(row: EventRow): Promise<HandlerResult> {
     icon,
   });
   const destino = await destinatariosDoInbound(row.organization_id, conversationId, contactId);
-  if (destino.tipo === "todos") {
-    const { sent } = await enviarPushDaOrg(row.organization_id, payload);
-    return { consumer_key: WEB_PUSH_INBOUND_KEY, status: "ok", detail: `sent:${sent}` };
-  }
-  const { sent } = await enviarPushAosUsuarios(row.organization_id, destino.userIds, payload);
-  return { consumer_key: WEB_PUSH_INBOUND_KEY, status: "ok", detail: `sent:${sent};restrito:${destino.userIds.length}` };
+  // Quem DEVE ser avisado (`destino`) nunca alarga quem PODE ver: nome e prévia
+  // só saem para quem a RLS de `conversations` deixaria abrir a conversa.
+  const soUsuarios = destino.tipo === "restrito" ? destino.userIds : undefined;
+  const { sent } = await enviarPushAQuemVeAConversa(row.organization_id, conversationId, payload, soUsuarios);
+  const detail = soUsuarios ? `sent:${sent};restrito:${soUsuarios.length}` : `sent:${sent}`;
+  return { consumer_key: WEB_PUSH_INBOUND_KEY, status: "ok", detail };
 }
 
 /**
@@ -94,10 +98,9 @@ async function handleInbound(row: EventRow): Promise<HandlerResult> {
  */
 async function destinatariosDoInbound(
   organizationId: string,
-  conversationId: string | null,
+  conversationId: string,
   contactId: string | null,
 ): Promise<DestinatariosDaMensagem> {
-  if (!conversationId) return { tipo: "todos" };
   try {
     const destino = await carregarDestinatariosDaMensagem(
       createAdminClient(),

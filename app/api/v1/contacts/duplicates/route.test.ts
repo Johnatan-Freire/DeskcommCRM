@@ -19,12 +19,12 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { loadAuthUser } from "@/lib/auth/server";
-import { orgAtivaDaApi } from "@/lib/auth/require-role";
+import { loadAuthUser, resolveActiveOrg } from "@/lib/auth/server";
 import { createClient } from "@/lib/supabase/server";
 
-vi.mock("@/lib/auth/server", () => ({ loadAuthUser: vi.fn() }));
-vi.mock("@/lib/auth/require-role", () => ({ orgAtivaDaApi: vi.fn() }));
+// Fork Capital Code: a rota resolve a organização por `resolveActiveOrg` (a
+// `orgAtivaDaApi` é da suspensão de empresa #1987, não portada).
+vi.mock("@/lib/auth/server", () => ({ loadAuthUser: vi.fn(), resolveActiveOrg: vi.fn() }));
 vi.mock("@/lib/supabase/server", () => ({ createClient: vi.fn() }));
 
 const ORG_ID = "22222222-2222-4222-8222-222222222222";
@@ -146,7 +146,7 @@ beforeEach(() => {
     idioma: "pt-BR",
     organizations: [{ organization_id: ORG_ID, organization_name: "Org", role: "manager" }],
   } as never);
-  vi.mocked(orgAtivaDaApi).mockResolvedValue({ ok: true, org: { orgId: ORG_ID, name: "Org" } } as never);
+  vi.mocked(resolveActiveOrg).mockResolvedValue({ orgId: ORG_ID, name: "Org" } as never);
 });
 
 describe("a varredura de duplicados responde ao que foi LIDO", () => {
