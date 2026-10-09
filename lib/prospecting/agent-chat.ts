@@ -143,6 +143,9 @@ export async function chatAboutAgent(
   signal?: AbortSignal,
 ): Promise<AgentChatResponse> {
   const db = await pool.connect();
+  // #2624 — mesma marcação do #2621: a consulta que rejeita não destrói o socket;
+  // liberado sem erro este cliente volta ao pool e é reemprestado pelo próximo dono.
+  let erroNaTransacao: Error | undefined;
   let context: AgentChatContext;
   let draft: AgentChatDraft;
   let model: Awaited<ReturnType<typeof resolveSetupModel>>;
@@ -205,7 +208,7 @@ export async function chatAboutAgent(
     draft = refreshChatDraft(input.draft ?? {}, context);
     model = await resolveSetupModel(db, orgId, draft.channel_session_id ?? null);
   } finally {
-    db.release();
+    db.release(erroNaTransacao);
   }
   const { result } = await runModelCall(pool, llmEdgeConfigFromEnv(env), {
     abortSignal: signal,
