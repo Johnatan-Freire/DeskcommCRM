@@ -36,6 +36,7 @@ import { ackToStatus } from "@/lib/types/messaging";
 import type { WahaEnvelope, WahaPayload } from "@/lib/waha/envelope";
 import { bareWaMessageId, chatIdFromWaMessageId, wahaEchoExternalIds } from "@/lib/waha/message-id";
 import { logger } from "@/lib/logger";
+import { nomeDeArquivoLimpo } from "@/lib/messaging/media/nome-de-arquivo";
 import {
   ehNumeroInternoDeAviso,
   registrarMensagemIgnorada,
@@ -316,6 +317,22 @@ export function mediaUrlOf(p: WahaPayload): string | null {
 /** MIME da mídia: idem (payload.media.mimetype é o campo do NOWEB atual). */
 export function mediaMimeOf(p: WahaPayload): string | null {
   return p.mimetype ?? p.media?.mimetype ?? null;
+}
+
+/**
+ * Nome ORIGINAL do arquivo (`payload.media.filename`, o campo que o WAHA
+ * documenta em "Receive messages": `"some-file.pdf"` em documento, `null` em
+ * imagem/áudio) — a chave `metadata.media_filename` que o cartão do Inbox lê
+ * (#2613).
+ *
+ * Guarda por VALOR, não por presença: `null`, não-string e string em branco
+ * não é nome, e a chave só entra no `metadata` quando sobra algo. O path de
+ * storage é canônico (`{org}/{conversa}/{mensagem}.{ext}`) e apaga o nome que o
+ * cliente mandou — sem isto aqui, o cartão nunca deixa de mostrar o rótulo de
+ * extensão.
+ */
+export function mediaFilenameOf(p: WahaPayload): string | null {
+  return nomeDeArquivoLimpo(p.media?.filename);
 }
 
 /**
@@ -792,6 +809,7 @@ async function handleInbound(
     : null;
 
   const now = new Date().toISOString();
+  const nomeDoArquivo = mediaFilenameOf(p);
   const { data: insertedMessage, error: insertErr } = await admin
     .from("messages")
     .insert({
@@ -818,6 +836,10 @@ async function handleInbound(
         // resolvida, a citada no banco é a fonte da verdade — uma edição
         // posterior mudaria o que a tela mostra, e a cópia ficaria velha.
         ...(citacao?.texto && !citadaId ? { reply_to_body: citacao.texto } : {}),
+        // Nome original do anexo (#2613). Só quando há nome: a chave nunca é
+        // gravada vazia, e gravação é de linha NOVA (o INSERT é o único caminho
+        // que escreve `metadata` aqui), então nada do que já está é sobrescrito.
+        ...(nomeDoArquivo ? { media_filename: nomeDoArquivo } : {}),
       },
     })
     .select("id")
@@ -1100,6 +1122,7 @@ async function handleOutboundFromUserPhone(
   const comando = lerComandoDeControle(bodyOf(p));
 
   const now = new Date().toISOString();
+  const nomeDoArquivo = mediaFilenameOf(p);
   const { data: insertedOutbound, error: insertErr } = await admin
     .from("messages")
     .insert({
@@ -1123,6 +1146,8 @@ async function handleOutboundFromUserPhone(
         fromMe: true,
         // Mesmo critério do inbound: cópia do texto só quando não há ponteiro.
         ...(citacao?.texto && !citadaId ? { reply_to_body: citacao.texto } : {}),
+        // Mesma regra do inbound (#2613): nome só quando há nome.
+        ...(nomeDoArquivo ? { media_filename: nomeDoArquivo } : {}),
       },
     })
     .select("id")

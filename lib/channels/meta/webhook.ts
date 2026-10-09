@@ -122,6 +122,14 @@ export interface InboundMessageEvent {
     mime: string | null;
     /** Nota de voz de verdade (não anexo de áudio). */
     voice: boolean;
+    /**
+     * Nome ORIGINAL do arquivo — a Cloud API só manda `filename` em
+     * `document` (imagem/vídeo/áudio vêm sem). Vira
+     * `metadata.media_filename` na ingestão, que é o que o cartão do Inbox
+     * lê (#2613). Opcional: o parser SEMPRE preenche (null quando não há),
+     * mas quem monta um evento à mão não é obrigado a inventar a chave.
+     */
+    filename?: string | null;
   } | null;
   /**
    * `messages[].referral` cru — vem na mensagem que o app do cliente manda ao
@@ -237,6 +245,9 @@ export function parseMetaWebhook(envelope: MetaWebhookEnvelope): MetaWebhookEven
                     url: str(corpoMidia.url),
                     mime: str(corpoMidia.mime_type),
                     voice: corpoMidia.voice === true,
+                    // Nome original (Cloud API: `document.filename`). `str`
+                    // devolve null em string vazia — a chave não nasce vazia.
+                    filename: str(corpoMidia.filename),
                   }
                 : null,
             referral: raw.referral ?? null,
