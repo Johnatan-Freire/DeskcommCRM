@@ -22,6 +22,7 @@ import { z } from 'zod';
 
 import { PONTO_POR_ID } from '@/lib/ai/pontos/registro';
 import { scrubMessage } from '@/lib/sentry/scrub';
+import { identificarConteudoBloqueado } from './conteudo-bloqueado';
 
 import type { Logger } from '../../obs/logger';
 import { decidirParaOSeam } from './binding-do-ponto';
@@ -730,6 +731,7 @@ export async function runModelCall(db: pg.Pool, cfg: LlmEdgeConfig, input: RunMo
       ...cacheDaCauda(config.provider, input.maxSteps),
     });
   } catch (err) {
+    err = identificarConteudoBloqueado(err) ?? err;
     // ─── A LINHA QUE FALTAVA ────────────────────────────────────────────────
     //
     // Até aqui o INSERT em llm_calls vivia só DEPOIS desta chamada, sem `try`
@@ -861,6 +863,8 @@ export function normalizarErro(err: unknown): {
   error_message: string;
   http_status: number | null;
 } {
+  const bloqueio = identificarConteudoBloqueado(err);
+  if (bloqueio) return { error_code: 'conteudo_bloqueado', error_message: bloqueio.message, http_status: bloqueio.statusCode ?? null };
   const bruto = err instanceof Error ? err.message : String(err);
   const status =
     (err as { statusCode?: number; status?: number })?.statusCode ??

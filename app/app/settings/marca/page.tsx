@@ -114,7 +114,9 @@ export default async function MarcaDaOrganizacaoPage() {
         // e a lei como o formulário de Configurações → Organização os mostra.
         vocabulario={{
           lei: perfil.lei?.nome ?? "LGPD",
-          rotuloNomeLegal: perfil.empresa.rotuloNomeLegal,
+          // Fork Capital Code: o perfil do país não tem `empresa` (rótulos por país
+          // vieram com a cadeia de Portugal, #2502, não portada). Brasil = Razão social.
+          rotuloNomeLegal: "Razão social",
         }}
       />
     </div>
