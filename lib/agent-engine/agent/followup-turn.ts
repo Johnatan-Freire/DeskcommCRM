@@ -29,6 +29,7 @@ import { getLeadContext, type LeadContext } from '../edge/crm/get-lead-context';
 import { WahaChannelAdapter } from '../edge/channel/waha-adapter';
 import { applySendOutcome } from '../edge/crm/send-message';
 import { runBeforeSend } from '../guardrails/before-send';
+import { contextoDoContato, renderizarTextoDeFollowup } from '@/lib/automation/texto-do-followup';
 import { camadaLigada, lerCamadasDaOrg } from '../guardrails/camadas-da-org';
 import { classifyPromise } from '../guardrails/promise/semantic';
 import { scheduleCronJob } from '../cron/scheduler';
@@ -605,7 +606,7 @@ async function runFlowDrivenTurn(
       await complete(pool,{jobId:job.id,jobClaim:claimOfJob(job),organizationId:target.tenantId,enrollmentId,nodeId,result:{kind:'skipped',reason:`Não enviado: ${explicarCorte(corte)}.`}});
       return;
     }
-    const body = await resolveFlowSendBody(pool, target.tenantId, input);
+    const body = await resolveFlowSendBody(pool, target.tenantId, target.leadId, input);
     if (body !== null) {
       // Texto do operador: sem camada semântica (ver o cabeçalho de sendFixedOutbound).
       const desfecho = await sendFixedOutbound(deps, job, pool, ctx, clock, target, body, false);
@@ -756,14 +757,32 @@ async function runDeterministicReentry(
   );
 }
 
-function interpolarVoltaDoPayload(texto: string, index: number | undefined, total: number | undefined): string {
-  if (index === undefined || total === undefined) return texto;
-  return texto.replaceAll('{{volta}}', String(index)).replaceAll('{{voltas}}', String(total));
+/**
+ * `{{volta}}`/`{{voltas}}` PRIMEIRO e, com o contexto do contato e do negócio
+ * (#2528), o resto pelo MESMO renderizador das automações: `{{nome}}`,
+ * `{{primeiro_nome}}`, `{{contact.*}}` e `{{lead.*}}` saem preenchidos, e
+ * marcação sem valor sai da frase junto com o espaço vizinho — nunca `{{...}}`
+ * cru ao cliente. Sem contexto (chamador que não leu) o comportamento é o de
+ * antes: só a volta.
+ */
+function interpolarVoltaDoPayload(
+  texto: string,
+  index: number | undefined,
+  total: number | undefined,
+  contexto?: Record<string, unknown> | null,
+): string {
+  const comVolta =
+    index === undefined || total === undefined
+      ? texto
+      : texto.replaceAll('{{volta}}', String(index)).replaceAll('{{voltas}}', String(total));
+  return contexto ? renderizarTextoDeFollowup(comVolta, contexto) : comVolta;
 }
 
 async function resolveFlowSendBody(
   pool: pg.Pool,
   tenantId: string,
+  /** `job.contact_id` — de quem é este texto (#2528). */
+  contactId: string,
   input: {
     fixedBody: string | undefined;
     templateId: string | undefined;
@@ -771,6 +790,9 @@ async function resolveFlowSendBody(
     voltaTotal: number | undefined;
   },
 ): Promise<string | null> {
+  // O `fixed_body` já chega renderizado do enfileiramento (`lib/followup/engine.ts`),
+  // ou é a confirmação, que é dado do contato. Renderizar de novo leria o que veio
+  // do cadastro como modelo — por isso aqui ele só ganha a volta, nunca o contexto.
   if (input.fixedBody !== undefined) {
     return interpolarVoltaDoPayload(input.fixedBody, input.voltaIndex, input.voltaTotal);
   }
@@ -783,7 +805,9 @@ async function resolveFlowSendBody(
   if (body === undefined || body.length === 0) {
     throw new Error('followup_turn sem modelo de mensagem — o template_id do passo não existe nesta organização');
   }
-  return interpolarVoltaDoPayload(body, input.voltaIndex, input.voltaTotal);
+  // #2528 — o corpo de `message_templates` só existe aqui: esta é a passada única dele.
+  const contexto = await contextoDoContato(pool, tenantId, contactId);
+  return interpolarVoltaDoPayload(body, input.voltaIndex, input.voltaTotal, contexto);
 }
 
 /**

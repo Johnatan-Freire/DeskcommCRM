@@ -59,6 +59,11 @@ function pool(corte: string | Error) {
       return { rows: [{ motivo: corte }] };
     }
     if (sql.includes("d.fechada_em::text")) return { rows: [{ ...boundary, status: "open", demanda_fechada_em: null }] };
+    // A inscrição viva no MESMO nó (#2261): sem esta resposta o turno é
+    // descartado antes do corte, e o teste não mediria o corte.
+    if (sql.includes("from followup_enrollments") && sql.includes("current_node_id, status")) {
+      return { rows: [{ current_node_id: "a1", status: "active" }] };
+    }
     if (/from conversations/.test(sql)) return { rows: [{ id: CONVERSA, channel_session_id: "canal-1", archived_at: null }] };
     return { rows: [], rowCount: 0 };
   });

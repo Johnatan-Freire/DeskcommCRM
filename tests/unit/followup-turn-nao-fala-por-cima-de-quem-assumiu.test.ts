@@ -100,6 +100,9 @@ function fakePool() {
       return { rows: [linha] };
     }
     if (sql.includes("d.fechada_em::text")) return { rows: [{ ...boundary, status: "open", demanda_fechada_em: null }] };
+    // Fork Capital Code: o corte no envio do follow-up (migration 0403) responde
+    // "autorizado" — este arquivo mede quem está no comando, não o corte.
+    if (sql.includes("fn_followup_pode_enviar")) return { rows: [{ motivo: "autorizado" }] };
     if (/from conversations/.test(sql)) return { rows: [{ id: CONVERSA, channel_session_id: "canal-1", archived_at: null }] };
     if (/from followup_enrollments/.test(sql) && !/left join ai_agents/.test(sql))
       return { rows: [{ current_node_id: NO, status: estado }] };
