@@ -12,6 +12,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { fail } from "@/lib/api/wrappers";
 import { loadAuthUser, resolveActiveOrg } from "@/lib/auth/server";
 import { traduzir } from "@/lib/i18n/dicionario";
+import { logger } from "@/lib/logger";
 import {
   CHANNEL_SESSION_REF_COLUMNS,
   DEFAULT_CHANNEL_PROVIDER,
@@ -76,7 +77,10 @@ export async function GET(_req: NextRequest, ctx: RouteCtx): Promise<Response> {
       return response;
     }
     if (signErr) {
-      console.error("[messages.media] createSignedUrl failed", signErr.message);
+      logger.error("messages.media.sign_failed", {
+        message_id: messageId,
+        erro: signErr.message,
+      });
     }
   }
 
