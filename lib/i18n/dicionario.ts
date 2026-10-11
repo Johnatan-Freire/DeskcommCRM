@@ -12527,6 +12527,21 @@ export const DICIONARIO: Traducoes = {
   "A janela de esfriando vai de 1 hora a 8760 horas (365 dias).": {
     es: "La ventana de enfriamiento va de 1 hora a 8760 horas (365 días).",
   },
+  // Exportação da conversa em PDF (#2229)
+  "Celular": { es: "Móvil" },
+  "Mensagem apagada pelo autor.": { es: "Mensaje eliminado por el autor." },
+  "(editada)": { es: "(editada)" },
+  "Histórico da conversa": { es: "Historial de la conversación" },
+  "Aberta em": { es: "Abierta el" },
+  "Exportado por": { es: "Exportado por" },
+  "Atenção: esta conversa ultrapassa o limite de mensagens por arquivo — só as mais recentes entram neste histórico.": { es: "Atención: esta conversación supera el límite de mensajes por archivo; solo las más recientes entran en este historial." },
+  "recebida": { es: "recibida" },
+  "enviada": { es: "enviada" },
+  "Não foi possível gerar o PDF desta conversa.": { es: "No se pudo generar el PDF de esta conversación." },
+  "{quem} em {quando}": { es: "{quem} el {quando}" },
+  "página {atual} de {total}": { es: "página {atual} de {total}" },
+  "Muitas exportações seguidas. Tente em um minuto.": { es: "Demasiadas exportaciones seguidas. Inténtelo en un minuto." },
+  "Erro ao ler o contato.": { es: "Error al leer el contacto." },
   // ─── #2387, ação em lote de pausa/retomada — Central de Conexões ─────────
   // Os rótulos dos dois botões e as frases de `frasesDoLoteDePausa`
   // (components/connections/ConnectionsClient.tsx). As contagens passam por

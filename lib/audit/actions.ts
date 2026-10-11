@@ -900,6 +900,10 @@ export const AUDIT_ACTIONS = [
   // o dado que importa quando alguém pergunta "por que este cliente voltou a
   // receber?".
   "contact.unblocked",
+  // O operador baixou o histórico de UMA conversa em PDF (issue #1982): o gesto
+  // auditável é a saída de dados — QUANTAS linhas saíram, não o que elas dizem
+  // (o corpo da mensagem não vai para log nem para metadata, LGPD).
+  "conversation.exported",
 ] as const;
 
 /** Um código de auditoria. Derivado de `AUDIT_ACTIONS` — não redigite a lista. */
