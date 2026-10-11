@@ -8921,5 +8921,11 @@
   "Janela agendada: a pausa e a retomada acontecem sozinhas.": "Window scheduled: the pause and the resume happen on their own.",
   "Não foi possível agendar a janela.": "Could not schedule the window.",
   "Janela cancelada. O que ela já pausou continua pausado.": "Window cancelled. Whatever it already paused stays paused.",
-  "Não foi possível cancelar a janela.": "Could not cancel the window."
+  "Não foi possível cancelar a janela.": "Could not cancel the window.",
+  "Buscar etiqueta": "Search tags",
+  "Nenhuma etiqueta com esse texto": "No tag matches this text",
+  "Destino da etiqueta": "Tag destination",
+  "Card (comportamento atual)": "Card (current behavior)",
+  "Contato do lead": "Lead contact",
+  "Sem contato vinculado, a etiqueta não é aplicada.": "With no linked contact, the tag is not applied."
 }
