@@ -26,6 +26,13 @@ import { FilterBar } from "@/components/kanban/FilterBar";
 import { BulkActionBar } from "@/components/kanban/BulkActionBar";
 import { NewLeadDialog } from "@/components/kanban/NewLeadDialog";
 import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { CaretLeft, Plus } from "@/lib/ui/icons";
 import type { LeadFilters } from "@/lib/kanban/filters";
 import { applyFilters, filtersFromParams, filtersToParams } from "@/lib/kanban/filters";
@@ -36,10 +43,17 @@ export function PipelinePageClient({
   pipelineId,
   initialName,
   role,
+  funis,
 }: {
   pipelineId: string;
   initialName: string;
   role: Role;
+  /**
+   * Os funis vivos da organização (`id` + `name`, na ordem da lista) — a MESMA
+   * partição da tela de Funis. É o que alimenta o seletor de troca rápida do
+   * cabeçalho; sem ele o quadro não sabe que existem outros funis.
+   */
+  funis: Array<{ id: string; name: string }>;
 }) {
   const t = useT();
   const { data, isLoading, error, pulses, realtimeStatus, seguranca } = useBoard(pipelineId);
@@ -79,6 +93,9 @@ export function PipelinePageClient({
     () => [...new Set((data?.leads ?? []).flatMap((l) => l.tags))].sort(),
     [data?.leads],
   );
+  const nomeAtual = data?.pipeline.name ?? initialName;
+  // Um funil só = nada para trocar: o seletor seria ruído permanente.
+  const podeTrocar = funis.length > 1;
 
   return (
     <div
@@ -141,9 +158,49 @@ export function PipelinePageClient({
             <CaretLeft size={16} /> {t("Funis")}
           </Link>
           <span className="shrink-0 text-border">/</span>
-          <h1 className="min-w-0 truncate text-2xl font-semibold tracking-tight">
-            {data?.pipeline.name ?? initialName}
+          {/*
+            O TÍTULO É O SELETOR. Com um funil só, `h1` puro (nada para trocar);
+            com vários, o gatilho do `Select` veste o título e o `h1` real vai
+            para `sr-only` — botão dentro de `h1` é HTML inválido, e sem o `h1`
+            o leitor de tela perde o título da página. Trocar zera a query
+            string: filtro de um funil aplicado no outro é resultado fantasma.
+          */}
+          <h1
+            className={
+              podeTrocar
+                ? "sr-only"
+                : "min-w-0 truncate text-2xl font-semibold tracking-tight"
+            }
+          >
+            {nomeAtual}
           </h1>
+          {podeTrocar && (
+            <Select
+              value={funis.some((f) => f.id === pipelineId) ? pipelineId : undefined}
+              onValueChange={(id) => {
+                if (id !== pipelineId) router.push(`/app/pipelines/${id}`);
+              }}
+            >
+              <SelectTrigger
+                aria-label={`${t("Trocar de funil")}: ${nomeAtual}`}
+                data-testid="trocar-funil"
+                className="h-auto w-auto min-w-0 max-w-full gap-1.5 border-0 bg-transparent p-0 text-2xl font-semibold tracking-tight shadow-none focus:ring-1 focus:ring-ring sm:max-w-[60%] [&>span]:truncate"
+              >
+                <SelectValue placeholder={nomeAtual} />
+              </SelectTrigger>
+              <SelectContent>
+                {funis.map((f) => (
+                  <SelectItem
+                    key={f.id}
+                    value={f.id}
+                    data-testid={`trocar-funil-opcao-${f.id}`}
+                  >
+                    {f.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
         </div>
         <Button onClick={() => setNewOpen(true)} disabled={!data} className="shrink-0">
           <Plus size={16} className="mr-2" /> {t("Novo Lead")}
