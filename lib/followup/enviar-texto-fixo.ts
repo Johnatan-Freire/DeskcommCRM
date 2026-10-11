@@ -224,6 +224,20 @@ export async function enviarTextoFixoPendente(
     } catch (err) {
       const message = err instanceof ApiError ? err.message : err instanceof Error ? err.message : String(err);
       logger.warn("[dev.pipeline] envio inline falhou", { error: message });
+      let revogado = false;
+      if (err instanceof StaleServiceBoundaryError) {
+        const {data: fato,error: falhaDeLeitura} = await admin.rpc("fn_autonomous_turn_revoked", {
+          p_org: job.organization_id, p_job: job.id,
+        });
+        if (falhaDeLeitura) throw falhaDeLeitura;
+        revogado = fato === true;
+      }
+      if (revogado) {
+        // Turno revogado porque alguém assumiu a conversa (#2541): a inscrição
+        // precisa do rastro de descarte para retomar sem falso worker morto.
+        const { error: falhaDoDescarte } = await admin.rpc("fn_followup_turno_descartado", { p_org: job.organization_id, p_job: job.id });
+        if (falhaDoDescarte) throw falhaDoDescarte;
+      }
       await settle(job.organization_id,job.id,jobClaim.acquired_at,err instanceof StaleServiceBoundaryError,message,
         err instanceof AgendaDeferredError
           ? { retryAt: err.protection.reavaliar_em ?? null, hold: err.protection.motivo !== "leitura_indisponivel" }
