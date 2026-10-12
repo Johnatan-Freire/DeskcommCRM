@@ -8929,5 +8929,14 @@
   "Destino da etiqueta": "Tag destination",
   "Card (comportamento atual)": "Card (current behavior)",
   "Contato do lead": "Lead contact",
-  "Sem contato vinculado, a etiqueta não é aplicada.": "With no linked contact, the tag is not applied."
+  "Sem contato vinculado, a etiqueta não é aplicada.": "With no linked contact, the tag is not applied.",
+  "Quadro": "Board",
+  "Semana": "Week",
+  "Semana anterior": "Previous week",
+  "Próxima semana": "Next week",
+  "Campo de data final": "End date field",
+  "Sem intervalo": "No range",
+  "Este funil não tem campo de data para montar o calendário.": "This pipeline has no date field to build the calendar.",
+  "Nenhum negócio com este campo de data.": "No deals with this date field.",
+  "Nenhum negócio com este campo de data neste período.": "No deals with this date field in this period."
 }
