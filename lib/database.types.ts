@@ -6422,6 +6422,7 @@ export type Database = {
           due_at: string
           emergency: boolean
           error_message: string | null
+          export_claimed_at: string | null
           external_customer_id: string | null
           id: string
           organization_id: string
@@ -6443,6 +6444,7 @@ export type Database = {
           due_at: string
           emergency?: boolean
           error_message?: string | null
+          export_claimed_at?: string | null
           external_customer_id?: string | null
           id?: string
           organization_id: string
@@ -6464,6 +6466,7 @@ export type Database = {
           due_at?: string
           emergency?: boolean
           error_message?: string | null
+          export_claimed_at?: string | null
           external_customer_id?: string | null
           id?: string
           organization_id?: string
