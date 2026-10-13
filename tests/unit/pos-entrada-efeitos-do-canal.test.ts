@@ -407,6 +407,21 @@ describe("opt-out fecha o negócio aberto como perdido", () => {
     expect(nasce, "o lead nasceu antes do fechamento").toBeGreaterThan(encerra);
   });
 
+  // Fork Capital Code: negócio em etapa PERMANENTE (exit_locked, 0404) — o banco
+  // recusa a saída com PT423. O contato continua bloqueado (o opt-out vale), a
+  // ingestão segue (o lead do resto do fluxo ainda é tratado) e nada lança.
+  it("etapa travada recusa o fechamento (PT423): o bloqueio vale e a ingestão segue", async () => {
+    leadsAbertos = [{ id: "lead-travado" }];
+    encerraDemanda.mockRejectedValueOnce(
+      Object.assign(new Error("etapa_travada"), { code: "PT423" }) as never,
+    );
+
+    await rodar({ texto: "PARAR" }); // não lança
+
+    expect(ultimoUpdate).toMatchObject({ is_blocked: true, blocked_reason: "stop_keyword" });
+    expect(encerraDemanda).toHaveBeenCalledTimes(1);
+  });
+
   it("mensagem que não pede para sair não fecha nada", async () => {
     leadsAbertos = [{ id: "lead-a" }];
 
