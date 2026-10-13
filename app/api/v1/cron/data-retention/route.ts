@@ -97,6 +97,12 @@ export const TAMANHO_DO_LOTE = 1000;
 export const MAX_LOTES = 20;
 
 export interface ResultadoDaRetencao {
+  /**
+   * As podas que falharam nesta rodada, nomeadas (upstream #2645, issue #2508).
+   * Vazia na rodada sã. Uma poda que falha não derruba as irmãs nem a retomada
+   * de anonimização do dia — ver `executarDreno`.
+   */
+  falhas: string[];
   jobs_apagados: number;
   auditoria_apagada: number;
   lotes_fila: number;
@@ -185,6 +191,28 @@ async function drenar(
 }
 
 /**
+ * Cada dreno falha SOZINHO (upstream #2645, issue #2508).
+ *
+ * Antes, o primeiro `throw` de um `drenar` abortava a rodada inteira: as podas
+ * seguintes não rodavam, a retomada de anonimização (SLA D+15) era PULADA e a
+ * trilha registrava só `{falhou, erro}` — o que já tinha sido apagado nas
+ * tabelas anteriores sumia da auditoria. Agora a falha vira uma linha nomeada
+ * em `falhas`, e a rodada segue: um grant que não veio num clone derruba UMA
+ * tabela, não o dia.
+ */
+async function executarDreno(
+  falhas: string[],
+  tarefa: () => Promise<{ apagadas: number; lotes: number; temResto: boolean }>,
+): Promise<{ apagadas: number; lotes: number; temResto: boolean }> {
+  try {
+    return await tarefa();
+  } catch (err) {
+    falhas.push(err instanceof Error ? err.message : String(err));
+    return { apagadas: 0, lotes: 0, temResto: false };
+  }
+}
+
+/**
  * Separado do handler HTTP para o teste exercitar a REGRA (o laço de lotes, o
  * teto, o corte no lote incompleto) sem montar request/auth — mesmo desenho de
  * `recoverStuckMessages`.
@@ -242,29 +270,30 @@ export async function podarHistorico(
     piso: RETENCAO_PROSPECCAO_DIAS_PISO,
   });
 
-  const jobs = await drenar(db, "fn_podar_fila_de_jobs", fila.dias);
-  const linhas = await drenar(db, "fn_expurgar_auditoria_vencida", auditoria.dias);
-  const eventos = await drenar(db, "fn_expurgar_espelho_da_agenda", espelho.dias);
+  const falhas: string[] = [];
+  const jobs = await executarDreno(falhas, () => drenar(db, "fn_podar_fila_de_jobs", fila.dias));
+  const linhas = await executarDreno(falhas, () => drenar(db, "fn_expurgar_auditoria_vencida", auditoria.dias));
+  const eventos = await executarDreno(falhas, () => drenar(db, "fn_expurgar_espelho_da_agenda", espelho.dias));
   // Quarta poda: os nonces de OAuth já queimados. O `state` vale dez minutos,
   // então um dia é folga de duas ordens de grandeza — e sem esta linha a tabela
   // cresceria para sempre, uma linha por conexão tentada, num produto que se
   // instala e ninguém monitora.
-  const nonces = await drenar(db, "fn_expurgar_nonces_de_oauth", 1);
+  const nonces = await executarDreno(falhas, () => drenar(db, "fn_expurgar_nonces_de_oauth", 1));
   // Quinta poda: a conversa da equipe com a IA sobre um caso (migration 0281).
   // O piso de 90 dias mora no CORPO da função; o número daqui é o que o
   // operador pediu, já elevado, e é ele que aparece no relatório da rodada.
-  const conversas = await drenar(db, "fn_expurgar_conversa_do_caso_vencida", conversaDoCaso.dias);
+  const conversas = await executarDreno(falhas, () => drenar(db, "fn_expurgar_conversa_do_caso_vencida", conversaDoCaso.dias));
   // Sexta poda: o registro da passagem do atendimento para uma pessoa (0291). O
   // piso de 90 dias mora no CORPO da função, como nas anteriores — e ela tem uma
   // segunda guarda que só ela tem: passagem NÃO RECONHECIDA nunca é apagada, em
   // nenhuma idade. Uma passagem aberta é alguém esperando resposta.
-  const passagens = await drenar(db, "fn_expurgar_passagens_vencidas", passagem.dias);
+  const passagens = await executarDreno(falhas, () => drenar(db, "fn_expurgar_passagens_vencidas", passagem.dias));
   // Sétima poda: o registro de entrega do aviso de caso no WhatsApp da equipe
   // (0292). O piso de 30 dias mora no CORPO da função, como nas anteriores. Ela
   // não guarda o texto do aviso (só o resumo criptográfico dele), então o que se
   // poda aqui é volume de operação — e é a poda de horizonte mais curto das
   // sete, porque a única pergunta que a linha responde é de semanas.
-  const avisosDeCaso = await drenar(db, "fn_expurgar_avisos_de_caso_vencidos", avisoDeCaso.dias);
+  const avisosDeCaso = await executarDreno(falhas, () => drenar(db, "fn_expurgar_avisos_de_caso_vencidos", avisoDeCaso.dias));
   // Oitava poda: o candidato de prospecção nativa vencido (migration 0408,
   // issue #1313). Padrão 365 / piso 90 — decisão do dono, alinhada ao
   // horizonte da conversa do caso e da captação. O piso mora no CORPO da
@@ -273,9 +302,10 @@ export async function podarHistorico(
   // (`suppression_salt is not null`) nunca entra — é ele que barra a
   // reimportação. É a primeira poda da casa cujo dado é de uma pessoa que
   // NUNCA falou com a empresa, então as duas guardas são a regra, não enfeite.
-  const prospeccaoDrenada = await drenar(db, "fn_expurgar_prospeccao_vencida", prospeccao.dias);
+  const prospeccaoDrenada = await executarDreno(falhas, () => drenar(db, "fn_expurgar_prospeccao_vencida", prospeccao.dias));
 
   return {
+    falhas,
     jobs_apagados: jobs.apagadas,
     auditoria_apagada: linhas.apagadas,
     espelho_apagado: eventos.apagadas,
@@ -437,14 +467,25 @@ async function handle(req: NextRequest): Promise<Response> {
   // Ver o cabeçalho: rodada que não apagou nada não é mutação. E rodada que
   // apagou SEMPRE deixa rastro — é isto que impede o expurgo do audit de ser
   // encolhimento silencioso da trilha.
-  if (houveEfeito(resultado)) {
+  // Poda que falhou também entra na trilha (é o laço de retorno: grant que não
+  // veio num clone, função ausente), agora COM as contagens das que funcionaram
+  // e com o nome de cada falha — antes a rodada inteira virava `{falhou, erro}`.
+  if (houveEfeito(resultado) || resultado.falhas.length > 0) {
     void audit({
       action: "retention.sweep_run",
       organizationId: null,
       bypassedRls: true,
-      metadata: resultado as unknown as Record<string, unknown>,
+      metadata: {
+        ...(resultado as unknown as Record<string, unknown>),
+        ...(resultado.falhas.length > 0
+          ? { falhou: true, erro: resultado.falhas.join(" | ").slice(0, 300) }
+          : {}),
+      },
       requestId,
     });
+  }
+  for (const falha of resultado.falhas) {
+    logger.error("[data-retention] poda falhou", { error: falha, requestId });
   }
 
   for (const falha of varredura.falhas) {
@@ -476,6 +517,15 @@ async function handle(req: NextRequest): Promise<Response> {
         },
       });
     }
+  }
+
+  // A anonimização do dia e as podas sãs já rodaram e foram auditadas acima; o
+  // cron ainda termina com erro quando alguma poda falhou, dizendo QUAIS.
+  if (resultado.falhas.length > 0) {
+    return fail("internal_error", "Failed to prune history.", 500, {
+      requestId,
+      details: { falhas: resultado.falhas },
+    });
   }
 
   return ok(

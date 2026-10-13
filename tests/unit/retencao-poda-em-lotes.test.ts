@@ -227,18 +227,43 @@ describe("podarHistorico — o laço de lotes", () => {
     expect(r.avisos[0]).toContain("PROSPECCAO_RETENTION_DAYS");
   });
 
-  it("erro do banco sobe — a poda não engole falha em silêncio", async () => {
+  it("erro do banco não é engolido: a poda que falhou sai NOMEADA em `falhas`", async () => {
     const db: PodaDb = {
       async rpc() {
         return { data: null, error: { message: "permission denied for table api_audit_log" } };
       },
     };
-    await expect(podarHistorico(db, {})).rejects.toThrow(/permission denied/);
+    const r = await podarHistorico(db, {});
+    expect(r.falhas.length).toBeGreaterThan(0);
+    expect(r.falhas.join(" ")).toMatch(/permission denied/);
+  });
+
+  // Upstream #2645 (issue #2508): antes, o primeiro erro abortava a rodada —
+  // as podas seguintes não rodavam e a retomada de anonimização (D+15) era pulada.
+  it("uma poda que falha não derruba as irmãs: as seguintes rodam e contam", async () => {
+    const chamadas: string[] = [];
+    const db: PodaDb = {
+      async rpc(nome) {
+        chamadas.push(nome);
+        if (nome === "fn_expurgar_auditoria_vencida") {
+          return { data: null, error: { message: "function does not exist" } };
+        }
+        return { data: 3, error: null };
+      },
+    };
+    const r = await podarHistorico(db, {});
+    expect(r.falhas).toEqual(["fn_expurgar_auditoria_vencida: function does not exist"]);
+    expect(r.auditoria_apagada).toBe(0);
+    // A primeira (antes da que falhou) e a última (depois dela) contaram.
+    expect(r.jobs_apagados).toBe(3);
+    expect(r.prospeccao_apagada).toBe(3);
+    expect(chamadas).toContain("fn_expurgar_prospeccao_vencida");
   });
 });
 
 describe("houveEfeito — as duas direções", () => {
   const base = {
+    falhas: [] as string[],
     jobs_apagados: 0,
     auditoria_apagada: 0,
     lotes_fila: 1,
