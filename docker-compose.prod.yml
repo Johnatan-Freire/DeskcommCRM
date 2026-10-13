@@ -151,9 +151,14 @@ services:
       # SÓ por `message` foram ZERO, e 1.642 chegaram só por `message.any` (os
       # que saíram de nós, que `message` não cobre). Superconjunto estrito.
       WHATSAPP_HOOK_EVENTS: "message.any,message.ack,message.edited,message.revoked,session.status,state.change"
-      # Nome EXATO da doc do WAHA (events#hmac-authentication): WHATSAPP_HOOK_HMAC
-      # não existe nele — sem o _KEY ele ignora e nunca assina.
-      WHATSAPP_HOOK_HMAC_KEY: ${WAHA_HMAC_SECRET}
+      # Fork Capital Code (porte do upstream #2268): em produção fica o nome
+      # ANTIGO de propósito. O nome que o WAHA documenta é WHATSAPP_HOOK_HMAC_KEY
+      # e, com ele, o WAHA passa a ASSINAR toda entrega — e o app recusa como
+      # `bad_signature` qualquer assinatura que não consiga conferir (segredo
+      # < 16 caracteres no .env, ou segredo por sessão diferente). Trocar aqui
+      # sem medir o .env da VPS antes derrubaria a entrada de mensagens.
+      # Passo manual para ligar, em docs/upstream/auditoria-atualizacao-2026-10.md.
+      WHATSAPP_HOOK_HMAC: ${WAHA_HMAC_SECRET}
       # WAHA lê WHATSAPP_DEFAULT_ENGINE (NÃO WAHA_DEFAULT_ENGINE — o nome errado
       # fazia cair no default WEBJS, engine com browser que trava/corrompe a sessão
       # quando o WhatsApp Web atualiza; NOWEB é websocket direto, estável e leve).

@@ -18,11 +18,24 @@ import { describe, expect, it } from "vitest";
  * a verificação inteira — e nada neste repositório a vigiava.
  *
  * Sem shell, sem docker: só lê arquivo. Roda no Windows e no CI.
+ *
+ * ── Adaptação no fork (Capital Code) ────────────────────────────────────────
+ *
+ * `docker-compose.prod.yml` — o que `scripts/deploy-vps.sh` sobe — mantém o
+ * nome ANTIGO de propósito. Com `_KEY` o WAHA passa a assinar, e o app recusa
+ * toda assinatura que não consegue conferir: se o `WAHA_HMAC_SECRET` da VPS
+ * tiver menos de 16 caracteres, ou houver segredo por sessão diferente, toda
+ * mensagem de entrada é perdida. A troca em produção é um passo manual, depois
+ * de medir o `.env` (ver docs/upstream/auditoria-atualizacao-2026-10.md).
+ * Este teste vigia as DUAS metades: dev/local assinam; prod não muda sozinho.
  */
 
 const RAIZ = process.cwd();
 
-const COMPOSES = ["docker-compose.yml", "docker-compose.prod.yml", "docker-compose.local.yml"] as const;
+const COMPOSES = ["docker-compose.yml", "docker-compose.local.yml"] as const;
+
+/** Produção do fork: troca só por passo manual, depois de medir o .env. */
+const COMPOSE_DE_PRODUCAO = "docker-compose.prod.yml";
 
 /** Linhas que DECLARAM variável (chave YAML), ignorando comentário e prosa. */
 function chavesDeHook(texto: string): string[] {
@@ -57,5 +70,14 @@ describe("o WAHA recebe o segredo sob o nome que ele documenta", () => {
         `${arquivo} não interpola \${WAHA_HMAC_SECRET} na chave do HMAC`,
       ).toContain("WHATSAPP_HOOK_HMAC_KEY: ${WAHA_HMAC_SECRET}");
     }
+  });
+
+  it("produção mantém o nome antigo até o passo manual (fork Capital Code)", () => {
+    const texto = fs.readFileSync(path.join(RAIZ, COMPOSE_DE_PRODUCAO), "utf8");
+    expect(chavesDeHook(texto)).toEqual(["WHATSAPP_HOOK_HMAC"]);
+    expect(texto).toContain("WHATSAPP_HOOK_HMAC: ${WAHA_HMAC_SECRET}");
+    expect(texto, "o compose de produção perdeu a explicação da exceção").toContain(
+      "docs/upstream/auditoria-atualizacao-2026-10.md",
+    );
   });
 });
