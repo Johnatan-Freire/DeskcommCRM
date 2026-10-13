@@ -121,7 +121,47 @@ idempotentes (`if not exists`, `create or replace`, `drop ... if exists`).
 
 ## 6. Testes
 
-PENDENTE_TESTES
+Todas as execuções na branch, máquina local (Linux, Node 22, Docker com `pgvector/pgvector:pg15`).
+
+| Comando | Resultado | Quantidade |
+|---|---|---|
+| `pnpm typecheck` | ✅ exit 0 | 0 erros |
+| `pnpm lint` | ✅ exit 0 | 0 erros (503 avisos, como antes) |
+| `pnpm lint:channels` | ✅ | nenhuma dívida nova |
+| `pnpm test:unit` (suíte inteira, sem caminho) | ✅ após correções | 17.687 casos passando em 1.724 arquivos; a última falha da rodada (`varredura-anon-e-o-ultimo-bloco`) foi corrigida e o arquivo reexecutado verde |
+| `pnpm test:db` (baseline install + update com `ON_ERROR_STOP=1`, molde Supabase recente, invariantes, RLS entre 2 organizações) | ✅ exit 0 | 358 arquivos, 2.890 casos passando (1 pulado) |
+| `pnpm test:shell` (kit/deploy) | ✅ exit 0 | todas as suítes verdes |
+| `pnpm build` (produção) | ✅ exit 0 | `Compiled successfully` |
+| `pnpm test:e2e` (Playwright) | ⏸ **não executado** | sem ambiente de navegador com Supabase local nesta máquina; roda no job `e2e` do CI |
+
+**Falhas encontradas e corrigidas durante a validação** (todas eram regressões da integração; na
+`main` os mesmos testes passavam):
+
+- `test:unit`, 1ª rodada: 17 falhas em 13 arquivos — MANIFEST duplicado, vocabulário de CHECK do
+  baseline, `en.json` sem idioma, entradas congeladas de arquivos inexistentes, testes de PRs que
+  assumiam suspensão de empresa/Jev/módulos, testes estáticos do envio desatualizados pelo #2338,
+  e o caso que dependia do #2541 (resolvido portando #2277 + #2541).
+- `test:db`, 1ª rodada: a **instalação limpa quebrava** (`jev_observacoes` inexistente) por 7 blocos
+  de carona no baseline; depois, 23 falhas em 6 invariantes (módulos inexistentes, colunas de
+  propostas/grupos, cenários sem agente no ar — o corte de ativação do fork recusa).
+- Um teste do fork quebrado desde a sessão 1 (`followup-turn-respeita-o-corte`, dublê sem a
+  consulta de inscrição viva do #2261) — corrigido.
+
+**Testes de proteção da missão (§8)**
+
+| # | Exigência | Prova |
+|---|---|---|
+| 1 | Integração escolar funciona | `identidade-escolar-antes-do-agente.test.ts` (43 casos com `pausa-barra-envio`), `sistema-escolar-gate.test.ts`, invariante `agentes-escola-configurados` |
+| 2 | Agentes comercial e acadêmico isolados | `politica-de-etapa-no-codigo.test.ts`, `destino-da-intencao-respeita-politica-de-etapa.test.ts` (novo, sabotado), invariante `trava-da-versao-publicada` (escopo imutável na versão publicada) |
+| 3 | Etapas travadas não se movem por caminho alternativo | invariante `politica-de-atendimento-por-etapa` (qualquer escritor → PT423), `transfereParaOFunil` recusa antes de clonar (novo), PARAR em etapa travada (novo, invariante + unitário sabotado) |
+| 4 | RLS preserva os limites da organização | `rls-isolation` (inclui `channel_schedules`), `rls-completude-varredura`, `admin-client-exige-filtro-de-tenant` (R3 nova) |
+| 5 | Inbox mantém as otimizações | invariante `conversas-escopo-uma-vez-por-consulta` (0560), `comando-da-conversa-sem-reavaliar-rls` |
+| 6 | Autenticação sem regressão | suítes de `lib/auth`, `proxy`, MFA e suporte temporário verdes; `requireRole` do fork preservado (o do upstream com suspensão não entrou) |
+| 7 | WAHA compatível | `waha-hook-hmac-key` (prod sem troca de nome), `contrato-do-webhook-waha`, `messages-handler-eco-duplicado` (eco sem duplicar, novo caso @lid) |
+| 8 | Webhooks sem perda/duplicação | `webhook-waha-pede-reentrega`, `recusa-do-webhook-waha-deixa-rastro`, unique de `external_id` canônico (#2525) |
+| 9 | Nada ignora `OUTBOUND_MESSAGING` | `trava-global-de-envio.test.ts` (varre todos os endpoints de envio), `capital-code-golden-invariants` |
+| 10 | Deploy compatível com a VPS | `test:shell` verde; compose de produção sem troca de HMAC; scheduler com os crons novos; passos manuais na seção 8 |
+
 
 ## 7. Tabela completa (443 PRs funcionais)
 
