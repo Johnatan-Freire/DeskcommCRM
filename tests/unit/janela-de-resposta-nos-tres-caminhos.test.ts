@@ -157,7 +157,7 @@ describe("retenção: o tipo do envio decide qual janela avalia", () => {
   beforeEach(() => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.mocked(loadAuthUser).mockResolvedValue({ idioma: "pt-BR" } as never);
-    vi.mocked(orgAtivaSemPortao).mockResolvedValue({ orgId: ORG, org_status: "active" } as never);
+    vi.mocked(resolveActiveOrg).mockResolvedValue({ orgId: ORG, role: "agent" } as never);
   });
 
   it("disparo retido às 3h NÃO é resolvido pela janela de RESPOSTA aberta", async () => {
