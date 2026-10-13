@@ -159,6 +159,21 @@ export interface PodaDb {
   ): Promise<{ data: number | null; error: { message: string } | null }>;
 }
 
+/**
+ * A falha de um dreno no MEIO (upstream #2653, refs #2508): os lotes que já
+ * passaram APAGARAM linhas, e o relatório da rodada tem de contá-las — senão a
+ * auditoria diz "0" sobre um expurgo que aconteceu. `temResto` fica verdadeiro:
+ * a ponta velha não foi drenada até o fim.
+ */
+class FalhaComParcial extends Error {
+  constructor(
+    message: string,
+    readonly parcial: { apagadas: number; lotes: number; temResto: boolean },
+  ) {
+    super(message);
+  }
+}
+
 async function drenar(
   db: PodaDb,
   nome:
@@ -179,7 +194,7 @@ async function drenar(
       p_retencao_dias: dias,
       p_limite: TAMANHO_DO_LOTE,
     });
-    if (error) throw new Error(`${nome}: ${error.message}`);
+    if (error) throw new FalhaComParcial(`${nome}: ${error.message}`, { apagadas, lotes, temResto: true });
     const n = data ?? 0;
     lotes += 1;
     apagadas += n;
@@ -208,7 +223,7 @@ async function executarDreno(
     return await tarefa();
   } catch (err) {
     falhas.push(err instanceof Error ? err.message : String(err));
-    return { apagadas: 0, lotes: 0, temResto: false };
+    return err instanceof FalhaComParcial ? err.parcial : { apagadas: 0, lotes: 0, temResto: false };
   }
 }
 

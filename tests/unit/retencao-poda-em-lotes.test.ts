@@ -261,6 +261,25 @@ describe("podarHistorico — o laço de lotes", () => {
   });
 });
 
+describe("a poda interrompida no meio leva o parcial (upstream #2653)", () => {
+  it("lotes cheios que passaram antes do erro entram na contagem, com tem_resto", async () => {
+    let chamadas = 0;
+    const db: PodaDb = {
+      async rpc(nome) {
+        if (nome !== "fn_podar_fila_de_jobs") return { data: 0, error: null };
+        chamadas += 1;
+        if (chamadas <= 2) return { data: TAMANHO_DO_LOTE, error: null };
+        return { data: null, error: { message: "statement timeout" } };
+      },
+    };
+    const r = await podarHistorico(db, {});
+    expect(r.falhas).toEqual(["fn_podar_fila_de_jobs: statement timeout"]);
+    expect(r.jobs_apagados).toBe(2 * TAMANHO_DO_LOTE);
+    expect(r.lotes_fila).toBe(2);
+    expect(r.fila_tem_resto).toBe(true);
+  });
+});
+
 describe("houveEfeito — as duas direções", () => {
   const base = {
     falhas: [] as string[],
