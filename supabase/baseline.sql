@@ -5600,9 +5600,24 @@ drop policy if exists "crm_leads_insert" on public.crm_leads;
 drop policy if exists "crm_leads_update" on public.crm_leads;
 drop policy if exists "crm_leads_delete" on public.crm_leads;
 
+-- 0656: a leitura do funil calcula o escopo do usuário UMA vez por consulta, não
+-- `fn_can_view_lead` por linha (mesmo defeito e mesmo conserto da 0560 nas
+-- conversas: definer não é embutida e cada chamada rodava `fn_user_role_in_org`
+-- duas vezes). A regra de visibilidade é a MESMA de `fn_can_view_lead`, que não
+-- muda; `fn_escopo_de_conversas` já devolve exatamente esse escopo (papel e
+-- `visibility_mode` da organização). Versão FINAL, no lugar da antiga. Vigiado
+-- por tests/invariants/funil-escopo-uma-vez-por-consulta.test.ts.
 create policy "crm_leads_select" on public.crm_leads
   for select using (
-    public.fn_can_view_lead(organization_id, owner_user_id)
+    (select public.fn_is_platform_admin())
+    or organization_id in (
+      select e.organization_id from public.fn_escopo_de_conversas() e where e.ve_todas)
+    or (owner_user_id = (select auth.uid())
+        and organization_id in (
+          select e.organization_id from public.fn_escopo_de_conversas() e))
+    or (owner_user_id is null
+        and organization_id in (
+          select e.organization_id from public.fn_escopo_de_conversas() e where e.ve_nao_atribuidas))
   );
 
 create policy "crm_leads_insert" on public.crm_leads
