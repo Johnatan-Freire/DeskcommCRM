@@ -35,18 +35,18 @@ vi.mock("@/lib/agent-engine/guardrails/before-send", () => ({
 // ---------------------------------------------------------------------------
 // 1. Rota de retenção — usa a janela de RESPOSTA para o "aberta agora".
 // ---------------------------------------------------------------------------
-// `orgAtivaDaApi` REAL (sobre o `orgAtivaSemPortao` mockado): é ela que decide o 403 da org suspensa.
+// A rota de retenção do fork resolve a org por `resolveActiveOrg` (sem suspensão de empresa).
 vi.mock("@/lib/auth/require-role", async (original) => ({
   ...(await original<Record<string, unknown>>()),
   requireRole: vi.fn(),
 }));
 vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: vi.fn() }));
 vi.mock("@/lib/supabase/server", () => ({ createClient: vi.fn() }));
-vi.mock("@/lib/auth/server", () => ({ loadAuthUser: vi.fn(), orgAtivaSemPortao: vi.fn() }));
+vi.mock("@/lib/auth/server", () => ({ loadAuthUser: vi.fn(), resolveActiveOrg: vi.fn() }));
 vi.mock("@/lib/audit", () => ({ audit: vi.fn(async () => undefined) }));
 vi.mock("@/lib/impersonate/support", () => ({ requireSupportWrite: vi.fn(async () => null) }));
 
-import { loadAuthUser, orgAtivaSemPortao } from "@/lib/auth/server";
+import { loadAuthUser, resolveActiveOrg } from "@/lib/auth/server";
 import { createClient } from "@/lib/supabase/server";
 import { GET as getRetention } from "@/app/api/v1/conversations/[id]/retention/route";
 
@@ -108,7 +108,7 @@ describe("retenção: o 'aberta agora' usa a janela da RESPOSTA", () => {
   beforeEach(() => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.mocked(loadAuthUser).mockResolvedValue({ idioma: "pt-BR" } as never);
-    vi.mocked(orgAtivaSemPortao).mockResolvedValue({ orgId: ORG, org_status: "active" } as never);
+    vi.mocked(resolveActiveOrg).mockResolvedValue({ orgId: ORG, role: "agent" } as never);
   });
 
   it("resposta retida por outside_window some quando a janela de RESPOSTA está aberta (3h)", async () => {

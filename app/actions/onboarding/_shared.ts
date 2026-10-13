@@ -9,8 +9,6 @@
 import { supportWriteError } from "@/lib/impersonate/support";
 import { loadAuthUser, resolveActiveOrg } from "@/lib/auth/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { ehOperante } from "@/lib/organizacao/operante";
-import { redirect } from "next/navigation";
 import type { OnboardingState } from "@/lib/schemas/onboarding";
 
 export class OnboardingError extends Error {
@@ -51,9 +49,9 @@ export async function requireOnboardingCtx(orgIdDaAba?: string): Promise<Onboard
   if (orgIdDaAba) {
     const membro = user.organizations.find((o) => o.organization_id === orgIdDaAba);
     if (membro) {
-      // A mesma régua do `resolveActiveOrg`: org não operante não recebe
-      // escrita — este caminho não passa por ele, então repete o portão.
-      if (!ehOperante(membro.org_status)) redirect("/account-suspended");
+      // (No upstream, aqui repete-se o portão de org suspensa do
+      // `resolveActiveOrg`. Este fork não tem suspensão de empresa — #1987 não
+      // portado — então não há estado "não operante" a barrar.)
       return {
         userId: user.id,
         orgId: membro.organization_id,

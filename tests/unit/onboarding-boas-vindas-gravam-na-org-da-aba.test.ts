@@ -21,8 +21,6 @@
  * - O caso identidade: aba para B, org ativa B → grava em B (normal).
  * - Vínculo perdido: a aba de A ficou aberta, a pessoa saiu de A, B está
  *   ativa → recusa, nada gravado (cair em B seria o #2068 por outra porta).
- * - Org da aba SUSPENSA (vínculo real): a mesma régua do `resolveActiveOrg`
- *   — redireciona para `/account-suspended`, nada gravado.
  * - Acompanhamento (suporte, sem vínculo): recusado. Hoje o layout do
  *   onboarding já expulsa essas sessões; o caso mostra a interação se não.
  *
@@ -231,15 +229,6 @@ describe("onboarding/welcome: boas-vindas gravam na organização da aba, não n
     expect(updates).toEqual([]);
   });
 
-  it("org da aba SUSPENSA (vínculo real), B ativa: vai para /account-suspended e não grava", async () => {
-    mundo.membros = [{ ...mA, org_status: "suspended" }, mB];
-    montarBanco();
-
-    await executar(formulario(ORG_A));
-
-    expect(mundo.redirects).toEqual(["/account-suspended"]);
-    expect(updates).toEqual([]);
-  });
 
   it("acompanhamento (suporte full, sem vínculo) na aba da org acompanhada é recusado", async () => {
     // Hoje o layout do onboarding expulsa a sessão de suporte antes desta
