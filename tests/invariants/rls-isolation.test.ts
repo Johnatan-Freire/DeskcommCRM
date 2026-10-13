@@ -640,6 +640,10 @@ export const TABLES = [
   "campaigns",
   "campaign_templates",
   "campaign_channel_sessions",
+  // migration 0626 (#2388) — a janela de manutenção de conexões: horários e
+  // canal alvo. Leitura org-flat; a escrita é do admin e do servidor. Vazar a
+  // linha entrega ao vizinho quando o outro vai mexer nas conexões dele.
+  "channel_schedules",
 ] as const;
 
 describe("RLS tenant isolation (fn_user_org_ids pattern)", () => {

@@ -30,18 +30,28 @@ const pool = new pg.Pool({
 beforeAll(() => seedGov());
 afterAll(() => pool.end());
 
+// Fork Capital Code: a 0503 do fork protege as colunas DELE (o upstream cobria
+// `proposal_ai_draft_enabled`, de propostas, que não existe aqui). O escopo do
+// agente (comercial × acadêmico) e a permissão de mover o funil não podem mudar
+// numa versão publicada — era um furo do fork fechado nesta integração.
 const COLUNAS: Array<[string, unknown]> = [
-  ["proposal_ai_draft_enabled", false],
   ["inbound_debounce_ms", 5000],
+  ["service_scope", "academico"],
+  ["can_update_lead_state", false],
 ];
 
 async function linha(id: string) {
   return (
     await pool.query(
-      "select status, proposal_ai_draft_enabled, inbound_debounce_ms from ai_agent_versions where id=$1",
+      "select status, inbound_debounce_ms, service_scope, can_update_lead_state from ai_agent_versions where id=$1",
       [id],
     )
-  ).rows[0] as { status: string; proposal_ai_draft_enabled: boolean; inbound_debounce_ms: number | null };
+  ).rows[0] as {
+    status: string;
+    inbound_debounce_ms: number | null;
+    service_scope: string | null;
+    can_update_lead_state: boolean | null;
+  };
 }
 
 it.each(COLUNAS)("%s não muda numa versão PUBLICADA", async (coluna, valor) => {
@@ -61,22 +71,25 @@ it("o caminho de versão nova continua: rascunho com os valores novos publica, e
   await pool.query("update channel_sessions set status='WORKING' where id=$1", [f.channel]);
   await pool.query("update ai_agents set published_version_id=$2 where id=$1", [f.agent, f.version]);
 
+  // Fork Capital Code: sem provedor `custom` / `base_url` (provedor personalizado
+  // não portado) — o rascunho reusa provedor, modelo e credencial da publicada.
   const credencial = randomUUID();
   await pool.query(
     `insert into ai_provider_credentials
        (id, organization_id, provider, label, api_key_encrypted, api_key_iv, api_key_tag,
-        api_key_last4, validated_at, models_available, base_url)
-     values ($1,$2,'custom','Ollama','\\x01'::bytea,'\\x02'::bytea,'\\x03'::bytea,
-             '4242', now(), $3, 'https://ollama.example/v1')`,
-    [credencial, f.org, ["qwen3:14b"]],
+        api_key_last4, validated_at, models_available)
+     select $1, organization_id, 'anthropic', 'Anthropic', '\\x01'::bytea, '\\x02'::bytea, '\\x03'::bytea,
+            '4242', now(), array['claude-sonnet-4-6']
+       from ai_agent_versions where id = $2`,
+    [credencial, f.version],
   );
-
   const rascunho = randomUUID();
   await pool.query(
     `insert into ai_agent_versions
        (id,organization_id,agent_id,version_number,system_prompt,provider,model,credential_id,channel_session_id,status)
-     values ($1,$2,$3,2,'Atenda quem chegar.','custom','qwen3:14b',$4,$5,'draft')`,
-    [rascunho, f.org, f.agent, credencial, f.channel],
+     select $1, organization_id, agent_id, 2, 'Atenda quem chegar.', 'anthropic', 'claude-sonnet-4-6', $3, channel_session_id, 'draft'
+       from ai_agent_versions where id = $2`,
+    [rascunho, f.version, credencial],
   );
   // Rascunho é editável — senão ninguém configura nada.
   for (const [coluna, valor] of COLUNAS) {
@@ -91,8 +104,9 @@ it("o caminho de versão nova continua: rascunho com os valores novos publica, e
 
   expect(await linha(rascunho)).toEqual({
     status: "published",
-    proposal_ai_draft_enabled: false,
     inbound_debounce_ms: 5000,
+    service_scope: "academico",
+    can_update_lead_state: false,
   });
   expect((await linha(f.version)).status).toBe("superseded");
 });

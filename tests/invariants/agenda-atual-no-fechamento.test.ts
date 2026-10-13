@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
 import pg from "pg";
+
+import { publicarAgenteNaSessao } from "./agente-no-ar";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { createInboundTurnHandler, latestCheckpoint } from "@/lib/agent-engine/agent/inbound-turn";
@@ -44,6 +46,9 @@ beforeAll(async () => {
     values($1,$2,'waha','agenda-test','WORKING','\\x00'::bytea)`,
     [session, org],
   );
+  // Fork Capital Code: turno sem agente no ar resolvido não responde (corte de
+  // ativação, migration 0403) — o cenário do upstream não tinha agente.
+  await publicarAgenteNaSessao(pool, org, session, { ativoDesde: "2020-01-01T00:00:00Z" });
   await pool.query(
     `insert into conversations(id,organization_id,contact_id,channel_session_id,status,is_group)
     values($1,$2,$3,$4,'open',false)`,
@@ -152,7 +157,10 @@ describe("o fechamento do motor recebe a reserva atual e a persiste", () => {
     await pool.query(
       `insert into messages(id,organization_id,conversation_id,channel_session_id,contact_id,type,direction,status,body,sent_via,sent_at)
       values($1,$2,$3,$4,$5,'text','inbound','delivered','Pode mudar para 17h?','external_device',$6)`,
-      [msg, org, conv, session, contact, agora],
+      // Fork Capital Code: `sent_at` real — o corte de ativação (0403) recusa
+      // mensagem com horário no futuro do banco (fail-closed), e o "agora" deste
+      // cenário é 2030. O que se mede aqui é a reserva, não o horário da mensagem.
+      [msg, org, conv, session, contact, new Date()],
     );
     await pool.query(`update job_queue set status='done' where status='pending'`);
     const { job } = await enqueueJob(pool, org, {

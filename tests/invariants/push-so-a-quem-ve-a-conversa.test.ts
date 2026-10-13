@@ -27,10 +27,6 @@ import {
 // Namespace exclusivo deste arquivo.
 const REVOGADO = "abab0611-1111-4000-8000-000000000001";
 const OUTRA_ORG = "abab0611-0000-4000-8000-000000000001";
-const CONTATO_GRUPO_SEM_DONO = "abab0611-3333-4000-8000-000000000001";
-const CONTATO_GRUPO_DO_A = "abab0611-3333-4000-8000-000000000002";
-const GRUPO_SEM_DONO = "abab0611-4444-4000-8000-000000000001";
-const GRUPO_DO_A = "abab0611-4444-4000-8000-000000000002";
 
 const SUB = {
   a: "https://push.invariant.test/agente-a",
@@ -48,6 +44,8 @@ function inscricoesQueVeem(org: string, conversa: string): string[] {
   return linha ? linha.split(",") : [];
 }
 
+// Fork Capital Code: sem conversa de grupo (cadeia de grupos não portada) — os
+// casos de grupo do upstream saíram; a régua 1:1 é a mesma função.
 beforeAll(() => {
   seedGov();
   sql(`
@@ -62,16 +60,6 @@ beforeAll(() => {
       ('${GOV_ORG}', '${GOV_MANAGER}', '${SUB.manager}', 'k', 'a'),
       ('${GOV_ORG}', '${REVOGADO}', '${SUB.revogado}', 'k', 'a')
     on conflict (endpoint) do nothing;
-    insert into public.contacts (id, organization_id, display_name, kind, source) values
-      ('${CONTATO_GRUPO_SEM_DONO}', '${GOV_ORG}', 'Push Grupo Sem Dono', 'whatsapp_group', 'whatsapp_group'),
-      ('${CONTATO_GRUPO_DO_A}', '${GOV_ORG}', 'Push Grupo do A', 'whatsapp_group', 'whatsapp_group')
-    on conflict do nothing;
-    insert into public.conversations
-      (id, organization_id, contact_id, channel_session_id, status, is_group, group_chat_id, assigned_to_user_id)
-    values
-      ('${GRUPO_SEM_DONO}', '${GOV_ORG}', '${CONTATO_GRUPO_SEM_DONO}', '${GOV_SESSION}', 'open', true, 'push-sem-dono@g.us', null),
-      ('${GRUPO_DO_A}', '${GOV_ORG}', '${CONTATO_GRUPO_DO_A}', '${GOV_SESSION}', 'claimed', true, 'push-do-a@g.us', '${GOV_AGENT_A}')
-    on conflict do nothing;
   `);
 });
 
@@ -113,21 +101,11 @@ describe("push de mensagem recebida: só a quem pode ver a conversa", () => {
     expect(lastLine(out)).toBe("service_role");
   });
 
-  it("grupo sem dono em own_and_unassigned: os dois agents e o manager", () => {
-    expect(inscricoesQueVeem(GOV_ORG, GRUPO_SEM_DONO).sort()).toEqual([SUB.a, SUB.b, SUB.manager].sort());
-  });
-
   // Daqui para baixo muda o visibility_mode do GOV_ORG (cada arquivo tem banco
   // próprio); os casos rodam em ordem.
   it("conversa sem dono em 'own': só o manager", () => {
     definirModo("own");
     expect(inscricoesQueVeem(GOV_ORG, GOV_CONV_UNASSIGNED)).toEqual([SUB.manager]);
-  });
-
-  it("grupo em 'own': o agent sem acesso não recebe; o dono e o manager recebem", () => {
-    definirModo("own");
-    expect(inscricoesQueVeem(GOV_ORG, GRUPO_SEM_DONO)).toEqual([SUB.manager]);
-    expect(inscricoesQueVeem(GOV_ORG, GRUPO_DO_A).sort()).toEqual([SUB.a, SUB.manager].sort());
   });
 
   it("conversa de outro agent em 'all': todos os membros ativos; vínculo revogado nunca", () => {

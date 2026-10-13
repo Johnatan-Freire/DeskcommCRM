@@ -1,6 +1,8 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import pg from "pg";
 
+import { publicarAgenteNaSessao } from "./agente-no-ar";
+
 import type * as InboundTurn from "@/lib/agent-engine/agent/inbound-turn";
 import type * as Providers from "@/lib/agent-engine/edge/llm/providers";
 import type * as Queue from "@/lib/agent-engine/queue/queue";
@@ -162,6 +164,9 @@ beforeAll(async () => {
      values ($1,$2,'turno-mudo-session','WORKING','\\x00'::bytea) on conflict (id) do nothing`,
     [SESSION, ORG],
   );
+  // Fork Capital Code: turno sem agente no ar resolvido não responde (corte de
+  // ativação, migration 0403) — o cenário do upstream não tinha agente.
+  await publicarAgenteNaSessao(pool, ORG, SESSION);
   await pool.query(
     `with v as (
        insert into playbook_versions (organization_id, layer, content)
