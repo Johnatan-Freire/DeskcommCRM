@@ -6,6 +6,7 @@
  * (admin client bypasses RLS). PII is NEVER logged — only ids and counts.
  */
 
+import { textoLegivelDeMencao } from "@/lib/notifications/mentions";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { citacaoDaLei, perfilDoPais } from "@/lib/legal/perfil-do-pais";
 import { logger } from "@/lib/logger";
@@ -1356,7 +1357,9 @@ export async function collectExportData(args: CollectArgs): Promise<ExportPayloa
           .order("id")
           .range(offset, offset + pageSize - 1);
         if (error) throw error;
-        conversation_notes.push(...(data ?? []));
+        // Corpo legível (upstream #2461): o token de menção leva o UUID do
+        // atendente, que não é dado do titular — sai como `@Nome`.
+        conversation_notes.push(...(data ?? []).map((n) => ({ ...n, body: textoLegivelDeMencao(n.body) })));
         if (!data || data.length < pageSize) break;
       }
     }
