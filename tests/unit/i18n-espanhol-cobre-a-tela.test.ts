@@ -1386,32 +1386,11 @@ const CHAVE_DE_RUNTIME_CONGELADA: { arquivo: string; expressao: string; motivo: 
       "código, então nenhuma entrada do dicionário pode conter a frase inteira",
   },
   {
-    arquivo: "app/api/v1/proposals/[id]/send/route.ts",
-    expressao: "`Item sem preço definido: ${semPreco.join(\", \")}. Defina o preço antes de enviar.`",
-    motivo:
-      "erro que lista os itens sem preço devolvidos pelo banco: a lista é dado de runtime, e a frase " +
-      "montada serve só à rota que dispara o envio",
-  },
-  {
     arquivo: "components/theme/theme-toggle.tsx",
     expressao: "`Tema: ${theme}. Cmd+Shift+L para alternar.`",
     motivo:
       "aria-label do alternador de tema montado com o nome do tema em runtime — tela de produto, e o " +
       "conserto (literal em cada ramo, claro/escuro) é decisão de produto declarada na issue #603",
-  },
-  {
-    arquivo: "app/api/v1/ai/jev/route.ts",
-    expressao: "soObserva",
-    motivo:
-      "valor lido de TAREFAS_DO_JEV no corpo da rota (linha 654), não é const de topo: é a recusa da " +
-      "própria rota, não frase de tela",
-  },
-  {
-    arquivo: "app/api/v1/conversations/[id]/drafts/route.ts",
-    expressao: "mensagem",
-    motivo:
-      "mensagem montada no corpo da rota antes do throw (linha 126), a partir do dado que o validador " +
-      "da requisição rejeitou",
   },
   {
     arquivo: "app/app/ads/meta/_components/MetaAdsClient.tsx",
@@ -1460,34 +1439,6 @@ const CHAVE_DE_RUNTIME_CONGELADA: { arquivo: string; expressao: string; motivo: 
     motivo:
       "fraseDoErro(entrega.erro_codigo), helper chamado dentro do componente (linha 101): o código vem " +
       "do servidor, não do código",
-  },
-  {
-    arquivo: "app/app/ai/providers/_components/CartaoDoJev.tsx",
-    expressao: "aoDecidir",
-    motivo:
-      "registro?.aoDecidir lido dentro do componente (linha 857): frase do registro do Jev, e o índice " +
-      "do registro é dado de runtime",
-  },
-  {
-    arquivo: "app/app/ai/providers/_components/CartaoDoJev.tsx",
-    expressao: "oQueFazer",
-    motivo:
-      "frasesDeFalha[falha.motivo] atribuído dentro do componente (linha 829): tabela fechada usada " +
-      "como variável local",
-  },
-  {
-    arquivo: "app/app/ai/providers/_components/CartaoDoJev.tsx",
-    expressao: "efeito",
-    motivo:
-      "doRegistro(tarefa.id)?.aoConfirmarDecidir (linha 1183): texto do registro da tarefa, origem de " +
-      "runtime para o resolvedor",
-  },
-  {
-    arquivo: "app/app/ai/providers/_components/CartaoDoJev.tsx",
-    expressao: "escolhida",
-    motivo:
-      "frase escolhida pela contagem de mensagens (linha 1288) e passada por t() antes do replace de " +
-      "{dias}: a chave existe só depois da escolha",
   },
   {
     arquivo: "app/app/metrics/_components/PerdasPanel.tsx",
@@ -1617,7 +1568,9 @@ describe("chave construída em runtime: t() não recebe o que o código não esc
     expect(
       varredura.sitios.filter((s) => s.forma === "template").length,
       "template com interpolação deixou de ser forma de runtime",
-    ).toBeGreaterThanOrEqual(5);
+      // Fork Capital Code: 4 medidos aqui — o quinto sítio do upstream mora num
+      // arquivo de cadeia não portada (Jev/propostas).
+    ).toBeGreaterThanOrEqual(4);
   });
 
   it("nenhuma chave construída em runtime passa por t() fora da dívida congelada", () => {

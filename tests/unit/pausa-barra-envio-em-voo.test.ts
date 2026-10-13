@@ -54,6 +54,11 @@ describe("pausa × resposta em voo", () => {
     const { readFileSync } = await import("node:fs");
     const handler = readFileSync("app/api/v1/messages/_handler.ts", "utf8");
     const checkBoundary = handler.slice(handler.indexOf("const checkBoundary = async () => {"));
-    expect(checkBoundary.slice(0, 800)).toMatch(/if \(ctx\.agentOperation\) await assertAgentOperationSupabase/);
+    // Desde o #2338 a REST só reconfere quando o escopo do job ainda não conferiu
+    // a MESMA operação pelo pg (guardServiceEffect, no mesmo corte) — a pausa entre
+    // o corte e o beforeSend segue barrada: ver envio-por-bolha-confere-uma-vez.test.ts.
+    expect(checkBoundary.slice(0, 1600)).toMatch(
+      /if \(ctx\.agentOperation && !operacaoJaConferida\)\s*await assertAgentOperationSupabase/,
+    );
   });
 });

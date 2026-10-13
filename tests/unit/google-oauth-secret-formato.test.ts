@@ -36,6 +36,12 @@ vi.mock("@/lib/auth/escritaDeAdminOuRecusa", () => ({
   escritaDeAdminOuRecusa: async () => ({ ok: true, ctx: { user: { id: USUARIO } } }),
 }));
 
+// Fork Capital Code: a ação do fork autentica por `requirePlatformAdmin` (a
+// `escritaDeAdminOuRecusa` acima é do upstream e fica só para o import não quebrar).
+vi.mock("@/lib/auth/requirePlatformAdmin", () => ({
+  requirePlatformAdmin: async () => ({ user: { id: USUARIO } }),
+}));
+
 vi.mock("@/lib/agenda/google/config", () => ({
   invalidarCredencialDoGoogle: () => {},
 }));

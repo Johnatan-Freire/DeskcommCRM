@@ -64,11 +64,11 @@ describe("motivoDaRecusaDaCriacao (#2297, caminho 4)", () => {
     expect(MOTIVO_DA_RECUSA_LABEL.erro_ao_criar_lead).toContain("funil e a etapa da fonte");
   });
 
-  it("todo rótulo tem tradução em es, en e zh-CN — chega ao `t()` por variável e nenhum varredor de tela o vê", () => {
-    const en = JSON.parse(readFileSync("lib/i18n/traducoes/en.json", "utf8")) as Record<string, string>;
+  // Fork Capital Code: sem catálogo `en` (o idioma inglês não foi portado).
+  it("todo rótulo tem tradução em es e zh-CN — chega ao `t()` por variável e nenhum varredor de tela o vê", () => {
     const zh = JSON.parse(readFileSync("lib/i18n/traducoes/zh-CN.json", "utf8")) as Record<string, string>;
     const semTraducao = Object.values(MOTIVO_DA_RECUSA_LABEL).filter(
-      (rotulo) => !DICIONARIO[rotulo]?.es || !en[rotulo] || !zh[rotulo],
+      (rotulo) => !DICIONARIO[rotulo]?.es || !zh[rotulo],
     );
     expect(semTraducao).toEqual([]);
   });

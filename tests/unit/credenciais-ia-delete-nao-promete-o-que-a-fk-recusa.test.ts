@@ -249,7 +249,8 @@ describe("a pré-checagem do DELETE enxerga o mesmo conjunto da FK", () => {
     const body = await res.json();
 
     expect(res.status).toBe(200);
-    expect(body.data).toEqual({ id, deleted: true, jev_desligado: false });
+    // Fork Capital Code: sem o Jev, a resposta não traz `jev_desligado`.
+    expect(body.data).toEqual({ id, deleted: true });
     const del = registros.find((x) => x.table === "ai_provider_credentials" && x.op === "delete");
     expect(del).toBeDefined();
     expect((del as Registro).filtros).toMatchObject({ id, organization_id: org });

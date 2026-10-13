@@ -78,7 +78,10 @@ describe("a demanda do caso encerrado ganha próximo passo (fix 0505 · #2035)",
     // Descrita nos DOIS lugares é erro do gate `manifest-x-migrations.test.ts`:
     // a linha na tabela do MANIFEST.md conflitava entre PRs e o GitHub ignora o
     // `merge=union`, deixando todo PR com migration CONFLICTING.
-    expect(MANIFEST).not.toContain("0505_demanda_marca_proximo_passo_com_o_caso");
+    // Fork Capital Code: a doutrina "só no -- manifest:" veio com o #2149, que NÃO
+    // foi portado — aqui o gate `manifest-x-migrations.test.ts` exige a linha no
+    // MANIFEST.md para toda migration, então a linha TEM de existir.
+    expect(MANIFEST).toContain("0505_demanda_marca_proximo_passo_com_o_caso");
   });
 
   describe("gatilho em agent_cases", () => {

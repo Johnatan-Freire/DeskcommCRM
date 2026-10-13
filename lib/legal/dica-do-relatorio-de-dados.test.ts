@@ -81,16 +81,6 @@ describe("no Brasil, fora do português, o texto é o da main", () => {
       'El informe de LGPD que se entrega al cliente incluye la RAZÓN SOCIAL de tu empresa, no el nombre de arriba, porque es ella quien responde legalmente por los datos. Revisa el campo "Razón social" en Configuración → Organización.',
     );
   });
-
-  it("em inglês (catálogo em construção), byte a byte a frase de antes do #2503", () => {
-    const catalogo = JSON.parse(
-      readFileSync(path.join(process.cwd(), "lib/i18n/traducoes/en.json"), "utf8"),
-    ) as Record<string, string>;
-    const en = (texto: string) => catalogo[texto] ?? texto;
-    expect(dicaDoRelatorio(en, BR)).toBe(
-      'The LGPD report delivered to the client shows your company\'s LEGAL NAME, not the name above — it\'s the legal name that\'s liable for the data. Check the "Legal name" field in Settings → Organization.',
-    );
-  });
 });
 
 describe("o call site usa a dica com o vocabulário do país", () => {

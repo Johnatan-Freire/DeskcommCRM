@@ -254,7 +254,7 @@ describe("J/M · escopo relido no beforeSend — o card pode ter mudado durante 
     const { readFileSync } = await import("node:fs");
     const handler = readFileSync("app/api/v1/messages/_handler.ts", "utf8");
     const bloco = handler.slice(handler.indexOf("const checkBoundary = async () => {"));
-    expect(bloco.slice(0, 1200)).toMatch(/assertEscopoDaEtapaSupabase\(supabase, ctx\.agentOperation, c\.contact_id\)/);
+    expect(bloco.slice(0, 2400)).toMatch(/assertEscopoDaEtapaSupabase\(supabase, ctx\.agentOperation, c\.contact_id\)/);
   });
 });
 

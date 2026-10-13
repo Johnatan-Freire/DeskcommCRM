@@ -24,9 +24,11 @@ const linhas = [
 vi.mock("@/lib/auth/server", () => ({
   loadAuthUser: vi.fn(async () => ({ id: "u1" })),
   mfaEmDivida: vi.fn(async () => false),
+  // Fork Capital Code: a rota resolve a organização por `resolveActiveOrg` (a
+  // `orgAtivaDaApi` é da suspensão de empresa #1987, não portada).
+  resolveActiveOrg: vi.fn(async () => ({ orgId: "org-1", role: "viewer" })),
 }));
 vi.mock("@/lib/auth/require-role", () => ({
-  orgAtivaDaApi: vi.fn(async () => ({ ok: true, org: { orgId: "org-1", role: "viewer" } })),
   requireRole: vi.fn(),
 }));
 vi.mock("@/lib/supabase/server", () => {
