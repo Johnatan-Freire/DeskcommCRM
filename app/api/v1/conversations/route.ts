@@ -66,6 +66,9 @@ export async function GET(req: NextRequest): Promise<Response> {
     unread: url.searchParams.get("unread") ?? undefined,
     channel_session_id: url.searchParams.get("channel_session_id") ?? undefined,
     search: url.searchParams.get("search") ?? undefined,
+    // A cerca `rota-le-todo-filtro-do-schema` cobra a chave: schema aceita,
+    // rota lê, handler filtra. Esquecer aqui é invisível para todo gate de tipo.
+    contact_id: url.searchParams.get("contact_id") ?? undefined,
     cursor: url.searchParams.get("cursor") ?? undefined,
     limit: url.searchParams.get("limit") ?? undefined,
   });

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useT } from "@/hooks/i18n/useT";
 import { ArrowRight, ChatCircle } from "@/lib/ui/icons";
 import type { Contact } from "@/lib/types/contacts";
+import { AbrirConversaDoLead, temAlvoParaAbrir } from "./AbrirConversaDoLead";
 
 /**
  * A porta para a conversa, dentro do dossiê.
@@ -29,14 +30,33 @@ import type { Contact } from "@/lib/types/contacts";
  * Ausência continua sendo estado normal: negócio criado à mão não tem contato, e
  * contato pode não ter conversa. Nesses casos o bloco não aparece, em vez de um
  * "sem conversa" cinza que ocuparia o mesmo espaço para não dizer nada.
+ *
+ * ─── Sem conversa, mas com contato: a AÇÃO (issue #1993) ─────────────────────
+ *
+ * O lead do webhook chega com telefone e sem thread. Para ele o bloco não some:
+ * vira o botão "Abrir conversa", que reaproveita a rota já existente, abre (ou
+ * reabre) a conversa do contato e leva para a Inbox. `contactId`/`phone` são
+ * opcionais porque a tela de CONTATO ainda não os passa — sem eles o bloco
+ * continua sumindo, como antes.
  */
 export function ConversaNoDossie({
   conversa,
+  contactId,
+  phone,
 }: {
   conversa: Contact["conversa"] | null | undefined;
+  contactId?: string | null;
+  phone?: string | null;
 }) {
   const t = useT();
-  if (!conversa) return null;
+  if (conversa === undefined) return null;
+  if (conversa === null) {
+    // Mesma guarda do card, antes de montar: sem contato e sem telefone o bloco
+    // continua sumindo (regra de sempre), em vez de desenhar um botão mudo.
+    return temAlvoParaAbrir(contactId, phone) ? (
+      <AbrirConversaDoLead contactId={contactId} phone={phone} variante="dossie" />
+    ) : null;
+  }
 
   const preview = conversa.preview?.trim();
 

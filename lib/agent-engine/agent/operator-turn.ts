@@ -472,7 +472,10 @@ export function createOperatorTurnHandler(deps: InboundTurnDeps) {
       try {
         mcp = await buildMcpTurnTools(
           deps.crmCfg,
-          { organizationId: tenantId, jobId: job.id },
+          // `leadId` aqui é o CONTATO do job (a fila guarda contact_id) — o mesmo
+          // escopo que o upstream passa (#2280): sem ele, a leitura do banco
+          // externo escopada pelo cliente não teria a quem se restringir.
+          { organizationId: tenantId, jobId: job.id, contactId: leadId },
           // A ponte lê `toolIds`; o papel guarda a lista dele em
           // `operatorToolIds`. A troca acontece AQUI, num ponto só, para que
           // nenhum caminho do Operador alcance a lista do Conversador por

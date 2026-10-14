@@ -18,6 +18,14 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { embedText } from "@/lib/ai/embed";
 import { MODELO_DE_EMBEDDING } from "@/lib/ai/embeddings/chave";
 
+/**
+ * Limiar padrão de similaridade para quem pergunta FORA do turno do agente
+ * (chat do caso). O turno lê `ai_agents.config.rag_similarity_threshold`, cujo
+ * padrão também é 0,40 — a mesma pergunta pelo mesmo material devolve o mesmo
+ * trecho pelas duas portas. (Trazido com o #1952 do upstream.)
+ */
+export const LIMIAR_PADRAO_BUSCA = 0.4;
+
 export interface TrechoEncontrado {
   chunk_id: string;
   knowledge_source_id: string | null;

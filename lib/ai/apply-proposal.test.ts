@@ -210,3 +210,66 @@ describe("applyProposal — guards e fluxo publish-por-ponteiro", () => {
     expect(publishAgentVersion).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * Regra do fork (Capital Code): aplicar uma proposta de playbook NÃO muda o
+ * escopo do agente. Antes do #2145 do upstream, a lista de colunas escrita à
+ * mão deixava `service_scope` e `can_update_lead_state` de fora — a versão nova
+ * nascia com o DEFAULT do banco (`comercial`, `true`) e o agente ACADÊMICO
+ * virava comercial, podendo mover o funil. Com `versionPayloadFrom`, a versão
+ * aplicada herda tudo da publicada; só o prompt muda.
+ */
+describe("applyProposal — o agente acadêmico continua acadêmico", () => {
+  it("a versão aplicada herda escopo, permissão de funil, ganho/perda e ferramentas do Sistema Escolar", async () => {
+    vi.mocked(publishAgentVersion).mockResolvedValueOnce({
+      ok: true,
+      agent_id: AGENT,
+      version_id: NEW_VERSION,
+      previous_version_id: PUB_VERSION,
+      published_at: "2026-10-13T12:00:00Z",
+    });
+    const academica = {
+      ...BASE_VERSION,
+      service_scope: "academico",
+      can_update_lead_state: false,
+      can_mark_won: false,
+      can_mark_lost: false,
+      pipeline_ids: ["99999999-0000-4000-8000-000000000009"],
+      sistema_escolar_tool_ids: ["consultar_aluno_sistema_escolar"],
+    };
+    const base = stubAdmin({
+      flywheel_distiller_proposals: [
+        { id: PROPOSAL, type: "playbook_bullet", content: "confirme o nome completo do aluno", applied_at: null },
+        {},
+      ],
+      ai_agents: [{ id: AGENT, published_version_id: PUB_VERSION }],
+      ai_agent_versions: [academica, { version_number: 3 }, { id: NEW_VERSION, version_number: 4 }],
+    });
+    const inseridos: Record<string, unknown>[] = [];
+    const admin = {
+      from: (tabela: string) => {
+        const chain = base.from(tabela) as unknown as Record<string, unknown>;
+        const inserirOriginal = chain["insert"] as (v: unknown) => unknown;
+        chain["insert"] = (v: Record<string, unknown>) => {
+          inseridos.push(v);
+          return inserirOriginal(v);
+        };
+        return chain;
+      },
+    } as unknown as SupabaseClient;
+
+    const r = await applyProposal(admin, { orgId: ORG, agentId: AGENT, proposalId: PROPOSAL, userId: USER });
+    expect(r).toEqual({ ok: true, versionId: NEW_VERSION, versionNumber: 4 });
+    expect(inseridos).toHaveLength(1);
+    expect(inseridos[0]).toMatchObject({
+      service_scope: "academico",
+      can_update_lead_state: false,
+      can_mark_won: false,
+      can_mark_lost: false,
+      pipeline_ids: academica.pipeline_ids,
+      sistema_escolar_tool_ids: academica.sistema_escolar_tool_ids,
+      status: "draft",
+    });
+    expect(String(inseridos[0]!.system_prompt)).toContain("confirme o nome completo do aluno");
+  });
+});

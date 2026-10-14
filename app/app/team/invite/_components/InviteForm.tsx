@@ -21,6 +21,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { ROLES, type Role } from "@/lib/schemas/team";
+import { rotuloDoPapel } from "@/lib/auth/types";
 import { descreverMotivoDaFalha } from "./motivo-da-falha";
 
 interface ResultState {
@@ -81,7 +82,7 @@ export function InviteForm() {
           />
         </div>
         <div className="space-y-2">
-          <Label htmlFor="role">Role</Label>
+          <Label htmlFor="role">{t("Papel")}</Label>
           <Select value={role} onValueChange={(v) => setRole(v as Role)}>
             <SelectTrigger id="role">
               <SelectValue />
@@ -89,7 +90,7 @@ export function InviteForm() {
             <SelectContent>
               {ROLES.map((r) => (
                 <SelectItem key={r} value={r}>
-                  {r}
+                  {t(rotuloDoPapel(r))}
                 </SelectItem>
               ))}
             </SelectContent>

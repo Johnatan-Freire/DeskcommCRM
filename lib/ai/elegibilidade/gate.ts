@@ -55,6 +55,11 @@ export function lerModoDoGate(raw: unknown): AiGateMode {
 }
 
 export interface EstadoDeElegibilidade {
+  /**
+   * `channel_sessions.metadata.disabled` — canal desligado pelo operador.
+   * Veto que vale SEMPRE (mesmo com o gate aberto): desativado nunca atende.
+   */
+  canalDesativado: boolean;
   /** `channel_sessions.metadata.ai_gate` já normalizado. */
   modo: AiGateMode;
   /** `contacts.force_human` — a trava irrevogável pelo agente (regra dura 2). */
@@ -76,6 +81,7 @@ export interface EstadoDeElegibilidade {
 }
 
 export type MotivoDeElegibilidade =
+  | "canal_desativado"
   | "gate_aberto"
   | "force_human"
   | "conversa_silenciada"
@@ -110,6 +116,9 @@ function silenciadoAgora(until: Date | number | null, agora: Date): boolean {
  * autorização positiva.
  */
 export function decidirElegibilidade(e: EstadoDeElegibilidade): DecisaoDeElegibilidade {
+  if (e.canalDesativado) {
+    return { permite: false, motivo: "canal_desativado", bloqueioPorAllowlist: false };
+  }
   if (e.forceHuman) {
     return { permite: false, motivo: "force_human", bloqueioPorAllowlist: false };
   }
@@ -179,6 +188,8 @@ export function normalizarInstante(v: Date | string | number | null | undefined)
  */
 export function montarEstadoDeElegibilidade(raw: {
   aiGate: unknown;
+  /** `channel_sessions.metadata.disabled` (cru); só `true` desliga. */
+  canalDesativado?: unknown;
   aiGateMode?: unknown;
   aiTestPhoneNumbers?: unknown;
   contactPhoneNumber?: string | null;
@@ -194,6 +205,7 @@ export function montarEstadoDeElegibilidade(raw: {
   const preGoLive = modo === "allowlist" && raw.aiGateMode === AI_GATE_PRE_GO_LIVE;
   const numerosDeTeste = lerNumerosDeTeste({ ai_test_phone_numbers: raw.aiTestPhoneNumbers });
   return {
+    canalDesativado: raw.canalDesativado === true,
     modo,
     forceHuman: raw.forceHuman === true,
     botSilencedUntil: normalizarInstante(raw.botSilencedUntil),

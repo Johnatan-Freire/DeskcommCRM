@@ -17,6 +17,7 @@ import type { Message } from "@/lib/types/messaging";
 import { CitationButton } from "@/components/ai/CitationButton";
 import { MediaRenderer } from "@/components/inbox/media/MediaRenderer";
 import { ContactCard } from "@/components/inbox/media/ContactCard";
+import { resolveSharedContact } from "@/lib/messaging/contact-card";
 import {
   extractCitations,
   isAiGeneratedMessage,
@@ -305,6 +306,8 @@ export function MessageBubble({
                 ? t("Esta mensagem foi apagada")
                 : citada.metadata?.crm_hidden_at
                 ? t("Mensagem ocultada no CRM")
+                : citada.type === "contact"
+                ? resolveSharedContact(citada)?.name || t("Contato")
                 : citada.body?.trim() || t("(sem texto)")}
             </div>
           </div>
@@ -358,7 +361,7 @@ export function MessageBubble({
           <>
             {hasMedia && (
               <div className={cn(message.body && "mb-1")}>
-                <MediaRenderer message={message} />
+                <MediaRenderer message={message} agora={agora} />
               </div>
             )}
 

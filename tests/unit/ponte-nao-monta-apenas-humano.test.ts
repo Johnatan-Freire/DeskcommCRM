@@ -81,7 +81,13 @@ describe("a ponte do turno respeita `apenasHumano`", () => {
     });
     // Controle positivo: se o filtro derrubasse tudo, o teste acima passaria
     // vacuamente e o agente ficaria sem ferramenta nenhuma.
-    expect(Object.keys(montadas).length).toBeGreaterThan(allTools.length - apenasHumano.length - 3);
+    // As de banco externo somem quando o módulo está desligado (#2537) — e aqui
+    // nenhum está ligado. Contadas à parte (como o upstream faz com `modulo`),
+    // para o "-3" seguir medindo só o filtro cego.
+    const deBancoExterno = allTools.filter((t) => t.name.endsWith("_external_data")).length;
+    expect(Object.keys(montadas).length).toBeGreaterThan(
+      allTools.length - apenasHumano.length - deBancoExterno - 3,
+    );
     expect(montadas).toHaveProperty("crm_search_contacts");
   });
 });

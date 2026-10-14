@@ -76,6 +76,12 @@ export interface DemandaSemProximoPasso {
   aberta_em: string;
   horas_aberta: number;
   origem: string;
+  /**
+   * Conversa VIGENTE da demanda (via `demanda_conversas`) — o deep-link que a
+   * tela abre para `#parte1` da #2035. `null` quando a demanda não tem conversa
+   * (o item cai na ficha do contato).
+   */
+  conversation_id: string | null;
 }
 
 export interface RadarDeRisco {
@@ -98,6 +104,12 @@ export interface OpcoesDoRadar {
   now?: Date;
   /** Apenas a rota humana passa o papel efetivo; as consultas usam seu client RLS. */
   humanRole?: Role;
+  /**
+   * Só este contato — o escopo do turno do agente. Vai no WHERE de cada
+   * consulta que carrega dado de cliente (negócios, demandas, propostas), antes
+   * do `SCAN_CAP`.
+   */
+  contactId?: string;
 }
 
 export async function carregaRadarDeRisco(
@@ -140,6 +152,7 @@ export async function carregaRadarDeRisco(
   if (funisArquivados.length > 0) {
     consultaDeLeads = consultaDeLeads.not("pipeline_id", "in", `(${funisArquivados.join(",")})`);
   }
+  if (opts.contactId) consultaDeLeads = consultaDeLeads.eq("contact_id", opts.contactId);
   const { data: leads, error: leadsErr } = await consultaDeLeads
     .order("last_activity_at", { ascending: true, nullsFirst: true })
     .limit(SCAN_CAP);
@@ -284,12 +297,14 @@ export async function carregaRadarDeRisco(
   // IA usa (lib/mcp/tools/retencao.ts), e a tela e o agente têm de dizer a
   // mesma coisa sobre o mesmo negócio. Reescrevê-la agora arriscaria essa
   // paridade sem necessidade; acrescentar não arrisca nada.
-  const { data: semPasso, error: demandaError } = await admin
+  let consultaDeDemandas = admin
     .from("demandas")
     .select("id, lead_id, contact_id, aberta_em, origem, contacts(name, display_name)")
     .eq("organization_id", organizationId)
     .is("fechada_em", null)
-    .is("proximo_passo", null)
+    .is("proximo_passo", null);
+  if (opts.contactId) consultaDeDemandas = consultaDeDemandas.eq("contact_id", opts.contactId);
+  const { data: semPasso, error: demandaError } = await consultaDeDemandas
     .order("aberta_em", { ascending: true })
     .limit(SCAN_CAP);
   if (demandaError) throw new Error(`radar_demandas_failed: ${demandaError.message}`);
@@ -358,6 +373,36 @@ export async function carregaRadarDeRisco(
     demandasVisiveis = demandasVisiveis.filter(d => d.lead_id ? visibleLeads.has(d.lead_id) : visibleLeadless.has(d.id));
   }
 
+  // #2035 (Parte 1) — o deep-link do item. A conversa VIGENTE da demanda sai
+  // de `demanda_conversas` (mesma fonte da visibilidade acima); sem conversation,
+  // o item cai na ficha do contato. Prefere uma conversa ABERTA (qualquer uma
+  // serve para o link do inbox); sem nenhuma aberta, a última linha que achou
+  // (a conversa arquivada ainda é o lugar onde o atendimento aconteceu).
+  // #2294 — o invariante que encolhe esta lista de verdade:
+  // `tests/invariants/caso-encerrado-marca-o-proximo-passo-da-demanda.test.ts`
+  // prova no Postgres real que a 0505 preenche o `proximo_passo` da demanda
+  // aberta sem passo — e só dela, a mesma `agent_case_id` noutra organização
+  // fica intocada —, é o que tira o item da seção sem reescrever o passo que
+  // uma pessoa já marcou.
+  const STATUS_ABERTOS_DA_CONVERSA = new Set(["open", "pending", "claimed", "ai_handling"]);
+  const conversaPorDemanda = new Map<string, { id: string; aberta: boolean }>();
+  if (demandasVisiveis.length > 0) {
+    const { data: links, error: linksErr } = await admin
+      .from("demanda_conversas")
+      .select("demanda_id, conversation_id, conversations(status)")
+      .eq("organization_id", organizationId)
+      .in("demanda_id", demandasVisiveis.map((d) => d.id));
+    if (linksErr) throw new Error(`radar_demanda_conversa_failed: ${linksErr.message}`);
+    for (const l of links ?? []) {
+      const status = ((l.conversations as { status?: string } | null)?.status) ?? null;
+      const aberta = status !== null && STATUS_ABERTOS_DA_CONVERSA.has(status);
+      const prev = conversaPorDemanda.get(l.demanda_id);
+      if (!prev || (aberta && !prev.aberta)) {
+        conversaPorDemanda.set(l.demanda_id, { id: l.conversation_id, aberta });
+      }
+    }
+  }
+
   const semProximoPasso: DemandaSemProximoPasso[] = demandasVisiveis.map((d) => {
     // O join do PostgREST vem como ARRAY mesmo em relação um-para-um.
     const rel = d.contacts as unknown as ContatoNomeavel[] | ContatoNomeavel | null;
@@ -371,6 +416,7 @@ export async function carregaRadarDeRisco(
         (now.getTime() - new Date(d.aberta_em as string).getTime()) / 3_600_000,
       ),
       origem: d.origem as string,
+      conversation_id: conversaPorDemanda.get(d.id as string)?.id ?? null,
     };
   });
 

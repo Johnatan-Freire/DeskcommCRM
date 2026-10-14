@@ -21,6 +21,7 @@ import {
   RETENCAO_FILA_DIAS_PISO,
   RETENCAO_PROSPECCAO_DIAS_PADRAO,
   RETENCAO_PROSPECCAO_DIAS_PISO,
+  RETENCAO_TETO_DIAS,
   interpretarRetencao,
 } from "@/lib/retencao/politica";
 
@@ -123,6 +124,32 @@ describe("interpretarRetencao — o knob nunca derruba o produto", () => {
     expect(r.aviso).toContain("piso");
   });
 
+  it("valor acima do teto é REDUZIDO ao teto, com aviso no MESMO formato do piso", () => {
+    // `AUDIT_LOG_RETENTION_DAYS=9999999` chegaria ao Postgres como
+    // `now() - make_interval(days => 9999999)` — antes do mínimo de
+    // `timestamptz` (4713 a.C.) → `timestamp out of range`, o cron
+    // `data-retention` lançava a cada rodada, e aquela tabela e as que vêm
+    // depois dela paravam de ser podadas (#2509). O formato do aviso espelha o
+    // do piso:
+    // `chave=valor está <preposição> do <limite> de N dias — usando N.`
+    const r = interpretarRetencao("9999999", {
+      chave: "AUDIT_LOG_RETENTION_DAYS",
+      padrao: 90,
+      piso: 7,
+    });
+    expect(r.dias).toBe(RETENCAO_TETO_DIAS);
+    expect(r.aviso).toBe(
+      `AUDIT_LOG_RETENTION_DAYS=9999999 está acima do teto de ${RETENCAO_TETO_DIAS} dias — ` +
+        `usando ${RETENCAO_TETO_DIAS}.`,
+    );
+  });
+
+  it("valor NO teto passa intacto — o teto é inclusivo", () => {
+    expect(
+      interpretarRetencao(String(RETENCAO_TETO_DIAS), { chave: "K", padrao: 90, piso: 7 }),
+    ).toEqual({ dias: RETENCAO_TETO_DIAS, aviso: null });
+  });
+
   it("valor válido passa inteiro, sem aviso", () => {
     expect(interpretarRetencao("400", { chave: "K", padrao: 90, piso: 7 })).toEqual({
       dias: 400,
@@ -200,18 +227,62 @@ describe("podarHistorico — o laço de lotes", () => {
     expect(r.avisos[0]).toContain("PROSPECCAO_RETENTION_DAYS");
   });
 
-  it("erro do banco sobe — a poda não engole falha em silêncio", async () => {
+  it("erro do banco não é engolido: a poda que falhou sai NOMEADA em `falhas`", async () => {
     const db: PodaDb = {
       async rpc() {
         return { data: null, error: { message: "permission denied for table api_audit_log" } };
       },
     };
-    await expect(podarHistorico(db, {})).rejects.toThrow(/permission denied/);
+    const r = await podarHistorico(db, {});
+    expect(r.falhas.length).toBeGreaterThan(0);
+    expect(r.falhas.join(" ")).toMatch(/permission denied/);
+  });
+
+  // Upstream #2645 (issue #2508): antes, o primeiro erro abortava a rodada —
+  // as podas seguintes não rodavam e a retomada de anonimização (D+15) era pulada.
+  it("uma poda que falha não derruba as irmãs: as seguintes rodam e contam", async () => {
+    const chamadas: string[] = [];
+    const db: PodaDb = {
+      async rpc(nome) {
+        chamadas.push(nome);
+        if (nome === "fn_expurgar_auditoria_vencida") {
+          return { data: null, error: { message: "function does not exist" } };
+        }
+        return { data: 3, error: null };
+      },
+    };
+    const r = await podarHistorico(db, {});
+    expect(r.falhas).toEqual(["fn_expurgar_auditoria_vencida: function does not exist"]);
+    expect(r.auditoria_apagada).toBe(0);
+    // A primeira (antes da que falhou) e a última (depois dela) contaram.
+    expect(r.jobs_apagados).toBe(3);
+    expect(r.prospeccao_apagada).toBe(3);
+    expect(chamadas).toContain("fn_expurgar_prospeccao_vencida");
+  });
+});
+
+describe("a poda interrompida no meio leva o parcial (upstream #2653)", () => {
+  it("lotes cheios que passaram antes do erro entram na contagem, com tem_resto", async () => {
+    let chamadas = 0;
+    const db: PodaDb = {
+      async rpc(nome) {
+        if (nome !== "fn_podar_fila_de_jobs") return { data: 0, error: null };
+        chamadas += 1;
+        if (chamadas <= 2) return { data: TAMANHO_DO_LOTE, error: null };
+        return { data: null, error: { message: "statement timeout" } };
+      },
+    };
+    const r = await podarHistorico(db, {});
+    expect(r.falhas).toEqual(["fn_podar_fila_de_jobs: statement timeout"]);
+    expect(r.jobs_apagados).toBe(2 * TAMANHO_DO_LOTE);
+    expect(r.lotes_fila).toBe(2);
+    expect(r.fila_tem_resto).toBe(true);
   });
 });
 
 describe("houveEfeito — as duas direções", () => {
   const base = {
+    falhas: [] as string[],
     jobs_apagados: 0,
     auditoria_apagada: 0,
     lotes_fila: 1,

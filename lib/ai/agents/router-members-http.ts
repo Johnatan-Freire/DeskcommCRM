@@ -31,7 +31,7 @@ export async function replaceRouterMembersHttp(
   }
   const existing = await admin
     .from("ai_router_members")
-    .select("id,agent_id,intent_name,intent_description,examples,position")
+    .select("id,agent_id,intent_name,intent_description,examples,pipeline_id,stage_id,position")
     .eq("organization_id", orgId)
     .eq("router_id", routerId);
   if (existing.error) throw existing.error;
@@ -49,6 +49,8 @@ export async function replaceRouterMembersHttp(
     .insert(
       members.map((member, position) => ({
         ...member,
+        pipeline_id: member.pipeline_id ?? null,
+        stage_id: member.stage_id ?? null,
         position,
         organization_id: orgId,
         router_id: routerId,

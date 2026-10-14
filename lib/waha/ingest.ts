@@ -31,6 +31,7 @@ import { canonicalPhoneBR } from "@/lib/channels/phone-variants";
 import { estamparAtribuicaoDoContato } from "@/lib/leads/atribuicao-de-anuncio";
 import { extrairEEstamparAtribuicaoGoogle } from "@/lib/plataformas-de-anuncio/google/atribuicao";
 import { extrairAtribuicaoWaha } from "@/lib/waha/atribuicao-de-anuncio";
+import { previaDaMensagem } from "@/lib/messaging/previa-da-mensagem";
 import type { createAdminClient } from "@/lib/supabase/admin";
 import { ackToStatus } from "@/lib/types/messaging";
 import type { WahaEnvelope, WahaPayload } from "@/lib/waha/envelope";
@@ -46,8 +47,9 @@ import {
   telefoneAlternativoDe,
   type ChatIdentity,
 } from "@/lib/waha/payload";
-import { bareWaMessageId, chatIdFromWaMessageId } from "@/lib/waha/message-id";
+import { bareWaMessageId, chatIdFromWaMessageId, wahaEchoExternalIds } from "@/lib/waha/message-id";
 import { logger } from "@/lib/logger";
+import { nomeDeArquivoLimpo } from "@/lib/messaging/media/nome-de-arquivo";
 import {
   ehNumeroInternoDeAviso,
   registrarMensagemIgnorada,
@@ -235,12 +237,36 @@ export function verifyHmacSha512(
   }
 }
 
-function previewFromMessage(p: WahaPayload): string {
-  if (p.body) return p.body.slice(0, 280);
-  const t = resolveMessageType(p);
-  return t !== "text" ? `[${t}]` : "";
+/**
+ * Prévia da conversa (`conversations.last_message_preview`), gravada pelos dois
+ * ramos da ingestão.
+ *
+ * ⚠️ O corpo NÃO é só `p.body`: o payload NOWEB de um cartão de contato vem sem
+ * `body` e o vCard mora em `_data.message.contactMessage.vcard` (#2742). Antes,
+ * essa função caía em `[contact]` e a lista da Inbox mostrava o literal no lugar
+ * do nome do contato compartilhado. `bodyOf` é o MESMO caminho que grava o
+ * `body` da mensagem; `previaDaMensagem` lê o `FN:` do cartão (`parseVcard`,
+ * #2712) e devolve `Contato: <nome>`.
+ */
+export function previewFromMessage(p: WahaPayload): string {
+  return previaDaMensagem(bodyOf(p), resolveMessageType(p));
 }
 
+/**
+ * Nome ORIGINAL do arquivo (`payload.media.filename`, o campo que o WAHA
+ * documenta em "Receive messages": `"some-file.pdf"` em documento, `null` em
+ * imagem/áudio) — a chave `metadata.media_filename` que o cartão do Inbox lê
+ * (#2613).
+ *
+ * Guarda por VALOR, não por presença: `null`, não-string e string em branco
+ * não é nome, e a chave só entra no `metadata` quando sobra algo. O path de
+ * storage é canônico (`{org}/{conversa}/{mensagem}.{ext}`) e apaga o nome que o
+ * cliente mandou — sem isto aqui, o cartão nunca deixa de mostrar o rótulo de
+ * extensão.
+ */
+export function mediaFilenameOf(p: WahaPayload): string | null {
+  return nomeDeArquivoLimpo(p.media?.filename);
+}
 
 /**
  * Upsert atômico de contato pela identidade canônica. Retorna null se a
@@ -376,6 +402,122 @@ async function mensagemIngeridaPorExternalId(
   return data ?? null;
 }
 
+/** Objeto simples (nem array, nem null) — a guarda para dado que vem do fio. */
+function objetoSimples(v: unknown): Record<string, unknown> | null {
+  return typeof v === "object" && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
+}
+
+/** String não-vazia — a régua do `texto` do envelope (`envelope.ts`), em runtime. */
+function textoNaoVazio(v: unknown): string | null {
+  return typeof v === "string" && v !== "" ? v : null;
+}
+
+/**
+ * O `contextInfo` do Baileys — o id cru da citada e a mensagem citada inteira.
+ *
+ * O formato varia: `extendedTextMessage.contextInfo` é o caso do texto (o
+ * medido em produção), uma resposta com mídia carrega o dela em
+ * `imageMessage.contextInfo`, e alguns formatos trazem direto na mensagem.
+ * Varrer os valores evita acoplar a leitura a uma lista de tipos que o WhatsApp
+ * muda sem avisar.
+ */
+function contextoDaCitacao(p: WahaPayload): Record<string, unknown> | null {
+  const msg = objetoSimples(p._data?.message);
+  if (!msg) return null;
+  const direto = objetoSimples(msg.contextInfo);
+  if (direto) return direto;
+  for (const valor of Object.values(msg)) {
+    const ctx = objetoSimples(objetoSimples(valor)?.contextInfo);
+    if (ctx) return ctx;
+  }
+  return null;
+}
+
+/**
+ * A CITAÇÃO DO "RESPONDER EM CIMA" (issue #2474): o id da mensagem respondida
+ * e, quando vem, o texto citado.
+ *
+ * Duas fontes porque o WAHA entrega as duas: o `replyTo` normalizado (medido em
+ * produção — `payload.replyTo.id` com o texto) e o cru em
+ * `_data.message.<tipo>.contextInfo` (`stanzaId` + `quotedMessage`), que é onde
+ * o texto aparece quando o normalizado não o traz. Sem id não há o que
+ * resolver: devolve `null` e a mensagem entra solta, como sempre entrou.
+ */
+function citacaoDoPayload(p: WahaPayload): { id: string; texto: string | null } | null {
+  const direto = objetoSimples(p.replyTo);
+  const contexto = contextoDaCitacao(p);
+  const id = textoNaoVazio(direto?.id) ?? textoNaoVazio(contexto?.stanzaId);
+  if (!id) return null;
+  const citada = objetoSimples(contexto?.quotedMessage);
+  const texto =
+    textoNaoVazio(direto?.body) ??
+    textoNaoVazio(citada?.conversation) ??
+    textoNaoVazio(objetoSimples(citada?.extendedTextMessage)?.text) ??
+    null;
+  return { id, texto };
+}
+
+/**
+ * Acha a linha da mensagem CITADA, presa à MESMA conversa.
+ *
+ * ─── Por que o filtro de conversa é obrigatório ─────────────────────────────
+ *
+ * A bolha renderiza a citada pelo TEXTO (`ChatThread` → `MessageBubble`), então
+ * apontar para fora da conversa mostraria conteúdo de outro atendimento. A
+ * régua (e o motivo) é a mesma do envio (`app/api/v1/messages/_handler.ts`). O
+ * filtro de organização vai explícito porque service role bypassa RLS.
+ *
+ * ─── Por que DUAS consultas ─────────────────────────────────────────────────
+ *
+ * O id do fio chega em formas diferentes conforme quem escreveu a citada:
+ * recebida do cliente é gravada COMPLETA (`false_<chat>_<bare>`), do nosso lado
+ * é BARE (`<bare>`) — e o `replyTo.id` pode chegar em qualquer uma delas, com o
+ * outro formato de chat (`@lid` × `@c.us`). Os candidatos de
+ * `wahaEchoExternalIds` (completo × bare × `true_<chat>_<bare>`, o composto
+ * legado e o eco de envio nosso) resolvem a maioria; o SUFIXO `_<bare>` fecha
+ * o resto, o mesmo raciocínio de `removerEcoDoProprioEnvio` (`_handler.ts`): o
+ * bare do WhatsApp tem 20+ caracteres aleatórios, então casar pela cauda
+ * alcança qualquer formato sem alcançar outra mensagem.
+ */
+async function resolverMensagemCitada(
+  admin: Admin,
+  organizationId: string,
+  conversationId: string,
+  citacaoId: string,
+  chatId: string,
+): Promise<string | null> {
+  const formas = wahaEchoExternalIds(citacaoId, chatId);
+  const { data, error } = await admin
+    .from("messages")
+    .select("id")
+    .eq("organization_id", organizationId)
+    .eq("conversation_id", conversationId)
+    .in("external_id", formas)
+    .limit(1)
+    .maybeSingle();
+  if (error) {
+    logger.warn("waha.ingest: não consegui ler a mensagem citada", { detail: error.message });
+  }
+  if (data) return (data as { id: string }).id;
+
+  const bare = bareWaMessageId(citacaoId);
+  // Teto de 16: um id real do WhatsApp tem 20+ caracteres aleatórios; abaixo
+  // disso o LIKE casaria outra mensagem por coincidência em vez de achar esta.
+  if (bare.length < 16) return null;
+  const { data: porSufixo, error: erroSufixo } = await admin
+    .from("messages")
+    .select("id")
+    .eq("organization_id", organizationId)
+    .eq("conversation_id", conversationId)
+    .like("external_id", `%\\_${bare}`)
+    .limit(1)
+    .maybeSingle();
+  if (erroSufixo) {
+    logger.warn("waha.ingest: não consegui ler a mensagem citada por sufixo", { detail: erroSufixo.message });
+  }
+  return (porSufixo as { id: string } | null)?.id ?? null;
+}
+
 async function handleInbound(
   admin: Admin,
   session: Session,
@@ -440,7 +582,16 @@ async function handleInbound(
   const conversationId = await upsertConversation(admin, session.organization_id, contactId, session.id);
   if (!conversationId) return;
 
+  // A citação da mensagem respondida (issue #2474), resolvida ANTES do insert
+  // porque o ponteiro é coluna da linha que está nascendo. Sem citação no
+  // payload, `null` — e a mensagem entra solta, como sempre entrou.
+  const citacao = citacaoDoPayload(p);
+  const citadaId = citacao
+    ? await resolverMensagemCitada(admin, session.organization_id, conversationId, citacao.id, chatId)
+    : null;
+
   const now = new Date().toISOString();
+  const nomeDoArquivo = mediaFilenameOf(p);
   const { data: insertedMessage, error: insertErr } = await admin
     .from("messages")
     .insert({
@@ -459,7 +610,19 @@ async function handleInbound(
       sent_via: "external_device",
       sent_at: dataDoTimestamp(p.timestamp, now),
       delivered_at: now,
-      metadata: { raw_type: p.type, ack_name: p.ackName },
+      reply_to_message_id: citadaId,
+      metadata: {
+        raw_type: p.type,
+        ack_name: p.ackName,
+        // O texto citado só entra quando NÃO há ponteiro: com a linha
+        // resolvida, a citada no banco é a fonte da verdade — uma edição
+        // posterior mudaria o que a tela mostra, e a cópia ficaria velha.
+        ...(citacao?.texto && !citadaId ? { reply_to_body: citacao.texto } : {}),
+        // Nome original do anexo (#2613). Só quando há nome: a chave nunca é
+        // gravada vazia, e gravação é de linha NOVA (o INSERT é o único caminho
+        // que escreve `metadata` aqui), então nada do que já está é sobrescrito.
+        ...(nomeDoArquivo ? { media_filename: nomeDoArquivo } : {}),
+      },
     })
     .select("id")
     .maybeSingle();
@@ -728,12 +891,20 @@ async function handleOutboundFromUserPhone(
   const conversationId = await upsertConversation(admin, session.organization_id, contactId, session.id);
   if (!conversationId) return;
 
+  // O operador também usa o "responder em cima" pelo celular (issue #2474):
+  // mesma extração e mesma resolução do inbound, presas a esta conversa.
+  const citacao = citacaoDoPayload(p);
+  const citadaId = citacao
+    ? await resolverMensagemCitada(admin, session.organization_id, conversationId, citacao.id, chatId)
+    : null;
+
   // Comando de controle vindo do celular (`#on`/`#off`). Só a mensagem INTEIRA
   // conta (ver `lib/escalacao/comando-de-canal.ts`). Reconhecer não é aplicar:
   // quem decide se vale é o interruptor do agente, lá embaixo.
   const comando = lerComandoDeControle(bodyOf(p));
 
   const now = new Date().toISOString();
+  const nomeDoArquivo = mediaFilenameOf(p);
   const { data: insertedOutbound, error: insertErr } = await admin
     .from("messages")
     .insert({
@@ -751,7 +922,15 @@ async function handleOutboundFromUserPhone(
       media_mime: mediaMimeOf(p),
       sent_via: "external_device",
       sent_at: dataDoTimestamp(p.timestamp, now),
-      metadata: { raw_type: p.type, fromMe: true },
+      reply_to_message_id: citadaId,
+      metadata: {
+        raw_type: p.type,
+        fromMe: true,
+        // Mesmo critério do inbound: cópia do texto só quando não há ponteiro.
+        ...(citacao?.texto && !citadaId ? { reply_to_body: citacao.texto } : {}),
+        // Mesma regra do inbound (#2613): nome só quando há nome.
+        ...(nomeDoArquivo ? { media_filename: nomeDoArquivo } : {}),
+      },
     })
     .select("id")
     .maybeSingle();
@@ -768,6 +947,44 @@ async function handleOutboundFromUserPhone(
       direcao: "outbound",
     });
     return;
+  }
+
+  // ── A CORRIDA COM O ENVIO — re-checar DEPOIS do insert ─────────────────
+  //
+  // `jaRegistrada` lê ANTES do insert, e o envio pode gravar o id do canal no
+  // meio: entre aquela leitura e o insert desta linha. Medido em 06/10/2026
+  // (campanha da Rodaê): o eco chegou 14 s depois do envio, a ingestão levou
+  // 4 s, e o envio confirmou dentro dessa janela. As duas guardas erraram ao
+  // mesmo tempo — `jaRegistrada` viu a linha sem id, `ehEcoDeEnvioNosso` a viu
+  // já `sent` (fora de "em voo") — e a IA foi pausada por 1 h por ter falado.
+  // A remoção do lado do envio também não alcançou: ela rodou antes desta
+  // linha existir.
+  //
+  // Aqui o id já está gravado, se o envio confirmou. Achando uma linha NOSSA
+  // com ele, esta é eco: sai a duplicata e não há pausa. A linha do envio nunca
+  // nasce `external_device`, e o `neq` do id protege a recém-inserida.
+  if (insertedOutbound?.id) {
+    const { data: nossa } = await admin
+      .from("messages")
+      .select("id")
+      .eq("organization_id", session.organization_id)
+      .in("external_id", idCandidates)
+      .neq("sent_via", "external_device")
+      .neq("id", insertedOutbound.id)
+      .limit(1)
+      .maybeSingle();
+    if (nossa) {
+      await admin
+        .from("messages")
+        .delete()
+        .eq("organization_id", session.organization_id)
+        .eq("id", insertedOutbound.id);
+      logger.info("waha.ingest: eco reconhecido depois do insert (corrida com o envio)", {
+        organization_id: session.organization_id,
+        external_id: p.id,
+      });
+      return;
+    }
   }
 
   await markConversation(admin, session.organization_id, conversationId, "outbound", previewFromMessage(p), now);

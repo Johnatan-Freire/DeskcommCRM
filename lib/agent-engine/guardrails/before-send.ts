@@ -283,6 +283,21 @@ export interface GateContext {
    * site, que é quem monta as tools).
    */
   agenda?: { active: boolean; ferramentas: readonly string[]; toolCalledThisTurn: boolean };
+  /**
+   * Retorno marcado pelo próprio assistente, para o `casePromiseGate` (#1873). Ausente =
+   * nenhum alívio: o gate exige caso como sempre, e o veto não cita follow-up.
+   *
+   * `disponivel` é o agente ter a tool `schedule_followup` neste turno — o veto só a ensina
+   * quando ela existe (ensinar ferramenta que o agente não tem é o segundo defeito que o
+   * `agenda.ferramentas` já evita). `agendadoNesteTurno` é ela ter EXECUTADO com sucesso
+   * neste turno, marcado no call site como o `agenda.toolCalledThisTurn`.
+   *
+   * O alívio só vale para promessa em que quem volta é o próprio assistente
+   * (`semanticPromise.retornoSoDoAssistente`). Promessa de que uma pessoa, setor ou análise
+   * interna vai agir continua exigindo caso: um lembrete para o assistente voltar a falar
+   * não põe ninguém da empresa para trabalhar.
+   */
+  followup?: { disponivel: boolean; agendadoNesteTurno: boolean };
 }
 
 /**
@@ -298,7 +313,16 @@ export type GateVerdict =
   // `skipped: 'not_applicable'` (invariante 4 de `docs/doctrine/restricao-de-canal.md`): a
   // restrição não existe NESTE canal. Passa, mas o trace registra que não se aplicava — um
   // `pass` silencioso apagaria a diferença entre "não regrediu" e "provo que não regrediu".
-  | { pass: true; waitMs?: number; amendBody?: string; skipped?: 'not_applicable' }
+  //
+  // `skipped: 'sandbox_send_embargo'` só nasce no Testar do agente (`preview.ts`, kind
+  // `sandbox`): o veto de pacing virou aviso porque ali não existe envio. Nunca na cadeia
+  // de produção.
+  | {
+      pass: true;
+      waitMs?: number;
+      amendBody?: string;
+      skipped?: 'not_applicable' | 'sandbox_send_embargo';
+    }
   | {
       pass: false;
       code: string;
@@ -421,7 +445,7 @@ export const semanticPromiseGate: Gate = {
  * Gate anti-alucinação de casos humanos (spec 15 §10.2, Wave 4) — a garantia DURA da
  * invariante "o lead nunca recebe promessa-de-humano sem caso aberto". Off (`casesEnabled`
  * false) ou já há caso (`hasOpenCase`/`openedCaseThisTurn` — a IA abriu um NESTE turno) =
- * no-op. Só veta quando o detector determinístico (`detectHumanPromise`) acha uma promessa
+ * no-op. Só veta quando ALGUMA das duas camadas — o detector léxico (`detectHumanPromise`) ou o sinal semântico (`ctx.semanticPromise?.prometeuRetornoHumano`) — acha uma promessa
  * clara na candidata E nenhum caso existe. O fail-safe de 2ª camada (auto-abre caso e
  * re-roda a cadeia) vive na orquestração do `send_message` (inbound-turn.ts), não aqui — o
  * gate em si é síncrono/puro como os demais. Posição 6.5 de `BEFORE_SEND_GATES` (logo após
@@ -434,13 +458,33 @@ export const casePromiseGate: Gate = {
   evaluate: (ctx) => {
     if (!ctx.casesEnabled) return { pass: true };
     if (ctx.hasOpenCase || ctx.openedCaseThisTurn) return { pass: true };
-    if (!detectHumanPromise(ctx.body, ctx.humanPromiseExtraTargets)) return { pass: true };
+    // Lê os DOIS sinais, em OU — e o OU é o ponto. Exigir os dois faria o conserto
+    // não consertar nada: o léxico é o filtro BARATO e continua valendo sozinho
+    // (roda sem chamada de modelo, e pega as duas frases que nomeiam o alvo colado
+    // ao verbo); o semântico pega as outras cinco — as 5 de 7 que a medição de
+    // 2026-09-16 flagrou vazando. O `?.` é obrigatório: o fixture de
+    // `tests/invariants/case-guardrail.test.ts` passa `semanticPromise: null`.
+    const lexico = detectHumanPromise(ctx.body, ctx.humanPromiseExtraTargets);
+    const semantico = ctx.semanticPromise?.prometeuRetornoHumano === true;
+    if (!lexico && !semantico) return { pass: true };
+    // #1873, opção (a): o follow-up agendado é destino SÓ para a promessa do próprio
+    // assistente ("te retorno amanhã de manhã"). O léxico só casa alvo humano explícito
+    // (equipe, setor, responsável…), então o que ele acusa exige caso sempre. E o
+    // `=== true` é fechado de propósito: o parser degrada `retornoSoDoAssistente` para
+    // `false` em qualquer falha, e falha nunca libera.
+    const promessaDoAssistente =
+      !lexico && ctx.semanticPromise?.retornoSoDoAssistente === true;
+    if (promessaDoAssistente && ctx.followup?.agendadoNesteTurno === true) return { pass: true };
     return {
       pass: false,
       code: 'case_promise_without_case',
       reason:
-        'Você prometeu envolver um humano mas não abriu um caso. Chame a tool ' +
-        'open_human_case (descrevendo o que precisa) OU reformule a mensagem sem prometer humano.',
+        promessaDoAssistente && ctx.followup?.disponivel === true
+          ? 'Você prometeu voltar a falar com o cliente, mas não deixou o retorno marcado. ' +
+            'Chame a tool schedule_followup (agendando o retorno) OU open_human_case ' +
+            '(descrevendo o que precisa) OU reformule a mensagem sem prometer retorno.'
+          : 'Você prometeu envolver um humano mas não abriu um caso. Chame a tool ' +
+            'open_human_case (descrevendo o que precisa) OU reformule a mensagem sem prometer humano.',
     };
   },
 };
@@ -1001,6 +1045,8 @@ export interface RunBeforeSendArgs {
    * no-op (retrocompatível com todo caller que não conhece agenda, ex.: `followup-turn.ts`).
    */
   agenda?: GateContext['agenda'];
+  /** Ver `GateContext.followup`. Ausente = o `casePromiseGate` não alivia nada. */
+  followup?: GateContext['followup'];
   /**
    * Pausa humana do turno, paga ANTES de o guardrail tomar conexão/transação
    * (issue #654) — o porquê está no corpo de `runBeforeSend`. Ausente (default)
@@ -1123,23 +1169,67 @@ const realSleep = (ms: number): Promise<void> => new Promise((resolve) => setTim
  * O que NÃO muda de ordem: a cadeia continua julgando (e o estado sob o lock sendo
  * lido) exatamente quando julgava, o `send` continua acontecendo sob o lock, uma vez
  * por re-run, e o `finalBody` pós-disclosure continua sendo o que vai ao canal. A
- * espera é a única coisa que sai da janela da transação.
+ * espera é uma das duas coisas que saem da janela da transação; a outra é o
+ * classificador semântico de promessa (F4-02), que roda antes de tomar conexão — ver
+ * o porquê no ponto da chamada.
  */
 export async function runBeforeSend(args: RunBeforeSendArgs): Promise<BeforeSendResult> {
   const gates = args.gates ?? BEFORE_SEND_GATES;
-  // Fora do lock (nem conexão tomada): aqui não existe transação aberta para segurar.
-  if (args.esperaForaDoLock) await args.esperaForaDoLock();
-  const client = await args.pool.connect();
-  try {
-    // ANTES do `begin`, de propósito: preferência de estilo não precisa do lock,
-    // e uma consulta que falha DENTRO da transação a deixa abortada — a próxima
-    // morreria com 25P02, longe daqui e com outro nome. Aqui, uma falha custa o
-    // default (desligado) e uma linha no trace, não o envio.
-    const estilo =
-      args.enforceInternalVocabulary !== undefined
-        ? await lerAjustesDeEstiloDaOrg(client, args.tenantId)
-        : null;
+  // ANTES de tomar conexão, de propósito: preferência de estilo não precisa do
+  // lock, e uma consulta que falha DENTRO da transação a deixa abortada — a
+  // próxima morreria com 25P02, longe daqui e com outro nome. Aqui, uma falha
+  // custa o default (desligado) e uma linha no trace, não o envio. Pelo pool,
+  // e não pela conexão do envio, para a classificação abaixo poder começar antes.
+  const estilo =
+    args.enforceInternalVocabulary !== undefined
+      ? await lerAjustesDeEstiloDaOrg(args.pool, args.tenantId)
+      : null;
 
+  // O campo `enforceInternalVocabulary` tem três estados no seam: AUSENTE nos
+  // envios determinísticos/humanos, `true` no texto normal do modelo e `false`
+  // somente no re-run do fail-safe do próprio modelo. A PRESENÇA, portanto, é
+  // o marcador estável de "este corpo foi escrito pela IA" sem fazer template,
+  // resposta aprovada ou aviso de código passarem por uma preferência de estilo.
+  const bodyDoModelo =
+    estilo !== null ? aplicarAjustesDeEstilo(args.body, estilo.ajustes) : args.body;
+
+  // ═══ A CONFERÊNCIA SEMÂNTICA DE PROMESSA RODA FORA DO LOCK ═══
+  //
+  // Camada semântica (F4-02): recebe o MESMO corpo final de estilo que os gates
+  // determinísticos receberão. Se classificasse `args.body`, a cadeia julgaria
+  // uma frase diferente da que efetivamente pode chegar ao cliente.
+  //
+  // É uma ida e volta ao modelo por envio. Ela rodava DENTRO da transação, com
+  // o `pg_advisory_xact_lock` do número na mão: todo outro envio do MESMO
+  // WhatsApp esperava a IA responder, e a conexão (de um pool de 10 para 8 jobs
+  // simultâneos) ficava presa o tempo inteiro.
+  //
+  // E não era só latência: era TRAVAMENTO. Lá dentro, a transação já segurava a
+  // trava de leitura de `contacts` (readStopFlags) enquanto o `runModelCall`
+  // gravava `llm_calls` — que tem FK para `contacts` — por OUTRA conexão do
+  // pool. Com um DDL na fila de `contacts`, o insert esperava o DDL, o DDL
+  // esperava esta transação e esta transação esperava o insert: um ciclo que o
+  // Postgres não detecta, porque uma das arestas mora no processo Node. Medido
+  // numa VPS por @AlecsanderAbreu (#2363), em 2026-10-02: 8m47s `idle in
+  // transaction`, o worker inteiro parado e ~10 min de 503 até alguém encerrar
+  // o DDL à mão.
+  //
+  // O veredito não depende de nada lido sob o lock — só do corpo —, então ele é
+  // calculado antes e entra no contexto dos gates no mesmo lugar de sempre.
+  // Começa junto com a pausa humana: o cliente espera o maior dos dois, não a soma.
+  const [, semanticPromise] = await Promise.all([
+    // Fora do lock (nem conexão tomada): aqui não existe transação aberta para segurar.
+    args.esperaForaDoLock ? args.esperaForaDoLock() : undefined,
+    args.classifyPromiseSemantic ? args.classifyPromiseSemantic(bodyDoModelo) : null,
+  ]);
+
+  const client = await args.pool.connect();
+  // #2506: consulta que estoura o query_timeout rejeita sem destruir o socket
+  // (pg 8.23). Liberar com release() sem erro devolve um cliente com a transação
+  // antiga aberta, e o pool o reempresta nela — o envio seguinte rodaria dentro
+  // da transação de quem falhou. O finally lê desta marcação.
+  let erroNaTransacao: Error | undefined;
+  try {
     await client.query('begin');
     // Serialização por número: dois workers no MESMO channel_session esperam a vez.
     await client.query('select pg_advisory_xact_lock(hashtext($1))', [args.channelSessionId]);
@@ -1175,14 +1265,6 @@ export async function runBeforeSend(args: RunBeforeSendArgs): Promise<BeforeSend
         replyPolicy?.body !== args.body)
     )
       throw new Error('reply_scope_mismatch');
-
-    // O campo `enforceInternalVocabulary` tem três estados no seam: AUSENTE nos
-    // envios determinísticos/humanos, `true` no texto normal do modelo e `false`
-    // somente no re-run do fail-safe do próprio modelo. A PRESENÇA, portanto, é
-    // o marcador estável de "este corpo foi escrito pela IA" sem fazer template,
-    // resposta aprovada ou aviso de código passarem por uma preferência de estilo.
-    const bodyDoModelo =
-      estilo !== null ? aplicarAjustesDeEstilo(args.body, estilo.ajustes) : args.body;
 
     const optedOut =
       args.optedOutThisTurn ||
@@ -1221,12 +1303,6 @@ export async function runBeforeSend(args: RunBeforeSendArgs): Promise<BeforeSend
     );
     // org de fonte confiável (RunBeforeSendArgs.tenantId = organization_id do row do job) — regra dura nº 1.
     const promise = await loadPromiseTable(client, args.tenantId);
-    // Camada semântica (F4-02): recebe o MESMO corpo final de estilo que os gates
-    // determinísticos receberão. Se classificasse `args.body`, a cadeia julgaria
-    // uma frase diferente da que efetivamente pode chegar ao cliente.
-    const semanticPromise = args.classifyPromiseSemantic
-      ? await args.classifyPromiseSemantic(bodyDoModelo)
-      : null;
     // Disclosure (F4-05): template por ponteiro da org + detecção de 1º outbound via
     // send_ledger (só conta se há template — sem template o gate é no-op de qualquer forma).
     const disclosure = await loadDisclosureTemplate(client, args.tenantId);
@@ -1280,6 +1356,7 @@ export async function runBeforeSend(args: RunBeforeSendArgs): Promise<BeforeSend
         : {}),
       internalVocabularyEnforced: args.enforceInternalVocabulary ?? false,
       ...(args.agenda !== undefined ? { agenda: args.agenda } : {}),
+      ...(args.followup !== undefined ? { followup: args.followup } : {}),
     };
 
     const { body: evaluatedBody, trace: traceDaCadeia, veto, throttleWaitMs } = evaluateBeforeSend(ctx, gates);
@@ -1363,10 +1440,11 @@ export async function runBeforeSend(args: RunBeforeSendArgs): Promise<BeforeSend
     await client.query('commit');
     return { status: 'sent', outcome, trace };
   } catch (err) {
+    erroNaTransacao = err instanceof Error ? err : new Error(String(err));
     await rollback(client, err);
     throw err;
   } finally {
-    client.release();
+    client.release(erroNaTransacao);
   }
 }
 
@@ -1479,6 +1557,27 @@ function emitTrace(log: Logger, channelSessionId: string, trace: GateTraceEntry[
 }
 
 /**
+ * O TIPO do envio que a tentativa representava — vocabulário fechado da coluna
+ * `before_send_traces.tipo_envio` (migration 0535, #2112).
+ *
+ * A cadeia já SABIA o tipo (`RunBeforeSendArgs.resposta`, 0495): o que faltava
+ * era gravá-lo. Sem ele, o aviso de retenção da conversa tratava TODO veto como
+ * resposta e avaliava a janela errada para um disparo de follow-up — e o
+ * histórico não tinha por onde responder "seguramos um DISPARO às 3h".
+ */
+export type TipoDeEnvio = 'resposta' | 'disparo';
+
+/**
+ * `resposta` verdadeiro vira `resposta`; TODO o resto (omitido = disparo, que é
+ * o default da cadeia) vira `disparo`. O `true` explícito porque é a direção
+ * que fecha: um valor inesperado não pode cair no lado que abre a janela de
+ * resposta às 3h para quem não escreveu nada.
+ */
+export function tipoDeEnvio(resposta: boolean | undefined): TipoDeEnvio {
+  return resposta === true ? 'resposta' : 'disparo';
+}
+
+/**
  * Persiste o trace da tentativa em `before_send_traces` para export por run (F4-08 acc 3).
  * Escrita autônoma no pool (não no client sob lock) para sobreviver ao rollback do veto.
  * Sem jobId = pula (testes sem job real). Falha de escrita → log.error + segue: a auditoria
@@ -1493,8 +1592,8 @@ async function persistTrace(
   try {
     const { rows } = await args.pool.query<{ id: string }>(
       `insert into before_send_traces
-         (organization_id, job_id, contact_id, channel_session_id, trace, vetoed_gate, vetoed_code)
-       values ($1, $2, $3, $4, $5, $6, $7)
+         (organization_id, job_id, contact_id, channel_session_id, trace, vetoed_gate, vetoed_code, tipo_envio)
+       values ($1, $2, $3, $4, $5, $6, $7, $8)
        returning id`,
       [
         args.tenantId,
@@ -1504,6 +1603,9 @@ async function persistTrace(
         JSON.stringify(trace),
         veto?.gate ?? null,
         veto?.code ?? null,
+        // #2112: o TIPO da tentativa vai junto com o veto — é o que permite ao
+        // aviso de retenção avaliar a janela certa (resposta × disparo).
+        tipoDeEnvio(args.resposta),
       ],
     );
     return rows[0]?.id ?? null;

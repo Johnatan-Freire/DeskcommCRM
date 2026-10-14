@@ -101,6 +101,7 @@ describe("runSilenceSweep entrega os agentes que HABILITAM o pointer", () => {
       ],
       loadSilentContactIds: recebido,
       loadTriggerNode: async () => ({ id: "trigger", pedeAgente: false }),
+      loadContatosComInscricaoViva: async () => new Set<string>(),
       insertEnrollment: async () => ({ inserted: true }),
     };
     await runSilenceSweep({

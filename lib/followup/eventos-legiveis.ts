@@ -410,6 +410,36 @@ export function descreveEvento(
         ...motor,
       };
     }
+    case "turn_discarded": {
+      // Mais de uma origem, um event_type: o descarte durante a PAUSA da
+      // inscrição (#2262/#2277) e a interrupção por quem assumiu (#2541). O
+      // motivo decide a frase — uma linha que aponta a causa errada é pior que
+      // uma linha genérica, porque não parece errada. (Fork: sem a suspensão de
+      // conta do upstream, que tinha a frase própria.)
+      if (texto(p.motivo) === "inscricao_pausada") {
+        return {
+          titulo: "O envio deste passo foi descartado porque a inscrição está pausada",
+          detalhe: "sai num envio novo quando a inscrição for retomada",
+          ...motor,
+        };
+      }
+      return {
+        titulo: "O envio deste passo foi descartado antes de sair",
+        detalhe: "sai num envio novo quando o fluxo voltar a andar",
+        ...motor,
+      };
+    }
+    case "held_by_return": {
+      // Como o adiamento pela janela: segurar NÃO é falhar. Sem esta linha o
+      // operador veria o fluxo parado por dias sem saber que ele está esperando
+      // o retorno que o agente combinou com o cliente.
+      const ate = quandoLegivel(p.next_eval_at, idioma);
+      return {
+        titulo: "Segurou o fluxo por causa de um retorno agendado",
+        detalhe: ate ? `volta a andar em ${ate}, um dia depois do retorno` : null,
+        ...motor,
+      };
+    }
     case "action_sent":
       return { titulo: "Mensagem enviada", detalhe: null, ...motor };
     case "ai_classified":

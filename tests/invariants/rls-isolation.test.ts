@@ -488,6 +488,16 @@ beforeAll(() => {
             (organization_id, campaign_id, channel_session_id)
             values (v_org, v_camp, v_sess);
         end if;
+        -- migration 0626 (#2388): a janela de manutencao de conexoes. Vazar a
+        -- linha entrega ao vizinho os horarios em que o outro vai mexer nas
+        -- conexoes dele e o canal alvo da janela — e a retomada programada
+        -- passaria a ser do vizinho. Select-then-insert, como as irmas acima.
+        if not exists (select 1 from public.channel_schedules where organization_id = v_org) then
+          insert into public.channel_schedules
+            (organization_id, channel_session_id, starts_at, ends_at)
+          values
+            (v_org, v_sess, timestamptz '2030-01-01 03:00:00+00', timestamptz '2030-01-01 05:00:00+00');
+        end if;
       end loop;
     end
     $seed$;
@@ -630,6 +640,10 @@ export const TABLES = [
   "campaigns",
   "campaign_templates",
   "campaign_channel_sessions",
+  // migration 0626 (#2388) — a janela de manutenção de conexões: horários e
+  // canal alvo. Leitura org-flat; a escrita é do admin e do servidor. Vazar a
+  // linha entrega ao vizinho quando o outro vai mexer nas conexões dele.
+  "channel_schedules",
 ] as const;
 
 describe("RLS tenant isolation (fn_user_org_ids pattern)", () => {

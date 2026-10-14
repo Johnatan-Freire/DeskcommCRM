@@ -24,13 +24,15 @@ import { ttlDaAutorizacaoMs } from "@/lib/ai/elegibilidade/gate";
 import { DEFAULT_CLASSIFIER_MODEL, isAiGatewayConfigured } from "@/lib/ai/gateway";
 import { resolverModeloDoPonto } from "@/lib/ai/gateway-binding";
 import { logInvocation } from "@/lib/ai/log-invocation";
-import { SENTIMENT_SYSTEM_PROMPT } from "@/lib/ai/prompts/sentiment";
+import { DEFAULT_SENTIMENT_THRESHOLD, SENTIMENT_SYSTEM_PROMPT } from "@/lib/ai/prompts/sentiment";
 import { AUTORIZADO, iaPodeResponderMensagemViaSupabase } from "@/lib/ai/ativacao/corte-de-ativacao";
 import type { EventRow } from "@/lib/event-log/dispatcher";
+import { MENSAGEM_REDIGIDA } from "@/lib/lgpd/cascata";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { podeGastarComIa } from "@/lib/ai/budget/pode-gastar";
+import { logger } from "@/lib/logger";
 
 const SENTIMENT_MODEL = DEFAULT_CLASSIFIER_MODEL; // "anthropic/claude-haiku-4-5"
-const DEFAULT_SENTIMENT_THRESHOLD = 0.3;
 const CLASSIFY_TIMEOUT_MS = 5_000;
 
 // As descrições NÃO são decoração: viram o JSON Schema da ferramenta que o
@@ -243,6 +245,25 @@ export async function processSentiment(event: EventRow): Promise<SentimentResult
         ? agentConfig["sentiment_threshold"]
         : DEFAULT_SENTIMENT_THRESHOLD;
 
+    // ── O teto de gasto de IA, ANTES da chamada paga (upstream #2583) ─────
+    //
+    // Este worker roda a cada mensagem recebida e não passa pelo seam do engine
+    // nem pelo guard do caminho legado — os dois lugares onde o teto vinculava.
+    // Com a organização em "parar a IA" e o teto estourado, o turno ia para a
+    // fila humana e o clima seguia cobrando cada mensagem. Depois dos guards
+    // baratos acima, para a leitura do orçamento não rodar à toa; "só avisar"
+    // e "desligado" seguem, só o veredito `bloquear` pula.
+    const orcamento = await podeGastarComIa(event.organization_id, "sentiment_classify");
+    if (!orcamento.pode) {
+      logger.info("[ai-sentiment-worker] clima não medido: teto de gasto de IA atingido", {
+        organization_id: event.organization_id,
+        message_id: messageId,
+        gasto_cents: orcamento.gastoCents,
+        teto_cents: orcamento.tetoCents,
+      });
+      return { skipped: true, reason: "orcamento_de_ia_estourado" };
+    }
+
     // ── Call LLM ──────────────────────────────────────────────────────────
     const abortController = new AbortController();
     const timeout = setTimeout(() => abortController.abort(), CLASSIFY_TIMEOUT_MS);
@@ -326,7 +347,12 @@ export async function processSentiment(event: EventRow): Promise<SentimentResult
       .from("messages")
       .update({ metadata: updatedMetadata })
       .eq("id", messageId)
-      .eq("organization_id", event.organization_id);
+      .eq("organization_id", event.organization_id)
+      // Mesma guarda LGPD do media-derive-worker (#1991): `updatedMetadata`
+      // parte da foto lida antes da classificação, e a anonimização que rodar
+      // nesse meio tempo zera `metadata` — regravá-la devolveria o dado
+      // apagado, mais a nota derivada, a uma mensagem já redigida.
+      .filter("body", "isdistinct", MENSAGEM_REDIGIDA);
 
     if (updateErr) {
       console.warn("[ai-sentiment-worker] metadata update failed", {

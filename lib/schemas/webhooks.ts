@@ -7,6 +7,7 @@
  * na primeira vez que alguém acrescentou um. Agora não há número a envelhecer.)
  */
 import { z } from "zod";
+import { webhookFormFieldsSchema } from "@/lib/webhooks/formulario";
 
 import {
   GATILHO_DE_DATA_DO_FUNIL,
@@ -66,7 +67,19 @@ export const conditionSchema = z.object({
 export const actionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("create_or_move_lead"), config: z.object({ pipeline_id: z.string().uuid(), stage_id: z.string().uuid() }) }),
   z.object({ type: z.literal("send_whatsapp_message"), config: z.object({ channel_session_id: z.string().uuid(), template: z.string().min(1).max(2000) }) }),
-  z.object({ type: z.literal("add_tag"), config: z.object({ tags: z.array(z.string().min(1).max(60)).min(1).max(10) }) }),
+  z.object({
+    type: z.literal("add_tag"),
+    config: z.object({
+      tags: z.array(z.string().min(1).max(60)).min(1).max(10),
+      /**
+       * #2498 — onde a etiqueta é GRAVADA: `card` (padrão, o comportamento de
+       * sempre) ou `contato`. Opcional de propósito: as regras antigas não têm
+       * a chave e continuam iguais; sem `.optional()` o zod descartaria o campo
+       * no save e a tela mostraria uma escolha que não foi gravada.
+       */
+      destino: z.enum(["card", "contato"]).optional(),
+    }),
+  }),
   z.object({ type: z.literal("assign_owner"), config: z.object({ user_id: z.string().uuid() }) }),
   z.object({
     type: z.literal("send_ai_message"),
@@ -110,10 +123,13 @@ export const createWebhookSourceSchema = z.object({
       email: z.array(z.string()).optional(),
     })
     .optional(),
+  form_fields: webhookFormFieldsSchema.optional(),
   secret: z.string().min(16).max(200).nullish(),
 });
 export const updateWebhookSourceSchema = createWebhookSourceSchema.partial().extend({
+  name: z.string().trim().min(1).max(120).optional(),
   is_active: z.boolean().optional(),
+  authorize_ai_on_capture: z.boolean().optional(),
 });
 
 export const createAutomationRuleSchema = z
@@ -132,7 +148,23 @@ export const createAutomationRuleSchema = z
      */
     trigger_config: z.record(z.string(), z.unknown()).optional(),
   })
-  .superRefine(exigirConfigDoGatilhoDeData);
+  .superRefine(exigirConfigDoGatilhoDeData)
+  .superRefine(exigirIdDaFonteWebhook);
+
+function exigirIdDaFonteWebhook(
+  regra: { trigger_config?: Record<string, unknown> },
+  ctx: z.RefinementCtx,
+): void {
+  const sourceId = regra.trigger_config?.webhook_source_id;
+  if (sourceId === undefined || sourceId === null) return;
+  if (typeof sourceId !== "string" || !z.string().uuid().safeParse(sourceId).success) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["trigger_config", "webhook_source_id"],
+      message: "Escolha uma fonte de formulário válida.",
+    });
+  }
+}
 
 /**
  * O gatilho de data sem a configuração dele é uma regra que NUNCA dispara — a
@@ -172,7 +204,8 @@ export const updateAutomationRuleSchema = z
       path: ["trigger_config"],
       message: "Escolha o funil, o campo de data e em quantos dias avisar.",
     });
-  });
+  })
+  .superRefine(exigirIdDaFonteWebhook);
 
 export type CreateWebhookSourceInput = z.infer<typeof createWebhookSourceSchema>;
 export type UpdateWebhookSourceInput = z.infer<typeof updateWebhookSourceSchema>;

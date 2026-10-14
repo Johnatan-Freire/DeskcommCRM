@@ -44,6 +44,8 @@ import {
 } from "@/hooks/ai/useRouters";
 import type { ClassifierModelOption } from "@/lib/ai/classifier-models";
 import type { ChannelSessionLite } from "../../agents/[id]/_components/AgentForm";
+// #2155 — funil/etapa de DESTINO da intenção: o card vai para o funil do produto.
+import { usePipelines, usePipelineStages } from "@/hooks/webhooks/useWebhookSources";
 import { useT } from "@/hooks/i18n/useT";
 
 interface AgentLite {
@@ -83,6 +85,30 @@ function classifierKeyFrom(config: Record<string, unknown> | null | undefined): 
   return `${provider}::${model}`;
 }
 
+/**
+ * #2415 — o recorte que o baseline, o `currentMembers` (payload do PUT) e a
+ * reidratação comparam: os mesmos campos de entrada/saída do membro. `?? null`
+ * nos de destino porque o SSR legado chega sem `pipeline_id`/`stage_id` e
+ * `undefined` não pode virar "tem destino" na comparação nem no salvamento.
+ */
+function camposDoMembro(m: {
+  agent_id: string;
+  intent_name: string;
+  intent_description: string;
+  examples: string[];
+  pipeline_id?: string | null;
+  stage_id?: string | null;
+}): RouterMemberInput {
+  return {
+    agent_id: m.agent_id,
+    intent_name: m.intent_name,
+    intent_description: m.intent_description,
+    examples: m.examples,
+    pipeline_id: m.pipeline_id ?? null,
+    stage_id: m.stage_id ?? null,
+  };
+}
+
 export function RouterEditorClient({
   routerId,
   initialState,
@@ -109,6 +135,31 @@ export function RouterEditorClient({
   const [draftMembers, setDraftMembers] = React.useState<DraftMember[]>(() =>
     members.map((m) => ({ ...m, key: m.id })),
   );
+  // #2415 — o estado inicial do SSR e a resposta do React Query podem divergir
+  // (o SELECT do page.tsx não trazia pipeline_id/stage_id; a API devolve os
+  // dois). Sem esta reidratação, o draft ficava preso ao estado incompleto e o
+  // destino do funil/etapa voltava para "Sem destino" a cada recarga. Só
+  // reidrata quando o draft ainda reflete o estado ANTERIOR: edição local
+  // pendente não é sobrescrita pelo refetch.
+  // #2569 — esta reidratação só existe se a BUSCA existir: ela dispara quando
+  // `members` muda, e `members` só muda se o detalhe ser buscado. Foi o que
+  // faltou depois do #2415 — `useRouter` recebia o snapshot do SSR como
+  // `initialData`, o React Query o tratava como dado fresco (staleTime de 30 s,
+  // sem refetch em foco) e o GET nunca acontecia ao abrir a tela: o seletor
+  // ficava em "Sem destino" mesmo com a API devolvendo o funil gravado. Por
+  // isso o hook agora usa `placeholderData` (hooks/ai/useRouters.ts).
+  const prevMembers = React.useRef(members);
+  React.useEffect(() => {
+    const anterior = prevMembers.current;
+    if (anterior === members) return;
+    prevMembers.current = members;
+    setDraftMembers((prev) => {
+      const aindaRefleteOAnterior =
+        JSON.stringify(prev.map(camposDoMembro)) === JSON.stringify(anterior.map(camposDoMembro));
+      if (!aindaRefleteOAnterior) return prev;
+      return members.map((m) => ({ ...m, key: m.id }));
+    });
+  }, [members]);
   const [deleteOpen, setDeleteOpen] = React.useState(false);
   const [testMessage, setTestMessage] = React.useState("");
 
@@ -123,22 +174,12 @@ export function RouterEditorClient({
       isActive: router.is_active,
       fallbackAgentId: router.fallback_agent_id ?? "",
       classifier: classifierKeyFrom(router.config),
-      members: members.map(({ agent_id, intent_name, intent_description, examples }) => ({
-        agent_id,
-        intent_name,
-        intent_description,
-        examples,
-      })),
+      members: members.map(camposDoMembro),
     }),
     [router, members],
   );
 
-  const currentMembers = draftMembers.map(({ agent_id, intent_name, intent_description, examples }) => ({
-    agent_id,
-    intent_name,
-    intent_description,
-    examples,
-  }));
+  const currentMembers = draftMembers.map(camposDoMembro);
 
   const dirty =
     name !== baseline.name ||
@@ -179,6 +220,8 @@ export function RouterEditorClient({
         intent_name: "",
         intent_description: "",
         examples: [],
+        pipeline_id: null,
+        stage_id: null,
       },
     ]);
   }
@@ -448,6 +491,80 @@ export function RouterEditorClient({
   );
 }
 
+
+/**
+ * #2155 — para onde o CARD vai quando a intenção casa. Sem destino, o agente é
+ * escolhido e o negócio fica no funil de entrada (o defeito da issue): o agente
+ * do produto não escreve num funil que não é o dele. `pipeline_id` sozinho vale —
+ * a etapa vira a primeira aberta do funil.
+ */
+function DestinoDoCard({
+  pipelineId,
+  stageId,
+  disabled,
+  onChange,
+}: {
+  pipelineId: string | null;
+  stageId: string | null;
+  disabled: boolean;
+  onChange: (patch: Partial<DraftMember>) => void;
+}) {
+  const t = useT();
+  const { data: pipelinesRes } = usePipelines();
+  const pipelines = pipelinesRes?.data ?? [];
+  const { data: boardRes } = usePipelineStages(pipelineId);
+  const stages = boardRes?.data?.stages ?? [];
+  return (
+    <div className="flex flex-wrap items-end gap-2" data-testid="seletor-de-destino">
+      <div className="min-w-48 flex-1 space-y-1">
+        <Label>{t("Funil de destino (opcional)")}</Label>
+        <Select
+          value={pipelineId ?? NONE}
+          onValueChange={(v) =>
+            // trocar de funil invalida a etapa: ela não pertence ao funil novo.
+            onChange(v === NONE ? { pipeline_id: null, stage_id: null } : { pipeline_id: v, stage_id: null })
+          }
+          disabled={disabled}
+        >
+          <SelectTrigger aria-label={t("Funil de destino (opcional)")}>
+            <SelectValue placeholder={t("Sem destino — só escolher o agente")} />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={NONE}>{t("Sem destino — só escolher o agente")}</SelectItem>
+            {pipelines.map((pl) => (
+              <SelectItem key={pl.id} value={pl.id}>
+                {pl.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      {pipelineId !== null && stages.length > 0 && (
+        <div className="min-w-40 flex-1 space-y-1">
+          <Label>{t("Etapa de destino")}</Label>
+          <Select
+            value={stageId ?? AUTO}
+            onValueChange={(v) => onChange({ stage_id: v === AUTO ? null : v })}
+            disabled={disabled}
+          >
+            <SelectTrigger aria-label={t("Etapa de destino")}>
+              <SelectValue placeholder={t("Primeira etapa aberta")} />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={AUTO}>{t("Primeira etapa aberta")}</SelectItem>
+              {stages.map((st) => (
+                <SelectItem key={st.id} value={st.id}>
+                  {st.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function IntentRow({
   member,
   agents,
@@ -520,6 +637,12 @@ function IntentRow({
           maxLength={2000}
         />
       </div>
+      <DestinoDoCard
+        pipelineId={member.pipeline_id ?? null}
+        stageId={member.stage_id ?? null}
+        disabled={disabled}
+        onChange={onChange}
+      />
       <ExamplesInput
         value={member.examples}
         onChange={(examples) => onChange({ examples })}

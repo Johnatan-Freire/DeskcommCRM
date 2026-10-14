@@ -126,6 +126,11 @@ describe("inventário: quem reage a uma linha nova", () => {
         "conversations.trg_routing_assignment_changed",
         "conversations.trg_service_reopened_routing",
         "conversations.trg_service_stamp_status",
+        // 0645 (#2739, auditado no merge com a integração upstream): BEFORE
+        // INSERT/UPDATE de contact_id. Só copia `force_human OR is_blocked` do
+        // contato para `contato_trava_humano` na própria linha — sem evento, sem
+        // escrita em outra tabela. A conversa importada nasce com a trava certa.
+        "conversations.trg_conversa_calcula_trava_do_contato",
         // contacts — todos de UPDATE, acionados por `fn_upsert_wa_contact` IGUAL
         // ao webhook ao vivo; os de anonimização/opt-out/humano só agem quando
         // `is_anonymized`/`is_blocked`/`force_human` MUDAM, e a importação não
@@ -136,6 +141,11 @@ describe("inventário: quem reage a uma linha nova", () => {
         "contacts.trg_contacts_updated_at",
         "contacts.trg_contato_anonimizado_encerra_roteiro",
         "contacts.trg_contato_colunas_de_cliente",
+        // 0645 (#2739): AFTER UPDATE OF force_human, is_blocked. Só regrava o
+        // bit `contato_trava_humano` nas conversas do contato. A importação não
+        // muda nenhuma das duas colunas (como os demais de humano/opt-out
+        // acima), então nem dispara.
+        "contacts.trg_contato_atualiza_trava_nas_conversas",
         "contacts.trg_contato_encerra_roteiro_com_humano_ou_opt_out",
         "contacts.trg_google_redact_contact",
         "contacts.trg_meet_redact_contact",

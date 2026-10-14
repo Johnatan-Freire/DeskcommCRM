@@ -2388,8 +2388,10 @@ export type Database = {
           intent_description: string
           intent_name: string
           organization_id: string
+          pipeline_id: string | null
           position: number
           router_id: string
+          stage_id: string | null
           updated_at: string
         }
         Insert: {
@@ -2401,8 +2403,10 @@ export type Database = {
           intent_description: string
           intent_name: string
           organization_id: string
+          pipeline_id?: string | null
           position?: number
           router_id: string
+          stage_id?: string | null
           updated_at?: string
         }
         Update: {
@@ -2414,8 +2418,10 @@ export type Database = {
           intent_description?: string
           intent_name?: string
           organization_id?: string
+          pipeline_id?: string | null
           position?: number
           router_id?: string
+          stage_id?: string | null
           updated_at?: string
         }
         Relationships: [
@@ -2446,6 +2452,20 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "ai_routers"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ai_router_members_pipeline_mesma_org"
+            columns: ["organization_id", "pipeline_id"]
+            isOneToOne: false
+            referencedRelation: "crm_pipelines"
+            referencedColumns: ["organization_id", "id"]
+          },
+          {
+            foreignKeyName: "ai_router_members_stage_mesma_org"
+            columns: ["organization_id", "stage_id"]
+            isOneToOne: false
+            referencedRelation: "crm_stages"
+            referencedColumns: ["organization_id", "id"]
           },
         ]
       }
@@ -2801,6 +2821,7 @@ export type Database = {
           id: string
           job_id: string
           organization_id: string
+          tipo_envio: string | null
           trace: Json
           vetoed_code: string | null
           vetoed_gate: string | null
@@ -2812,6 +2833,7 @@ export type Database = {
           id?: string
           job_id: string
           organization_id: string
+          tipo_envio?: string | null
           trace: Json
           vetoed_code?: string | null
           vetoed_gate?: string | null
@@ -2823,6 +2845,7 @@ export type Database = {
           id?: string
           job_id?: string
           organization_id?: string
+          tipo_envio?: string | null
           trace?: Json
           vetoed_code?: string | null
           vetoed_gate?: string | null
@@ -2920,6 +2943,7 @@ export type Database = {
           rescheduled_from_id: string | null
           source: string
           starts_at: string
+          starts_at_marked_at: string | null
           status: string
           time_zone: string
           title: string
@@ -2986,6 +3010,7 @@ export type Database = {
           rescheduled_from_id?: string | null
           source?: string
           starts_at: string
+          starts_at_marked_at?: string | null
           status?: string
           time_zone?: string
           title: string
@@ -3052,6 +3077,7 @@ export type Database = {
           rescheduled_from_id?: string | null
           source?: string
           starts_at?: string
+          starts_at_marked_at?: string | null
           status?: string
           time_zone?: string
           title?: string
@@ -4204,6 +4230,7 @@ export type Database = {
           channel: string
           channel_session_id: string
           contact_id: string
+          contato_trava_humano: boolean
           created_at: string
           current_demanda_id: string | null
           group_chat_id: string | null
@@ -4248,6 +4275,7 @@ export type Database = {
           channel?: string
           channel_session_id: string
           contact_id: string
+          contato_trava_humano?: boolean
           created_at?: string
           current_demanda_id?: string | null
           group_chat_id?: string | null
@@ -4292,6 +4320,7 @@ export type Database = {
           channel?: string
           channel_session_id?: string
           contact_id?: string
+          contato_trava_humano?: boolean
           created_at?: string
           current_demanda_id?: string | null
           group_chat_id?: string | null
@@ -6393,6 +6422,7 @@ export type Database = {
           due_at: string
           emergency: boolean
           error_message: string | null
+          export_claimed_at: string | null
           external_customer_id: string | null
           id: string
           organization_id: string
@@ -6414,6 +6444,7 @@ export type Database = {
           due_at: string
           emergency?: boolean
           error_message?: string | null
+          export_claimed_at?: string | null
           external_customer_id?: string | null
           id?: string
           organization_id: string
@@ -6435,6 +6466,7 @@ export type Database = {
           due_at?: string
           emergency?: boolean
           error_message?: string | null
+          export_claimed_at?: string | null
           external_customer_id?: string | null
           id?: string
           organization_id?: string
@@ -7570,6 +7602,7 @@ export type Database = {
       }
       platform_branding: {
         Row: {
+          accent_dark_hex: string | null
           accent_hex: string | null
           app_name: string | null
           fallback_at: string | null
@@ -7583,6 +7616,7 @@ export type Database = {
           updated_by: string | null
         }
         Insert: {
+          accent_dark_hex?: string | null
           accent_hex?: string | null
           app_name?: string | null
           fallback_at?: string | null
@@ -7596,6 +7630,7 @@ export type Database = {
           updated_by?: string | null
         }
         Update: {
+          accent_dark_hex?: string | null
           accent_hex?: string | null
           app_name?: string | null
           fallback_at?: string | null
@@ -8786,11 +8821,13 @@ export type Database = {
       }
       webhook_sources: {
         Row: {
+          authorize_ai_on_capture: boolean
           created_at: string
           created_by_user_id: string | null
           default_pipeline_id: string
           default_stage_id: string
           field_map: Json
+          form_fields: Json
           id: string
           is_active: boolean
           kind: string
@@ -8805,11 +8842,13 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          authorize_ai_on_capture?: boolean
           created_at?: string
           created_by_user_id?: string | null
           default_pipeline_id: string
           default_stage_id: string
           field_map?: Json
+          form_fields?: Json
           id?: string
           is_active?: boolean
           kind?: string
@@ -8824,11 +8863,13 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          authorize_ai_on_capture?: boolean
           created_at?: string
           created_by_user_id?: string | null
           default_pipeline_id?: string
           default_stage_id?: string
           field_map?: Json
+          form_fields?: Json
           id?: string
           is_active?: boolean
           kind?: string
@@ -8932,6 +8973,12 @@ export type Database = {
       }
     }
     Functions: {
+      fn_authorize_ai_form_capture: {
+        Args: { p_organization_id: string; p_source_id: string; p_lead_id: string; p_contact_id: string; p_request_id: string; p_ttl_ms: number }
+        Returns: boolean
+      }
+
+
       fn_channel_routing_claim: {
         Args: {
           p_channel: string
@@ -9102,6 +9149,7 @@ export type Database = {
 
       fn_followup_job_current: { Args: { p_org: string; p_job: string; p_enrollment: string; p_node: string }; Returns: boolean }
       fn_agenda_minutes: { Args: { p_settings: Json; p_key: string; p_default: number }; Returns: number }
+      fn_autonomous_turn_revoked: { Args: { p_org: string; p_job: string }; Returns: boolean };
       fn_followup_claim_current: { Args: { p_org: string; p_job: string; p_worker: string; p_acquired_at: string }; Returns: boolean }
       fn_appointment_change: { Args: { p_org: string; p_id: string; p_revision: number; p_patch: Json }; Returns: Json }
       fn_appointment_recover: { Args: { p_org: string; p_event: string }; Returns: Json }
@@ -9472,6 +9520,11 @@ export type Database = {
       }
       fn_gasto_de_ia_do_mes: { Args: { p_org: string }; Returns: number }
       fn_is_platform_admin: { Args: never; Returns: boolean }
+      /** Migration 0502 — mescla campos personalizados no lead DENTRO do banco, numa única instrução atômica. */
+      fn_lead_anotar_campos: {
+        Args: { p_org: string; p_lead: string; p_campos: Json }
+        Returns: Json
+      }
       fn_lgpd_anonymize_contact: {
         Args: { p_contact_id: string; p_organization_id: string }
         Returns: Json
@@ -9570,6 +9623,16 @@ export type Database = {
           version_id: string
         }[]
       }
+      fn_push_inscricoes_que_veem_a_conversa: {
+        Args: { p_org: string; p_conversation: string }
+        Returns: {
+          id: string
+          user_id: string
+          endpoint: string
+          p256dh: string
+          auth: string
+        }[]
+      }
       fn_publish_followup_flow_version: {
         Args: {
           p_created_by: string
@@ -9605,6 +9668,16 @@ export type Database = {
       fn_user_org_ids: { Args: never; Returns: string[] }
       fn_user_role_in: { Args: { p_org: string }; Returns: number }
       fn_user_role_in_org: { Args: { p_org: string }; Returns: string }
+      fn_uso_de_ia: {
+        Args: {
+          p_agent_id?: string
+          p_ate: string
+          p_desde: string
+          p_org: string
+          p_purpose?: string
+        }
+        Returns: Json
+      }
       midpoint: { Args: { p_next: number; p_prev: number }; Returns: number }
       retrieve_top_k_chunks: {
         Args: {
@@ -10226,4 +10299,3 @@ export const Constants = {
     },
   },
 } as const
-

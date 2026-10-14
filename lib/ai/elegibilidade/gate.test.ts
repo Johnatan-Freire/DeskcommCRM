@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   AI_ALLOWLIST_TTL_DAYS_DEFAULT,
   decidirElegibilidade,
+  montarEstadoDeElegibilidade,
   lerModoDoGate,
   ttlDaAutorizacaoMs,
   type EstadoDeElegibilidade,
@@ -12,6 +13,7 @@ const AGORA = new Date("2026-08-27T12:00:00Z");
 const DIA = 24 * 60 * 60 * 1000;
 
 const base: EstadoDeElegibilidade = {
+  canalDesativado: false,
   modo: "open",
   forceHuman: false,
   botSilencedUntil: null,
@@ -173,5 +175,68 @@ describe("ttlDaAutorizacaoMs", () => {
   });
   it("respeita o valor configurado", () => {
     expect(ttlDaAutorizacaoMs({ AI_ALLOWLIST_TTL_DAYS: "7" })).toBe(7 * DIA);
+  });
+});
+
+describe("decidirElegibilidade — canal desativado vence tudo", () => {
+  it("canalDesativado nega com canal_desativado mesmo com gate aberto e sem nenhuma outra trava", () => {
+    const d = decidirElegibilidade({ ...base, modo: "open", canalDesativado: true });
+    expect(d).toEqual({ permite: false, motivo: "canal_desativado", bloqueioPorAllowlist: false });
+  });
+
+  it("canalDesativado vence force_human, silêncio, dono humano e allowlist", () => {
+    const d = decidirElegibilidade({
+      ...base,
+      modo: "allowlist",
+      canalDesativado: true,
+      forceHuman: true,
+      botSilencedUntil: new Date(AGORA.getTime() + DIA),
+      assigneeKind: "user",
+      aiAuthorizedAt: AGORA,
+    });
+    expect(d.motivo).toBe("canal_desativado");
+  });
+});
+
+describe("montarEstadoDeElegibilidade — o canal desativado viaja", () => {
+  it("canalDesativado ausente vira false (banco anterior à chave segue ligando)", () => {
+    const e = montarEstadoDeElegibilidade({
+      aiGate: "open",
+      forceHuman: false,
+      assigneeKind: null,
+      botSilencedUntil: null,
+      aiAuthorizedAt: null,
+      agora: AGORA,
+      ttlMs: DIA,
+    });
+    expect(e.canalDesativado).toBe(false);
+    expect(decidirElegibilidade(e).motivo).toBe("gate_aberto");
+  });
+
+  it("só o booleano true desliga; 'true' string e 1 não", () => {
+    for (const cru of ["true", 1]) {
+      const e = montarEstadoDeElegibilidade({
+        aiGate: "open",
+        forceHuman: false,
+        assigneeKind: null,
+        botSilencedUntil: null,
+        aiAuthorizedAt: null,
+        canalDesativado: cru,
+        agora: AGORA,
+        ttlMs: DIA,
+      });
+      expect(e.canalDesativado).toBe(false);
+    }
+    const ligado = montarEstadoDeElegibilidade({
+      aiGate: "open",
+      forceHuman: false,
+      assigneeKind: null,
+      botSilencedUntil: null,
+      aiAuthorizedAt: null,
+      canalDesativado: true,
+      agora: AGORA,
+      ttlMs: DIA,
+    });
+    expect(decidirElegibilidade(ligado).motivo).toBe("canal_desativado");
   });
 });

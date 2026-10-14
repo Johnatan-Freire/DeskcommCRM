@@ -1,6 +1,8 @@
 import { notFound } from "next/navigation";
 
 import { loadAuthUser } from "@/lib/auth/server";
+import { lerAssinaturaDasEntregas } from "@/lib/channels/assinatura-das-entregas";
+import { tagDeIdioma } from "@/lib/i18n/datas";
 import { carregarComportamentoDaInstalacao } from "@/lib/instalacao/comportamento-servidor";
 import { modulosLigados } from "@/lib/instalacao/modulos";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -10,6 +12,20 @@ import { FormularioDeComportamento, FormularioDeModulos } from "./_form";
 
 export const metadata = { title: "Comportamento da instalação" };
 export const dynamic = "force-dynamic";
+
+/**
+ * Formata no SERVIDOR, com fuso fixo: no cliente, o HTML servido (fuso do
+ * contêiner) e a hidratação (fuso do navegador) divergiriam. Mesmo motivo e
+ * mesma escolha de `/admin/marca` e `/admin/google`.
+ */
+function instanteLegivel(iso: string | null, tag: string): string | null {
+  if (!iso) return null;
+  return new Date(iso).toLocaleString(tag, {
+    timeZone: "America/Sao_Paulo",
+    dateStyle: "short",
+    timeStyle: "short",
+  });
+}
 
 /**
  * A tela onde o dono da instalação decide COMO ela se comporta, sem SSH.
@@ -43,9 +59,11 @@ export default async function Page() {
 
   // O valor EFETIVO (linha acima, `.env` como piso): a tela mostra o que está
   // valendo de verdade, e não o que a linha diria se ela existisse.
-  const [comportamento, ligados] = await Promise.all([
+  const admin = createAdminClient();
+  const [comportamento, ligados, assinatura] = await Promise.all([
     carregarComportamentoDaInstalacao(),
-    modulosLigados(createAdminClient()),
+    modulosLigados(admin),
+    lerAssinaturaDasEntregas(admin),
   ]);
 
   return (
@@ -61,7 +79,16 @@ export default async function Page() {
           )}
         </p>
       </div>
-      <FormularioDeComportamento inicial={comportamento} />
+      <FormularioDeComportamento
+        inicial={comportamento}
+        assinatura={
+          assinatura && {
+            assinadas: assinatura.assinadas,
+            ultimaAssinada: instanteLegivel(assinatura.ultimaAssinadaEm, tagDeIdioma(usuario.idioma)),
+            ultimaSemAssinatura: instanteLegivel(assinatura.ultimaSemAssinaturaEm, tagDeIdioma(usuario.idioma)),
+          }
+        }
+      />
       <FormularioDeModulos ligados={ligados} />
     </div>
   );

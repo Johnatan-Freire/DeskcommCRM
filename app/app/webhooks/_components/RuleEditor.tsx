@@ -27,13 +27,14 @@ import {
   GATILHO_DE_DATA_DO_FUNIL,
   configDoGatilhoDeData,
 } from "@/lib/automation/gatilho-de-data-do-funil";
+import { configAoSalvarDaTela } from "@/lib/automation/config-ao-salvar";
 import { camposDoFunil } from "@/lib/leads/campos-do-funil";
 import {
   useCreateAutomationRule,
   useUpdateAutomationRule,
   type AutomationRuleRow,
 } from "@/hooks/webhooks/useAutomationRules";
-import { usePipelines, usePipelineStages } from "@/hooks/webhooks/useWebhookSources";
+import { usePipelines, usePipelineStages, useWebhookSources } from "@/hooks/webhooks/useWebhookSources";
 import { TRIGGER_LABELS, ACTION_LABELS, type TriggerEvent, type ActionType } from "./labels";
 import { ActionConfigForm, defaultActionConfig, type ActionItem } from "./ActionConfigForm";
 import { useT } from "@/hooks/i18n/useT";
@@ -160,6 +161,8 @@ interface ConfigDaData {
 
 const DIAS_PADRAO = "7";
 
+
+const QUALQUER_FONTE = "__qualquer_fonte__";
 export function RuleEditor({ open, onOpenChange, rule }: Props) {
   const t = useT();
   const isEdit = !!rule;
@@ -173,12 +176,15 @@ export function RuleEditor({ open, onOpenChange, rule }: Props) {
     campo: "",
     dias: DIAS_PADRAO,
   });
+  const [webhookSourceId, setWebhookSourceId] = React.useState(QUALQUER_FONTE);
 
   const create = useCreateAutomationRule();
   const update = useUpdateAutomationRule();
   const saving = create.isPending || update.isPending;
 
   const { data: pipelinesRes } = usePipelines();
+  const { data: sourcesRes } = useWebhookSources();
+  const webhookSources = sourcesRes?.data ?? [];
   const defaultPipeline =
     pipelinesRes?.data?.find((p) => p.is_default) ?? pipelinesRes?.data?.[0] ?? null;
   const { data: boardRes } = usePipelineStages(defaultPipeline?.id ?? null);
@@ -193,6 +199,8 @@ export function RuleEditor({ open, onOpenChange, rule }: Props) {
     );
     setAdvancedRows({});
     setActions((rule?.actions as ActionItem[] | undefined) ?? []);
+    const sourceId = rule?.trigger_config?.webhook_source_id;
+    setWebhookSourceId(typeof sourceId === "string" ? sourceId : QUALQUER_FONTE);
     // A configuração salva volta pelo MESMO leitor que a varredura usa: se ela
     // não reconhece o que está guardado, a tela não inventa nada e o operador
     // reescolhe — em vez de a tela mostrar um funil que o cron ignora.
@@ -210,6 +218,7 @@ export function RuleEditor({ open, onOpenChange, rule }: Props) {
 
   const curatedFields = triggerEvent ? CURATED_FIELDS[triggerEvent] : [];
   const ehGatilhoDeData = triggerEvent === GATILHO_DE_DATA_DO_FUNIL;
+  const ehGatilhoDeNovoContato = triggerEvent === "lead.created";
   const camposDeData = camposDoFunil(
     (pipelinesRes?.data ?? []).find((p) => p.id === configDaData.pipeline_id)?.settings ?? null,
   ).filter((campo) => campo.type === "date");
@@ -259,13 +268,31 @@ export function RuleEditor({ open, onOpenChange, rule }: Props) {
       // `Number("")` é 0 — o que gravaria "avisar no dia" para quem não
       // digitou nada. O campo vazio vira `NaN`, que o schema recusa com a
       // mensagem certa em vez de aceitar um zero silencioso.
+      //
+      // As duas ramificações preservam o que a tela NÃO edita (issue #2483):
+      // o `pipeline_id`/`stage_id` gravados pela API sobrevivem ao salvar. Ver
+      // `configAoSalvarDaTela`.
       trigger_config: ehGatilhoDeData
-        ? {
-            pipeline_id: configDaData.pipeline_id,
-            campo: configDaData.campo,
-            dias: configDaData.dias.trim() === "" ? Number.NaN : Number(configDaData.dias),
-          }
-        : undefined,
+        ? configAoSalvarDaTela({
+            gatilhoDaRegra: rule?.trigger_event,
+            configDaRegra: rule?.trigger_config,
+            gatilhoDaTela: triggerEvent,
+            configDaTela: {
+              pipeline_id: configDaData.pipeline_id,
+              campo: configDaData.campo,
+              dias: configDaData.dias.trim() === "" ? Number.NaN : Number(configDaData.dias),
+            },
+          })
+        : ehGatilhoDeNovoContato
+          ? configAoSalvarDaTela({
+              gatilhoDaRegra: rule?.trigger_event,
+              configDaRegra: rule?.trigger_config,
+              gatilhoDaTela: triggerEvent,
+              configDaTela: {
+                webhook_source_id: webhookSourceId === QUALQUER_FONTE ? null : webhookSourceId,
+              },
+            })
+          : undefined,
     };
     const parsed = createAutomationRuleSchema.safeParse(payload);
     if (!parsed.success) {
@@ -318,6 +345,7 @@ export function RuleEditor({ open, onOpenChange, rule }: Props) {
                 setTriggerEvent(v as TriggerEvent);
                 setConditions([]);
                 setAdvancedRows({});
+                if (v !== "lead.created") setWebhookSourceId(QUALQUER_FONTE);
               }}
             >
               <SelectTrigger>
@@ -331,6 +359,29 @@ export function RuleEditor({ open, onOpenChange, rule }: Props) {
                 ))}
               </SelectContent>
             </Select>
+
+            {ehGatilhoDeNovoContato ? (
+              <div className="space-y-1 rounded-sm border border-border p-3">
+                <Label>{t("Fonte do formulário")}</Label>
+                <Select value={webhookSourceId} onValueChange={setWebhookSourceId}>
+                  <SelectTrigger aria-label={t("Fonte do formulário")}>
+                    <SelectValue placeholder={t("Qualquer fonte")} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={QUALQUER_FONTE}>{t("Qualquer fonte")}</SelectItem>
+                    {webhookSourceId !== QUALQUER_FONTE && !webhookSources.some((source) => source.id === webhookSourceId) ? (
+                      <SelectItem value={webhookSourceId}>{t("Fonte removida")}</SelectItem>
+                    ) : null}
+                    {webhookSources.map((source) => (
+                      <SelectItem key={source.id} value={source.id}>{source.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  {t("Escolha uma fonte para limitar esta automação a um formulário. Qualquer fonte mantém o comportamento geral.")}
+                </p>
+              </div>
+            ) : null}
 
             {/* O gatilho de DATA só sabe onde olhar se a regra disser o funil e o
                 campo: o campo de data pertence a UM funil. Sem esta escolha a

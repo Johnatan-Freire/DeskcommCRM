@@ -138,7 +138,11 @@ services:
       # Prefixo sha512: faz o WAHA HASHEAR o X-Api-Key recebido e comparar com este
       # hash. Sem o prefixo ele compara literal → o app (que manda o plaintext) toma 401.
       WAHA_API_KEY: "sha512:${WAHA_API_KEY_SHA512}"
-      WHATSAPP_HOOK_URL: ${WAHA_WEBHOOK_BASE_URL}/api/v1/webhooks/waha
+      # Fixo na rede interna, como o WAHA_API_BASE_URL do worker: o WAHA desta
+      # stack mora ao lado do `app`, e a rota global só atende a rede interna
+      # (app/api/v1/webhooks/waha/route.ts). Lido do .env, um endereço público
+      # ali faria a entrega parar sem nenhum arquivo ter mudado.
+      WHATSAPP_HOOK_URL: http://app:3000/api/v1/webhooks/waha
       # `message` NÃO entra, e `message.any` sozinho não perde nada — medido.
       #
       # O WAHA emite os DOIS para a mesma mensagem, e `lib/waha/ingest.ts` já
@@ -151,6 +155,13 @@ services:
       # SÓ por `message` foram ZERO, e 1.642 chegaram só por `message.any` (os
       # que saíram de nós, que `message` não cobre). Superconjunto estrito.
       WHATSAPP_HOOK_EVENTS: "message.any,message.ack,message.edited,message.revoked,session.status,state.change"
+      # Fork Capital Code (porte do upstream #2268): em produção fica o nome
+      # ANTIGO de propósito. O nome que o WAHA documenta é WHATSAPP_HOOK_HMAC_KEY
+      # e, com ele, o WAHA passa a ASSINAR toda entrega — e o app recusa como
+      # `bad_signature` qualquer assinatura que não consiga conferir (segredo
+      # < 16 caracteres no .env, ou segredo por sessão diferente). Trocar aqui
+      # sem medir o .env da VPS antes derrubaria a entrada de mensagens.
+      # Passo manual para ligar, em docs/upstream/auditoria-atualizacao-2026-10.md.
       WHATSAPP_HOOK_HMAC: ${WAHA_HMAC_SECRET}
       # WAHA lê WHATSAPP_DEFAULT_ENGINE (NÃO WAHA_DEFAULT_ENGINE — o nome errado
       # fazia cair no default WEBJS, engine com browser que trava/corrompe a sessão
