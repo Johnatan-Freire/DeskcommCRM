@@ -1102,6 +1102,7 @@ jobs:
         contadores-do-menu.spec.ts
         fonte-de-captacao-assina-os-envios.spec.ts
         celular-cabe-na-tela.spec.ts
+        skills-versao-nova-do-catalogo.spec.ts
 
       # ─── FORA_DO_CI — as duas que ficaram, e o motivo continua onde sempre ───
       #
