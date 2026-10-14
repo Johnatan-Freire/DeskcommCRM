@@ -497,6 +497,15 @@ export const NAV_CATALOG = [
     minRole: "manager",
   },
   {
+    href: "/app/ai/avisos",
+    label: "Avisos temporários",
+    description: "Promoções, início de turma e mudanças com prazo que os agentes usam só enquanto valem.",
+    icon: "ClockCountdown",
+    group: "ia",
+    section: "Ensinar o agente",
+    minRole: "agent",
+  },
+  {
     href: "/app/ai/memory",
     label: "Memória",
     description: "O que o agente já aprendeu sobre a sua operação e reaproveita.",

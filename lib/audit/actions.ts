@@ -341,6 +341,9 @@ export const AUDIT_ACTIONS = [
   // Pausa global de follow-ups da organização (0657).
   "followups.paused_all",
   "followups.resumed_all",
+  // Avisos temporários dos agentes de IA (0658).
+  "ai.aviso_temporario_criado",
+  "ai.aviso_temporario_alterado",
   "followup.silence_sweep_run",
   // Roteiros de atendimento encerrados por prazo (0397) — só quando houve efeito.
   "followup.roteiros_expirados",

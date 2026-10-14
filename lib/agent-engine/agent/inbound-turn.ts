@@ -148,6 +148,7 @@ import {
   catalogoEntregueAoOperador,
 } from './entrega-de-capacidade';
 import { composeSystemPrompt, loadOrgMemory, renderOrgMemory } from './org-memory';
+import { AVISOS_INDISPONIVEIS, carregarAvisosVigentes, renderAvisosVigentes } from '@/lib/ai/avisos-temporarios';
 import {
   carregarConfig as carregarConfigSistemaEscolar,
   buscarAlunoPorTelefone,
@@ -2397,6 +2398,24 @@ async function executarTurnoDoAgente(
   // testada (o bloco da cadeia nomeia `crm_list_event_types`, e nomear
   // ferramenta ausente faz o modelo tentar chamá-la).
   if (agentConfig !== null) blocosResidentes.push(...blocosDeAgendaResidentes(agentConfig.toolIds));
+  // Avisos temporários (0658): informação com prazo cadastrada pela equipe. Vai
+  // DEPOIS dos blocos fixos para não invalidar o prefixo cacheável quando um aviso
+  // entra ou vence. A régua do prazo é `fn_avisos_vigentes` (banco). Falha de
+  // leitura não derruba o turno — mas fecha: o modelo é instruído a não oferecer
+  // promoção nem condição especial que não possa conferir.
+  try {
+    const avisos = await carregarAvisosVigentes(pool, {
+      organizationId: tenantId,
+      escopoDoAgente: agentConfig?.serviceScope ?? null,
+      agentId: agentConfig?.agentId ?? null,
+    });
+    blocosResidentes.push(renderAvisosVigentes(avisos, fusoDaOrg));
+  } catch (err) {
+    runLog.warn('avisos temporários: leitura falhou — turno segue sem avisos', {
+      error: err instanceof Error ? err.message : String(err),
+    });
+    blocosResidentes.push(AVISOS_INDISPONIVEIS);
+  }
   if (preview)
     blocosResidentes.push(
       'MODO PRÉVIA: proponha a resposta com send_message. Operações são propostas separadas; nunca diga que executou uma proposta. Nenhum envio real acontece.',
