@@ -11,7 +11,7 @@
  * quando libera — cai no genérico, de propósito.
  */
 import { relogioEm, instanteDoRelogio } from "@/lib/tempo/relogio-local";
-import type { AvailabilitySchedule } from "@/lib/schemas/routing";
+import { dataLocal, type AgendaDeAtendimento } from "@/lib/routing/eligibility";
 
 /**
  * Próxima abertura de UMA agenda estritamente depois de `now`.
@@ -21,13 +21,17 @@ import type { AvailabilitySchedule } from "@/lib/schemas/routing";
  * Varre até 8 dias — cobre qualquer semana com pelo menos uma janela.
  */
 export function proximaAberturaDeUmaAgenda(
-  schedule: Pick<AvailabilitySchedule, "timezone" | "windows">,
+  schedule: AgendaDeAtendimento,
   now: Date,
 ): Date | null {
   if (schedule.windows.length === 0) return null;
   const wall = relogioEm(now, schedule.timezone);
+  const feriados = schedule.feriados ?? [];
 
-  for (let addDays = 0; addDays <= 8; addDays += 1) {
+  // 8 dias cobrem qualquer semana com uma janela; feriados (0660) podem empurrar
+  // a abertura — uma emenda de Carnaval com domingo no meio passa de 8 —, então
+  // a varredura vai até 21.
+  for (let addDays = 0; addDays <= 21; addDays += 1) {
     const dowAlvo = (wall.dow + addDays) % 7;
     const janelasDoDia = schedule.windows
       .filter((w) => w.dow === dowAlvo)
@@ -37,6 +41,7 @@ export function proximaAberturaDeUmaAgenda(
       const h = Number(partes[0]);
       const mi = Number(partes[1]);
       const candidato = instanteDoRelogio(wall.y, wall.mo, wall.d + addDays, h, mi, schedule.timezone);
+      if (feriados.length > 0 && feriados.includes(dataLocal(candidato, schedule.timezone))) break;
       if (candidato.getTime() > now.getTime()) return candidato;
     }
   }
@@ -45,7 +50,7 @@ export function proximaAberturaDeUmaAgenda(
 
 /** A mais cedo entre as próximas aberturas de várias agendas (união dos atendentes). */
 export function proximaAberturaGeral(
-  schedules: Pick<AvailabilitySchedule, "timezone" | "windows">[],
+  schedules: AgendaDeAtendimento[],
   now: Date,
 ): Date | null {
   let melhor: Date | null = null;

@@ -13,6 +13,7 @@ import type { Json } from "@/lib/database.types";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { isAttendantEligible, OPEN_LOAD_STATUSES } from "./eligibility";
+import { feriadosDaOrganizacao } from "@/lib/escalacao/feriados";
 import type { RoutingCandidate } from "./decide";
 import { availabilityScheduleSchema } from "@/lib/schemas/routing";
 
@@ -98,10 +99,11 @@ export async function loadEligibleAttendants(
     }
   }
 
+  const feriados = await feriadosDaOrganizacao(supabase, organizationId, now);
   const candidates: RoutingCandidate[] = [];
   for (const r of rows) {
     const currentLoad = loadByUser.get(r.user_id) ?? 0;
-    const schedule = availabilityScheduleSchema.parse(r.schedule ?? {});
+    const schedule = { ...availabilityScheduleSchema.parse(r.schedule ?? {}), feriados };
     const eligible = isAttendantEligible(
       { isAvailable: true, capacity: r.capacity, currentLoad, schedule },
       now,

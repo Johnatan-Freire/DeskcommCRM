@@ -18,6 +18,7 @@ import { estaPresente } from "@/lib/atendimento/presenca";
 import { ROLE_RANK, type Role } from "@/lib/auth/types";
 import { isAttendantEligible, OPEN_LOAD_STATUSES } from "@/lib/routing/eligibility";
 import { availabilityScheduleSchema } from "@/lib/schemas/routing";
+import { feriadosDaOrganizacao } from "./feriados";
 
 const COLUNAS_DISPONIBILIDADE =
   "user_id, is_available, capacity, schedule, updated_at, last_heartbeat_at";
@@ -32,6 +33,8 @@ export interface AtendenteDoRoster {
   atualizadoEm: string | null;
   /** Conversas abertas atribuídas — mesma contagem que o worker de roteamento usa. */
   cargaAtual: number;
+  /** Feriados do atendimento da organização (0660), `AAAA-MM-DD` — vencem a jornada. */
+  feriados?: string[];
   /** Carimbo do último sinal de presença; null = nunca abriu com a tela logada. */
   ultimoSinalEm: string | null;
   /**
@@ -109,6 +112,8 @@ export async function carregarRosterDeAtendimento(
     }
   }
 
+  const feriados = await feriadosDaOrganizacao(admin, organizationId, agora);
+
   return atendentes.map((m) => {
     const a = porUsuario.get(m.user_id);
     return {
@@ -119,6 +124,7 @@ export async function carregarRosterDeAtendimento(
       agenda: a?.schedule ?? { timezone: "America/Sao_Paulo", windows: [] },
       atualizadoEm: a?.updated_at ?? null,
       cargaAtual: cargaPorUsuario.get(m.user_id) ?? 0,
+      feriados,
       // Quem nunca emitiu sinal tem `last_heartbeat_at` null, e o roster diz
       // `presente: false` — "não sei quando foi a última vez", que a tela mostra
       // diferente de "o sinal venceu". As duas coisas são ausência de presença.
@@ -144,7 +150,7 @@ export function podeAssumirAgora(atendente: AtendenteDoRoster, now: Date): boole
       isAvailable: atendente.disponivel,
       capacity: atendente.capacidade,
       currentLoad: atendente.cargaAtual,
-      schedule: availabilityScheduleSchema.parse(atendente.agenda ?? {}),
+      schedule: { ...availabilityScheduleSchema.parse(atendente.agenda ?? {}), feriados: atendente.feriados ?? [] },
     },
     now,
   );
