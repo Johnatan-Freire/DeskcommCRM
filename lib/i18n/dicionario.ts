@@ -12759,6 +12759,17 @@ export const DICIONARIO: Traducoes = {
   "Nenhum negócio com este campo de data neste período.": {
     es: "Ningún negocio con este campo de fecha en este período.",
   },
+  // #2728 — o editor de campos do funil monta a condição de exibição.
+  "Mostrar só quando:": { es: "Mostrar solo cuando:" },
+  "Sempre mostrar": { es: "Mostrar siempre" },
+  "Campo da condição": { es: "Campo de la condición" },
+  "Operador da condição": { es: "Operador de la condición" },
+  "Valor da condição": { es: "Valor de la condición" },
+  "é igual a": { es: "es igual a" },
+  "é maior que": { es: "es mayor que" },
+  "Escondido, o campo não aparece no formulário nem é validado como obrigatório, e o valor já gravado continua no registro.": {
+    es: "Oculto, el campo no aparece en el formulario ni se valida como obligatorio, y el valor ya guardado sigue en el registro.",
+  },
 };
 
 /**

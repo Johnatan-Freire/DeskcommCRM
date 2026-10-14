@@ -5466,5 +5466,13 @@
   "Sem intervalo": "不显示区间",
   "Este funil não tem campo de data para montar o calendário.": "该漏斗没有可用于日历的日期字段。",
   "Nenhum negócio com este campo de data.": "此日期字段下没有商机。",
-  "Nenhum negócio com este campo de data neste período.": "此日期字段在此期间没有商机。"
+  "Nenhum negócio com este campo de data neste período.": "此日期字段在此期间没有商机。",
+  "Mostrar só quando:": "仅在以下条件显示：",
+  "Sempre mostrar": "始终显示",
+  "Campo da condição": "条件字段",
+  "Operador da condição": "条件运算符",
+  "Valor da condição": "条件值",
+  "é igual a": "等于",
+  "é maior que": "大于",
+  "Escondido, o campo não aparece no formulário nem é validado como obrigatório, e o valor já gravado continua no registro.": "隐藏时该字段不出现在表单中，也不作为必填校验，已保存的值仍保留在记录里。"
 }
