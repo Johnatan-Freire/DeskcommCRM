@@ -26,7 +26,7 @@
 import { ROLE_RANK, type Role } from "@/lib/auth/types";
 import { isAttendantEligible, isWithinSchedule, OPEN_LOAD_STATUSES, type AgendaDeAtendimento } from "@/lib/routing/eligibility";
 import { feriadosDaOrganizacaoPg } from "./feriados";
-import { availabilityScheduleSchema, type AvailabilitySchedule } from "@/lib/schemas/routing";
+import { availabilityScheduleSchema } from "@/lib/schemas/routing";
 import { proximaAberturaGeral, fraseDaProximaAbertura } from "./proxima-abertura";
 
 import type { Queryable } from "../agent-engine/queue/queue";

@@ -10,6 +10,8 @@ import { TeamMembersClient } from "./_components/TeamMembersClient";
 import { TeamInvitesClient } from "./_components/TeamInvitesClient";
 import { AttendantsClient } from "./_components/AttendantsClient";
 import { FeriadosDoAtendimento } from "./_components/FeriadosDoAtendimento";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { feriadosParaATela } from "@/lib/escalacao/feriados";
 import { fusoUtilizavel } from "@/lib/tempo/fusos";
 
 export const dynamic = "force-dynamic";
@@ -46,6 +48,9 @@ export default async function TeamPage({
   const activeOrg = await resolveActiveOrg(user);
   const isAdmin = !!activeOrg && ROLE_RANK[activeOrg.role] >= ROLE_RANK.admin;
   const isManager = !!activeOrg && ROLE_RANK[activeOrg.role] >= ROLE_RANK.manager;
+  // Feriados do atendimento (0660): lidos no servidor, com o id da organização
+  // ATIVA da sessão; a seção só aparece para gerente+ (mesma régua da jornada).
+  const feriados = isManager && activeOrg ? await feriadosParaATela(createAdminClient(), activeOrg.orgId) : [];
 
   return (
     <div className="flex h-full flex-col gap-6 p-6">
@@ -82,7 +87,7 @@ export default async function TeamPage({
           {isManager ? (
             <>
               <AttendantsClient canManage={isManager} organizationTimezone={fusoUtilizavel(activeOrg?.timezone)} />
-              <FeriadosDoAtendimento canManage={isManager} />
+              <FeriadosDoAtendimento canManage={isManager} feriados={feriados} />
             </>
           ) : (
             <p className="text-sm text-muted-foreground">

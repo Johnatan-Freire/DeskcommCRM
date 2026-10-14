@@ -5,7 +5,8 @@
  * fora: a IA continua atendendo, o handoff deixa de prometer consultor naquele dia
  * e a estimativa de "a equipe volta às…" pula o feriado.
  */
-import { useCallback, useEffect, useState, useTransition } from "react";
+import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -26,34 +27,20 @@ function formatarDia(iso: string): string {
   return `${dia}/${mes}/${ano}`;
 }
 
-export function FeriadosDoAtendimento({ canManage }: { canManage: boolean }) {
+export function FeriadosDoAtendimento({ canManage, feriados }: { canManage: boolean; feriados: Feriado[] }) {
   const t = useT();
-  const [feriados, setFeriados] = useState<Feriado[] | null>(null);
+  const router = useRouter();
   const [data, setData] = useState("");
   const [descricao, setDescricao] = useState("");
   const [isPending, startTransition] = useTransition();
   const anoAtual = new Date().getFullYear();
-
-  const carregar = useCallback(async () => {
-    try {
-      const res = await apiClient.get<{ data: Feriado[] }>("/api/v1/attendants/feriados");
-      setFeriados(res.data);
-    } catch {
-      setFeriados([]);
-      toast.error(t("Não foi possível carregar os feriados."));
-    }
-  }, [t]);
-
-  useEffect(() => {
-    void carregar();
-  }, [carregar]);
 
   const executar = (acao: () => Promise<unknown>, sucesso: string) => {
     startTransition(async () => {
       try {
         await acao();
         toast.success(sucesso);
-        await carregar();
+        router.refresh();
       } catch (err) {
         toast.error(err instanceof Error ? err.message : t("Não foi possível salvar."));
       }
@@ -71,9 +58,7 @@ export function FeriadosDoAtendimento({ canManage }: { canManage: boolean }) {
         </p>
       </div>
 
-      {feriados === null ? (
-        <p className="text-sm text-text-muted">{t("Carregando…")}</p>
-      ) : feriados.length === 0 ? (
+      {feriados.length === 0 ? (
         <p className="text-sm text-text-muted" data-testid="sem-feriados">
           {t("Nenhum feriado cadastrado.")}
         </p>

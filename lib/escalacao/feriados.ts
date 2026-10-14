@@ -63,3 +63,19 @@ export async function feriadosDaOrganizacao(
   }
   return ((data ?? []) as Array<{ data: string }>).map((r) => r.data.slice(0, 10));
 }
+
+/** Para a tela Equipe: os feriados de 30 dias atrás em diante, em ordem. */
+export async function feriadosParaATela(
+  admin: SupabaseClient,
+  organizationId: string,
+): Promise<Array<{ id: string; data: string; descricao: string }>> {
+  const desde = new Date(Date.now() - 30 * 86_400_000).toISOString().slice(0, 10);
+  const { data } = await admin
+    .from("feriados_de_atendimento")
+    .select("id, data, descricao")
+    .eq("organization_id", organizationId)
+    .gte("data", desde)
+    .order("data")
+    .limit(200);
+  return (data ?? []) as Array<{ id: string; data: string; descricao: string }>;
+}
