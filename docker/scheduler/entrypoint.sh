@@ -67,6 +67,9 @@ CRONS="
 */5 * * * *|25|api/v1/cron/storage-redaction?limit=50
 */5 * * * *|25|api/v1/cron/snooze-watcher
 */5 * * * *|60|api/v1/cron/handoff-devolucao
+# A IMPORTACAO DO HISTORICO DO WHATSAPP. Sem pedido de admin, a rodada so
+# consulta o recibo e volta: nao toca no WAHA. Nunca envia mensagem.
+* * * * *|60|api/v1/cron/whatsapp-history-import
 # A CAMPANHA. Minuto a minuto, e a rodada manda no máximo uma mensagem por
 # número: é o cron que dá a cadência base, e o ritmo da campanha e do canal
 # (channel_knobs + pacing_ledger) só sabem torná-la mais lenta.

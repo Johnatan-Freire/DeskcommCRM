@@ -75,6 +75,7 @@ interface Excecao {
  * linhas da OUTRA organização, não uma leitura como superusuário.
  */
 const PROVA_PROPRIA: readonly Excecao[] = [
+  { tabela: "whatsapp_history_imports", razao: "tests/invariants/importacao-historico-nao-dispara-nada.test.ts — dois tenants reais por JWT: admin lê os recibos da própria organização, agent lê zero e admin da outra organização lê zero; UPDATE por authenticated recusado (sem grant), anon sem leitura; a escrita é só service role e a RPC fn_importar_conversa_historica não é executável por authenticated" },
   { tabela: "prospecting_settings", razao: "tests/invariants/prospecting.test.ts — tabela exclusiva do servidor, ACL e RLS verificadas; FK composta e comandos autenticados cercam a organização." },
   { tabela: "prospecting_campaigns", razao: "tests/invariants/prospecting.test.ts — tabela exclusiva do servidor, ACL e RLS verificadas; FK composta e comandos autenticados cercam a organização." },
   { tabela: "prospecting_candidates", razao: "tests/invariants/prospecting.test.ts — tabela exclusiva do servidor, ACL e RLS verificadas; FK composta e comandos autenticados cercam a organização." },
