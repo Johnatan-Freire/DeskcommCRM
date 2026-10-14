@@ -112,6 +112,13 @@ export const DICIONARIO: Traducoes = {
   "Todos os follow-ups estão pausados desde {quando}. Nenhum passo anda, ninguém é inscrito e nenhuma mensagem automática de follow-up sai.": { es: "Todos los seguimientos están pausados desde {quando}. Ningún paso avanza, nadie es inscrito y no sale ningún mensaje automático de seguimiento." },
   "Promoções, início de turma e mudanças com prazo que os agentes usam só enquanto valem.": { es: "Promociones, inicio de clases y cambios con plazo que los agentes usan solo mientras están vigentes." },
   "Quem pediu para se matricular pelo WhatsApp e espera um consultor.": { es: "Quien pidió matricularse por WhatsApp y espera a un asesor." },
+  "Nome interno da conexão": { es: "Nombre interno de la conexión" },
+  "Nome interno": { es: "Nombre interno" },
+  "Nome interno atualizado.": { es: "Nombre interno actualizado." },
+  "Não foi possível salvar o nome.": { es: "No se pudo guardar el nombre." },
+  "Só a sua equipe vê este nome. O nome público no provedor não muda.": { es: "Solo tu equipo ve este nombre. El nombre público en el proveedor no cambia." },
+  "Ex.: WA | Fixo 7906": { es: "Ej.: WA | Fijo 7906" },
+  "Informe um nome interno com até 80 caracteres.": { es: "Indica un nombre interno de hasta 80 caracteres." },
   "Configure a assinatura da fonte antes de autorizar IA. Para remover a assinatura, desligue primeiro a autorização de IA.": { es: "Configura la firma de la fuente antes de autorizar IA. Para quitar la firma, desactiva primero la autorización de IA." },
   // Autorização por fonte de formulário.
   "Autorizar IA para leads deste formulário": { es: "Autorizar IA para los leads de este formulario" },

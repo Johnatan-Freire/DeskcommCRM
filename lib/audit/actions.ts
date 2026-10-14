@@ -260,6 +260,9 @@ export const AUDIT_ACTIONS = [
   // trilha dizer nos dois sentidos, como `archived`/`reactivated`.
   "channel.disabled",
   "channel.enabled",
+  // Rótulo interno do canal (channel_sessions.display_name); nada vai ao
+  // provedor. Emitida por app/api/v1/channel-sessions/[id]/name.
+  "channel.renamed",
   // A janela de manutenção (#2388): criar e cancelar são mutações da tela e
   // auditam como toda mutação. A pausa e a retomada que a janela aplica saem
   // como `channel.disabled`/`channel.enabled`, com `origem: schedule`.
