@@ -15,7 +15,13 @@ import { decidirAdiamentoPorJanela } from "@/lib/followup/janela-de-disparo";
 import type { EnrollmentRow } from "@/lib/followup/node-handlers";
 import { completeTurnForEnrollment, type TurnBridgeAdminClient } from "@/lib/followup/turn-bridge";
 import { logger } from "@/lib/logger";
-import { AUTORIZADO, explicarCorte, followupPodeEnviarViaSupabase } from "@/lib/ai/ativacao/corte-de-ativacao";
+import {
+  AUTORIZADO,
+  CORTE_DE_PAUSA,
+  ESPERA_DA_PAUSA_MS,
+  explicarCorte,
+  followupPodeEnviarViaSupabase,
+} from "@/lib/ai/ativacao/corte-de-ativacao";
 
 function ponteSupabase(admin: SupabaseClient): TurnBridgeAdminClient {
   const base = createSupabaseAdminClient(admin);
@@ -126,6 +132,26 @@ export async function enviarTextoFixoPendente(
       // (cancelado com o motivo), job `done`; erro → cai no catch, o job volta
       // a `pending` e NADA é enviado.
       const corte = await followupPodeEnviarViaSupabase(admin, job.organization_id as string, enrollmentId);
+      if (corte === CORTE_DE_PAUSA) {
+        // Pausa global (0657): ESPERA, como o adiamento por janela abaixo — o
+        // passo não é pulado e o mesmo job volta a `pending` sem gastar tentativa.
+        const ate = new Date(Date.now() + ESPERA_DA_PAUSA_MS);
+        await completeTurnForEnrollment(
+          ponte,
+          job.organization_id,
+          enrollmentId,
+          nodeId,
+          { kind: "deferred", until: ate, reason: explicarCorte(corte) },
+          undefined,
+          job.id,
+          jobClaim,
+        );
+        await settle(job.organization_id, job.id, jobClaim.acquired_at, false, undefined, {
+          retryAt: ate.toISOString(),
+          hold: true,
+        });
+        continue;
+      }
       if (corte !== AUTORIZADO) {
         logger.info("[followup] texto fixo não enviado — fora do corte de atendimento automático", {
           organization_id: job.organization_id,

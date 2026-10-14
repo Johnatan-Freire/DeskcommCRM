@@ -57,7 +57,15 @@ export type MotivoDoSilencio =
   | "contato_nunca_falou"
   | "ja_reengajado_neste_silencio"
   /** Follow-up é comercial (0404): etapa de outra política não é reengajada. */
-  | "etapa_fora_do_follow_up";
+  | "etapa_fora_do_follow_up"
+  /** Pausa global de follow-ups da organização (0657): os emissores ADIAM, não pulam. */
+  | "followups_pausados";
+
+/** Motivo de corte que é PAUSA, não recusa: o passo espera, não é pulado (0657). */
+export const CORTE_DE_PAUSA = "followups_pausados" as const;
+
+/** Por quanto tempo um envio barrado pela pausa global espera até ser reavaliado. */
+export const ESPERA_DA_PAUSA_MS = 15 * 60_000;
 
 /** Motivos de `fn_followup_pode_enviar`. */
 export type MotivoDoEnvioDeFollowup = MotivoDoSilencio | "inscricao_desconhecida" | "fluxo_desligado";
@@ -165,6 +173,7 @@ export function explicarCorte(motivo: string): string {
     conversa_encerrada: "a conversa está encerrada",
     fluxo_desligado: "o fluxo de follow-up foi desligado",
     ja_reengajado_neste_silencio: "este silêncio já recebeu um reengajamento",
+    followups_pausados: "os follow-ups da organização estão pausados",
   };
   return textos[motivo] ?? motivo;
 }

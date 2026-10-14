@@ -7319,6 +7319,8 @@ export type Database = {
           currency: string
           display_name: string
           dpo_email: string | null
+          followups_pausados_em: string | null
+          followups_pausados_por: string | null
           id: string
           legal_name: string
           locale: string
@@ -7345,6 +7347,8 @@ export type Database = {
           currency?: string
           display_name: string
           dpo_email?: string | null
+          followups_pausados_em?: string | null
+          followups_pausados_por?: string | null
           id?: string
           legal_name: string
           locale?: string
@@ -7371,6 +7375,8 @@ export type Database = {
           currency?: string
           display_name?: string
           dpo_email?: string | null
+          followups_pausados_em?: string | null
+          followups_pausados_por?: string | null
           id?: string
           legal_name?: string
           locale?: string

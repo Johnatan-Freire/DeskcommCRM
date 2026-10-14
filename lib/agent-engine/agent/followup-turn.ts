@@ -2,7 +2,7 @@ import {claimOfJob,type JobClaim} from "../queue/claim";
 import {resultadoDoEnvioDoFollowup} from "../edge/crm/send-ledger";
 import { parseServiceBoundary } from "@/lib/atendimento/fronteira";
 import { requireCurrentServiceBoundary } from "@/lib/atendimento/fronteira-server";
-import { AUTORIZADO, explicarCorte, followupPodeEnviar } from "@/lib/ai/ativacao/corte-de-ativacao";
+import { AUTORIZADO, CORTE_DE_PAUSA, ESPERA_DA_PAUSA_MS, explicarCorte, followupPodeEnviar } from "@/lib/ai/ativacao/corte-de-ativacao";
 /**
  * Handler do job `followup_turn` (F3-03; blueprint 1.3) — a peça BUILD da
  * continuidade. A F3-01 (cron persistente) dispara e a F3-02 (tool schedule_followup)
@@ -643,6 +643,14 @@ async function runFlowDrivenTurn(
     // (o enrollment segue o grafo e NÃO envia); erro de leitura lança e o job
     // re-tenta — nunca envia na dúvida.
     const corte = await followupPodeEnviar(pool, target.tenantId, enrollmentId);
+    if (corte === CORTE_DE_PAUSA) {
+      // Pausa global (0657): o passo ESPERA — pulá-lo perderia a mensagem e
+      // levaria o fluxo adiante sem ela. O claim já não reivindica organização
+      // pausada; isto cobre o turno que estava em voo quando a pausa entrou.
+      runLog.info('follow-up adiado — follow-ups da organização pausados', {});
+      await complete(pool,{jobId:job.id,jobClaim:claimOfJob(job),organizationId:target.tenantId,enrollmentId,nodeId,result:{kind:'deferred',until:new Date(clock().getTime()+ESPERA_DA_PAUSA_MS),reason:explicarCorte(corte)}});
+      return;
+    }
     if (corte !== AUTORIZADO) {
       runLog.info('follow-up não enviado — fora do corte de atendimento automático', { motivo: corte });
       await complete(pool,{jobId:job.id,jobClaim:claimOfJob(job),organizationId:target.tenantId,enrollmentId,nodeId,result:{kind:'skipped',reason:`Não enviado: ${explicarCorte(corte)}.`}});

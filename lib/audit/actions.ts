@@ -338,6 +338,9 @@ export const AUDIT_ACTIONS = [
   "followup_flow.duplicated",
   "followup_flow.rolled_back",
   "followup.worker_run",
+  // Pausa global de follow-ups da organização (0657).
+  "followups.paused_all",
+  "followups.resumed_all",
   "followup.silence_sweep_run",
   // Roteiros de atendimento encerrados por prazo (0397) — só quando houve efeito.
   "followup.roteiros_expirados",
