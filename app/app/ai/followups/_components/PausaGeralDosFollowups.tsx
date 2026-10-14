@@ -26,6 +26,8 @@ import { Pause, Play } from "@/lib/ui/icons";
 import { useT } from "@/hooks/i18n/useT";
 import { pausarTodosOsFollowupsAction, retomarTodosOsFollowupsAction } from "../_actions";
 
+const MARCADOR_DO_INSTANTE = "{quando}";
+
 export function PausaGeralDosFollowups({
   pausadosEm,
   podePausar,
@@ -41,6 +43,11 @@ export function PausaGeralDosFollowups({
   const [aberto, setAberto] = useState(false);
   const [isPending, startTransition] = useTransition();
   const pausado = pausadosEm !== null;
+  const faixa = pausadosEm
+    ? t(
+        "Todos os follow-ups estão pausados desde {quando}. Nenhum passo anda, ninguém é inscrito e nenhuma mensagem automática de follow-up sai.",
+      ).replace(MARCADOR_DO_INSTANTE, new Date(pausadosEm).toLocaleString())
+    : null;
 
   const executar = () => {
     startTransition(async () => {
@@ -63,10 +70,7 @@ export function PausaGeralDosFollowups({
           className="rounded-md border border-warning/40 bg-warning-bg px-3 py-2 text-sm text-text"
           data-testid="faixa-followups-pausados"
         >
-          {t("Todos os follow-ups estão pausados desde {quando}. Nenhum passo anda, ninguém é inscrito e nenhuma mensagem automática de follow-up sai.").replace(
-            "{quando}",
-            new Date(pausadosEm).toLocaleString(),
-          )}
+          {faixa}
         </div>
       ) : null}
       {(pausado ? podeRetomar : podePausar) ? (

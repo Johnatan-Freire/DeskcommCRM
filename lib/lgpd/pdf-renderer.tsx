@@ -403,6 +403,27 @@ export function LgpdExportPdf({ data, unsignedWarning }: Props): React.ReactElem
           </View>
         ) : null}
 
+        {/* Pré-matrículas (0659) — o pedido de matrícula feito pelo WhatsApp,
+            com os dados que a pessoa informou e quando autorizou o registro. */}
+        {(data.pre_matriculas ?? []).length > 0 ? (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Pré-matrículas</Text>
+            {(data.pre_matriculas ?? []).map((p) => (
+              <View key={p.id} style={styles.itemBlock}>
+                <Text>
+                  {p.curso} · {p.turno} · {p.status}
+                </Text>
+                <Text style={styles.small}>
+                  {p.nome_completo} · {p.email} · {p.telefone}
+                </Text>
+                <Text style={styles.small}>
+                  Registrada em {fmtDate(p.created_at)} · autorização em {fmtDate(p.consentimento_em)}
+                </Text>
+              </View>
+            ))}
+          </View>
+        ) : null}
+
         {/* Captação — de onde a pessoa veio. Entra no PDF porque `remote_ip`,
             `user_agent` e `utm` são dados que a organização guarda A RESPEITO
             dela e que ela raramente imagina que existem. */}

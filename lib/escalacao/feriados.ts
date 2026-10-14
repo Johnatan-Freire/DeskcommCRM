@@ -51,17 +51,21 @@ export async function feriadosDaOrganizacao(
   agora: Date,
 ): Promise<string[]> {
   const { de, ate } = janela(agora);
-  const { data, error } = await admin
-    .from("feriados_de_atendimento")
-    .select("data")
-    .eq("organization_id", organizationId)
-    .gte("data", de)
-    .lte("data", ate);
-  if (error) {
-    logger.warn("[feriados] leitura falhou — vale só a jornada semanal", { error: error.message });
+  try {
+    const { data, error } = await admin
+      .from("feriados_de_atendimento")
+      .select("data")
+      .eq("organization_id", organizationId)
+      .gte("data", de)
+      .lte("data", ate);
+    if (error) throw new Error(error.message);
+    return ((data ?? []) as Array<{ data: string }>).map((r) => String(r.data).slice(0, 10));
+  } catch (err) {
+    logger.warn("[feriados] leitura falhou — vale só a jornada semanal", {
+      error: err instanceof Error ? err.message : String(err),
+    });
     return [];
   }
-  return ((data ?? []) as Array<{ data: string }>).map((r) => r.data.slice(0, 10));
 }
 
 /** Para a tela Equipe: os feriados de 30 dias atrás em diante, em ordem. */

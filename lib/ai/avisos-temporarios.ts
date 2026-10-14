@@ -83,16 +83,24 @@ export interface AvisoVigente {
   cursos: string[];
 }
 
+/**
+ * `DD/MM/AAAA, HH:MM` no fuso da organização, montado pelas PARTES da data — o
+ * bloco é instrução para o modelo, e o formato não pode depender do idioma do
+ * processo (nem fixar um idioma de tela, que é a camada de i18n).
+ */
 function dataNoFuso(instante: string | Date, fuso: string): string {
   try {
-    return new Intl.DateTimeFormat("pt-BR", {
+    const partes = new Intl.DateTimeFormat("en-US", {
       timeZone: fuso,
       day: "2-digit",
       month: "2-digit",
       year: "numeric",
       hour: "2-digit",
       minute: "2-digit",
-    }).format(new Date(instante));
+      hourCycle: "h23",
+    }).formatToParts(new Date(instante));
+    const p = (tipo: string) => partes.find((x) => x.type === tipo)?.value ?? "";
+    return `${p("day")}/${p("month")}/${p("year")}, ${p("hour")}:${p("minute")}`;
   } catch {
     return new Date(instante).toISOString();
   }

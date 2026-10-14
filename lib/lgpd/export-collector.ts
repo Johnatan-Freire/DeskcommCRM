@@ -189,6 +189,20 @@ export interface SaleRow {
  * saber não só que a empresa escreveu algo sobre ele, mas quando ela combinou
  * agir — que é a informação que dá sentido ao texto.
  */
+/** Pré-matrícula (migration 0659) — o pedido de matrícula com os dados que a pessoa deu. */
+export interface PreMatriculaRow {
+  id: string;
+  nome_completo: string;
+  email: string;
+  telefone: string;
+  curso: string;
+  turno: string;
+  status: string;
+  consentimento_em: string;
+  consentimento_texto: string;
+  created_at: string;
+}
+
 export interface TaskRow {
   id: string;
   title: string;
@@ -476,6 +490,8 @@ export interface ExportPayload {
   appointments: AppointmentRow[];
   sales: SaleRow[];
   tasks: TaskRow[];
+  /** Pré-matrículas (0659): o que a anonimização redige, o acesso entrega. */
+  pre_matriculas?: PreMatriculaRow[];
   webhook_captures: CaptureRow[];
   audit_log_extract: AuditRow[];
   meeting_deliveries: MeetingDeliveryRow[];
@@ -1035,6 +1051,28 @@ export async function collectExportData(args: CollectArgs): Promise<ExportPayloa
       });
     } else if (data) {
       sales = data;
+    }
+  }
+
+  // Pré-matrículas — contact_id direto em pre_matriculas (migration 0659).
+  // Nome, e-mail e telefone que a pessoa deu ao agente, com o consentimento e o
+  // texto que ela aceitou: se a anonimização redige, o acesso entrega.
+  let preMatriculas: PreMatriculaRow[] = [];
+  if (contactId) {
+    const { data, error } = await admin
+      .from("pre_matriculas")
+      .select("id, nome_completo, email, telefone, curso, turno, status, consentimento_em, consentimento_texto, created_at")
+      .eq("organization_id", organizationId)
+      .eq("contact_id", contactId)
+      .order("created_at", { ascending: false })
+      .limit(100);
+    if (error) {
+      logger.warn("[lgpd-export-worker] pre_matriculas load failed", {
+        request_id: requestId,
+        error: error.message,
+      });
+    } else if (data) {
+      preMatriculas = data;
     }
   }
 
@@ -1647,6 +1685,7 @@ export async function collectExportData(args: CollectArgs): Promise<ExportPayloa
     appointments,
     sales,
     tasks,
+    pre_matriculas: preMatriculas,
     webhook_captures,
     audit_log_extract,
     reply_drafts,
@@ -1697,6 +1736,7 @@ function emptyPayload(
     appointments: [],
     sales: [],
     tasks: [],
+    pre_matriculas: [],
     webhook_captures: [],
     audit_log_extract: [],
     meeting_deliveries: [],

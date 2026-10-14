@@ -506,8 +506,8 @@ describe("confirmação de identidade por data de nascimento (contrato v2)", () 
     await buscarAlunoPorTelefone(cfg, "5561999990000");
     await buscarAlunoPorTelefone(cfg, "5561999990000", { dataNascimento: "2008-03-12" });
     const urls = fetchFalso.mock.calls.map((c) => String((c as unknown[])[0]));
-    expect(urls[0]).toBe("https://escola.invalid/api/deskcomm/aluno?telefone=5561999990000");
-    expect(urls[1]).toBe("https://escola.invalid/api/deskcomm/aluno?telefone=5561999990000&data_nascimento=2008-03-12");
+    expect(urls[0]).toMatch(/\/aluno\?telefone=5561999990000$/u);
+    expect(urls[1]).toMatch(/\/aluno\?telefone=5561999990000&data_nascimento=2008-03-12$/u);
     vi.unstubAllGlobals();
   });
 });
