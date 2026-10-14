@@ -44690,6 +44690,81 @@ begin
 end;
 $fn$;
 
+-- ---- contagem de "não achei" POR TERMO no uso das capacidades (migration 0671, #484) ----
+--
+-- A irmã de `fn_agent_tool_usage` (bloco da 0103): aquela agrega por tool e responde
+-- "quantas falhas"; esta agrega por TERMO e responde "QUAL termo não acha". O
+-- caminho 1 do #484 (PR #1182) já parou de auditar "não achei" como sucesso; o
+-- que faltava era o painel dizer o termo.
+--
+-- O termo já existia no audit dentro de `metadata.args`, sob o nome do argumento
+-- de cada tool (`args.termo`). Contar por ele no banco seria gravar o nome de UMA
+-- tool dentro do SQL. A tool passa a DECLARAR o termo (`termoBuscado`,
+-- lib/mcp/types.ts) e a auditoria sobe `metadata.termo` — chave única,
+-- independente de tool, que é o que este `group by` lê.
+--
+-- POR QUE UMA FUNÇÃO NOVA E NÃO UM GROUP BY A MAIS NA 0103
+-- -------------------------------------------------------
+-- `fn_agent_tool_usage` alimenta `montarUsoDeCapacidades`
+-- (lib/ai/agents/uso-de-capacidades.ts), que junta as linhas num `Map` por
+-- `tool_name`. Acrescentar `termo` ao GROUP BY dela produziria VÁRIAS linhas por
+-- tool, e o `Map` guardaria só a última: os totais da tela ficariam MENORES que a
+-- realidade, contando uma fatia de termo como se fosse o uso inteiro. A leitura
+-- por termo é SEPARADA e aditiva — a 0103 não muda de assinatura nem de resultado.
+--
+-- Mesmo caminho de acesso da 0103 (elo `api_audit_log.request_id =
+-- ai_agent_runs.id`, janela nos dois lados, filtro por organização e agente); a
+-- única diferença é o `and a.metadata->>'termo' is not null`, que descarta as
+-- chamadas de tools que não declaram termo. security invoker pela mesma razão.
+create or replace function public.fn_agent_tool_usage_por_termo(
+  p_organization_id uuid,
+  p_agent_id        uuid,
+  p_since           timestamptz
+)
+returns table (
+  tool_name  text,
+  termo      text,
+  total      bigint,
+  falhas     bigint,
+  ultima_vez timestamptz
+)
+language sql
+stable
+security invoker
+set search_path = public
+as $$
+  select
+    a.metadata->>'tool_name'                                          as tool_name,
+    a.metadata->>'termo'                                             as termo,
+    count(*)::bigint                                                 as total,
+    count(*) filter (where a.metadata->>'success' = 'false')::bigint  as falhas,
+    max(a.created_at)                                                as ultima_vez
+  from public.ai_agent_runs r
+  join public.api_audit_log a
+    on  a.request_id      = r.id::text
+    and a.action          = 'mcp.tool_called'
+    and a.organization_id = p_organization_id
+    and a.created_at     >= p_since
+  where r.organization_id = p_organization_id
+    and r.agent_id        = p_agent_id
+    and r.started_at     >= p_since
+    and a.metadata->>'tool_name' is not null
+    and a.metadata->>'termo'     is not null
+  group by 1, 2
+$$;
+
+comment on function public.fn_agent_tool_usage_por_termo(uuid, uuid, timestamptz) is
+  'Uso das capacidades (tools MCP) de um agente agrupado POR TERMO: total, falhas e a última vez de cada termo declarado pela tool (`metadata.termo`). Irmã de fn_agent_tool_usage (que agrega por tool): esta separa "não achei sempre o mesmo termo" de "não achei por sorte".';
+
+-- Doutrina 9: a função nasce com EXECUTE para PUBLIC (padrão do Postgres) e
+-- para anon (o default ACL do corpo deste arquivo). A VARREDURA anon abaixo só
+-- percorre `security definer`, então esta, que é invoker, não seria curada.
+revoke execute on function public.fn_agent_tool_usage_por_termo(uuid, uuid, timestamptz)
+  from public, anon;
+
+grant execute on function public.fn_agent_tool_usage_por_termo(uuid, uuid, timestamptz)
+  to authenticated, service_role;
+
 -- ---- VARREDURA anon: função nova nasce exposta em quem ATUALIZA (migration 0116) ----
 --
 -- ⚠️ DE PROPÓSITO, NENHUMA FUNÇÃO É CRIADA DEPOIS DESTE BLOCO. Apêndice que cria
