@@ -7,6 +7,7 @@ import {
   buscarAlunoPorTelefone,
   buscarCatalogoCursos,
   selecionarAluno,
+  normalizarDataDeNascimento,
   sanitizarModalidades,
   sanitizarCatalogo,
   filtrarCatalogo,
@@ -365,6 +366,7 @@ describe("selecionarAluno", () => {
       encontrado: true,
       ambiguo: false,
       match_type: "exact",
+      confirmacao: "confere",
       alunos: [aluno("Ana Souza", 42)],
     });
 
@@ -390,6 +392,7 @@ describe("selecionarAluno", () => {
       encontrado: true,
       ambiguo: true,
       match_type: "exact",
+      confirmacao: "confere",
       alunos: [aluno("Ana Souza", 1), aluno("Bruno Souza", 2)],
     });
 
@@ -404,6 +407,7 @@ describe("selecionarAluno", () => {
         encontrado: true,
         ambiguo: true,
         match_type: "exact",
+        confirmacao: "confere",
         alunos: [aluno("Ána  de Souza", 1), aluno("Bruno Souza", 2)],
       },
       "ana de souza",
@@ -419,6 +423,7 @@ describe("selecionarAluno", () => {
         encontrado: true,
         ambiguo: true,
         match_type: "exact",
+        confirmacao: "confere",
         alunos: [aluno("Ana Souza", 1), aluno("Bruno Souza", 2)],
       },
       "Ana Silva",
@@ -451,11 +456,85 @@ describe("selecionarAluno", () => {
       encontrado: true,
       ambiguo: false,
       match_type: "exact",
+      confirmacao: "confere",
       alunos: [{ ...aluno("Ana Souza", 1), matched_contact_field: "numero_contato2" }],
     });
 
     expect(resultado.status).toBe("encontrado");
     expect(JSON.stringify(resultado)).not.toContain("matched_contact_field");
     expect(JSON.stringify(resultado)).not.toContain("numero_contato2");
+  });
+});
+
+describe("confirmação de identidade por data de nascimento (contrato v2)", () => {
+  const base = { encontrado: true, match_type: "exact" } as const;
+
+  it("sem a data: só a quantidade — nenhum nome, nenhum dado acadêmico", () => {
+    const r = selecionarAluno({ ...base, confirmacao: "nao_informada", quantidade: 2, alunos: [] });
+    expect(r).toEqual({ status: "confirmacao_necessaria", quantidade: 2 });
+  });
+
+  it("data que não confere: nada sai", () => {
+    expect(selecionarAluno({ ...base, confirmacao: "nao_confere", alunos: [] })).toEqual({ status: "nao_confere" });
+  });
+
+  it("número bloqueado por tentativas: nada sai", () => {
+    expect(selecionarAluno({ ...base, confirmacao: "bloqueado", alunos: [] })).toEqual({ status: "bloqueado" });
+  });
+
+  it("⭐ API sem o contrato (devolve o cadastro sem checar a data): o CRM fecha mesmo assim", () => {
+    const r = selecionarAluno({ ...base, ambiguo: false, alunos: [aluno("Ana Souza", 1)] });
+    expect(r).toEqual({ status: "api_sem_confirmacao" });
+    expect(JSON.stringify(r)).not.toContain("Ana Souza");
+    expect(JSON.stringify(r)).not.toContain("8.5");
+  });
+
+  it("'confere' sem aluno nenhum é contradição do contrato: trata como não conferido", () => {
+    expect(selecionarAluno({ ...base, confirmacao: "confere", alunos: [] })).toEqual({ status: "nao_confere" });
+  });
+
+  it("'nao_informada' com cadastro no corpo (API mal-comportada) também não deixa dado sair", () => {
+    const r = selecionarAluno({ ...base, confirmacao: "nao_informada", alunos: [aluno("Ana Souza", 1)] });
+    expect(r).toEqual({ status: "confirmacao_necessaria", quantidade: 1 });
+    expect(JSON.stringify(r)).not.toContain("Ana Souza");
+  });
+
+  it("buscarAlunoPorTelefone manda data_nascimento só quando informada", async () => {
+    const fetchFalso = vi.fn(async () => new Response(JSON.stringify({ ...base, confirmacao: "nao_informada", quantidade: 1, alunos: [] }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchFalso);
+    const cfg = { baseUrl: "https://escola.invalid", apiKey: "k" };
+    await buscarAlunoPorTelefone(cfg, "5561999990000");
+    await buscarAlunoPorTelefone(cfg, "5561999990000", { dataNascimento: "2008-03-12" });
+    const urls = fetchFalso.mock.calls.map((c) => String((c as unknown[])[0]));
+    expect(urls[0]).toBe("https://escola.invalid/api/deskcomm/aluno?telefone=5561999990000");
+    expect(urls[1]).toBe("https://escola.invalid/api/deskcomm/aluno?telefone=5561999990000&data_nascimento=2008-03-12");
+    vi.unstubAllGlobals();
+  });
+});
+
+describe("normalizarDataDeNascimento", () => {
+  const agora = new Date("2026-10-14T12:00:00Z");
+  it.each([
+    ["12/03/2008", "2008-03-12"],
+    ["1/3/2008", "2008-03-01"],
+    ["12-03-2008", "2008-03-12"],
+    ["12.03.2008", "2008-03-12"],
+    [" 2008-03-12 ", "2008-03-12"],
+    ["29/02/2008", "2008-02-29"],
+  ])("%s → %s", (entrada, esperado) => {
+    expect(normalizarDataDeNascimento(entrada, agora)).toBe(esperado);
+  });
+
+  it.each([
+    ["31/02/2008", "não existe no calendário"],
+    ["29/02/2009", "2009 não é bissexto"],
+    ["12/03/08", "ano de 2 dígitos é ambíguo"],
+    ["12/13/2008", "mês 13"],
+    ["15/10/2026", "no futuro"],
+    ["01/01/1899", "antes de 1900"],
+    ["doze de março", "texto livre"],
+    ["", "vazio"],
+  ])("%s → null (%s)", (entrada) => {
+    expect(normalizarDataDeNascimento(entrada, agora)).toBeNull();
   });
 });

@@ -152,9 +152,15 @@ import {
   carregarConfig as carregarConfigSistemaEscolar,
   buscarAlunoPorTelefone,
   buscarCatalogoCursos,
+  normalizarDataDeNascimento,
   selecionarAluno,
 } from '@/lib/integracoes/sistema-escolar';
 import { toolsDoSistemaEscolarNoTurno } from './sistema-escolar-gate';
+import {
+  desfechoDaConsultaDoAluno,
+  desfechoDaFalhaDaConsulta,
+  RESPOSTA_DATA_INVALIDA,
+} from './consulta-do-aluno';
 import { ferramentasOcultasPeloEscopo } from './ferramentas-por-escopo';
 import { matchesHandoffKeyword, type PublishedAgentConfig } from './agent-config';
 import { garantirPerguntaDoRoteiro, prepararRoteiroDoTurno } from './roteiro-no-turno';
@@ -364,16 +370,27 @@ export const AGENT_TOOL_DEFS = {
       'Busca no SISTEMA ESCOLAR (dado real, não a base de conhecimento) o cadastro do aluno pelo ' +
       'número de WhatsApp deste lead: matrícula, curso/turma, horário de aula, notas, frequência ' +
       '(faltas/presenças) e situação financeira (só o status — nunca peça ou repita boleto/PIX). Use ' +
-      'para QUALQUER pergunta sobre a situação PESSOAL de um aluno já matriculado. Se não achar (aluno ' +
-      'não cadastrado com este número), ou se vier mais de um cadastro para o mesmo número (ambíguo), ' +
-      'NÃO invente — se a resposta pedir desambiguação, pergunte o nome completo e chame de novo ' +
-      'preenchendo nome_completo. Use search_knowledge apenas para pergunta genérica, não pessoal.',
+      'para QUALQUER pergunta sobre a situação PESSOAL de um aluno já matriculado. ' +
+      'IDENTIDADE: nenhum dado sai sem a DATA DE NASCIMENTO DO ALUNO, informada pela pessoa nesta ' +
+      'conversa e conferida pelo sistema escolar. Se a resposta pedir a confirmação, peça a data de ' +
+      'nascimento do aluno (dia, mês e ano) e chame de novo com data_nascimento — nunca diga qual é a ' +
+      'data certa, nunca dê dica e nunca confirme dado algum antes do "confere". Se a data já foi ' +
+      'informada e conferida nesta conversa, reutilize-a sem pedir de novo. Se vier mais de um aluno, ' +
+      'pergunte o nome completo e chame de novo com nome_completo. Não invente nada; quando a ' +
+      'ferramenta disser que passou a conversa para a equipe, avise isso e encerre o turno. Use ' +
+      'search_knowledge apenas para pergunta genérica, não pessoal.',
     inputSchema: z.object({
+      data_nascimento: z
+        .string()
+        .min(6)
+        .max(20)
+        .optional()
+        .describe('data de nascimento DO ALUNO como a pessoa escreveu (ex.: 12/03/2008); omita até ela informar'),
       nome_completo: z
         .string()
         .min(2)
         .optional()
-        .describe('nome completo informado pelo aluno; omita na primeira busca por telefone'),
+        .describe('nome completo do aluno, só quando a ferramenta pedir para desambiguar'),
     }),
   },
   consultar_catalogo_cursos: {
@@ -2953,6 +2970,44 @@ async function executarTurnoDoAgente(
    */
   const mcpToolIdsDoTurno: string[] = [];
 
+  /**
+   * Passagem para a equipe decidida pelo CÓDIGO, não pelo modelo — o mesmo caminho
+   * da tool `request_human_handoff` (aviso ao lead, passagem com o porquê, silêncio,
+   * item na Central), para os desfechos em que continuar com a IA seria inventar ou
+   * insistir: consulta ao sistema escolar que falhou, identidade bloqueada por
+   * tentativas, API sem o contrato de confirmação e ambiguidade que o nome não
+   * resolveu. Antes disto, esses desfechos voltavam ao modelo como "siga sem o dado"
+   * e a passagem dependia de ele obedecer ao prompt (auditoria de 14/10/2026, R-06).
+   */
+  const passarParaAEquipePeloSistema = async (porQue: string): Promise<{ ok: boolean }> => {
+    passouParaAEquipe = true;
+    try {
+      const aviso =
+        seq === 0
+          ? await avisarLeadDaEscalacao(pool, avisoDaEscalacao().ids, {
+              ...avisoDaEscalacao().base,
+              motivo: 'outro',
+            })
+          : ({ avisado: true } as const);
+      const res = await applyRequestHumanHandoff(
+        pool,
+        { tenantId, leadId, conversationId: input.conversationId },
+        {
+          conversationSummary: buildHandoffSummary(previous),
+          contextoDoTurno: { checkpoint: previous, pendentesDoCliente: inboundsPendentes },
+          avisoAoLead: aviso,
+          gatilho: { inboundMessageId: input.inboundMessageId },
+          log: runLog,
+        },
+        { por_que: porQue },
+      );
+      return { ok: res.ok };
+    } catch (err) {
+      noteRunError(err instanceof Error ? err : new Error(String(err)));
+      return { ok: false };
+    }
+  };
+
   const rawTools: ToolSet = {
     get_lead_context: tool({
       ...AGENT_TOOL_DEFS.get_lead_context,
@@ -3169,7 +3224,7 @@ async function executarTurnoDoAgente(
     }),
     consultar_aluno_sistema_escolar: tool({
       ...AGENT_TOOL_DEFS.consultar_aluno_sistema_escolar,
-      execute: async ({ nome_completo }) => {
+      execute: async ({ nome_completo, data_nascimento }) => {
         // Gate igual ao de search_knowledge: sem config pra esta org, a tool nem
         // deveria ter entrado no turno (ver bloco de montagem de tools abaixo) —
         // este branch é defesa em profundidade, não o caminho normal.
@@ -3186,53 +3241,36 @@ async function executarTurnoDoAgente(
             error: { code: 'sem_telefone', message: 'este contato não tem telefone registrado — não dá pra buscar.' },
           };
         }
+        let dataNascimento: string | undefined;
+        if (data_nascimento !== undefined) {
+          const normalizada = normalizarDataDeNascimento(data_nascimento);
+          if (normalizada === null) return RESPOSTA_DATA_INVALIDA;
+          dataNascimento = normalizada;
+        }
+        let desfecho;
         try {
-          const out = await buscarAlunoPorTelefone(sistemaEscolarConfig, telefone);
+          const out = await buscarAlunoPorTelefone(
+            sistemaEscolarConfig,
+            telefone,
+            dataNascimento === undefined ? {} : { dataNascimento },
+          );
           const selecao = selecionarAluno(out, nome_completo);
-          if (selecao.status === 'nao_encontrado') {
-            return {
-              ok: true,
-              encontrado: false,
-              message: 'nenhum aluno foi encontrado com o telefone desta conversa; não invente dados.',
-            };
+          if (selecao.status === 'correspondencia_nao_confirmada' || selecao.status === 'api_sem_confirmacao') {
+            runLog.warn('sistema escolar sem casamento exato ou sem confirmação de identidade — nenhum dado repassado', {
+              status: selecao.status,
+            });
           }
-          if (selecao.status === 'correspondencia_nao_confirmada') {
-            runLog.warn('sistema escolar respondeu sem match_type=exact — nenhum dado de aluno repassado', {});
-            return {
-              ok: true,
-              encontrado: false,
-              message:
-                'não foi possível confirmar que este número pertence a um aluno; não informe nenhum dado ' +
-                'acadêmico nem financeiro, não invente, e ofereça passar para uma pessoa da equipe.',
-            };
-          }
-          if (selecao.status === 'ambiguo') {
-            return {
-              ok: true,
-              encontrado: true,
-              ambiguo: true,
-              quantidade: selecao.quantidade,
-              message: 'este telefone pertence a mais de um aluno; peça o nome completo e chame esta ferramenta novamente com nome_completo.',
-            };
-          }
-          if (selecao.status === 'nome_nao_encontrado') {
-            return {
-              ok: true,
-              encontrado: true,
-              ambiguo: true,
-              message: 'o nome informado não corresponde exatamente a nenhum aluno deste telefone; confira o nome completo, sem sugerir nomes.',
-            };
-          }
-          return { ok: true, encontrado: true, ambiguo: false, aluno: selecao.aluno };
+          desfecho = desfechoDaConsultaDoAluno(selecao, Boolean(nome_completo?.trim()));
         } catch (err) {
           runLog.warn('consulta ao sistema escolar (aluno) falhou', {
             error: err instanceof Error ? err.message : String(err),
           });
-          return {
-            ok: false,
-            error: { code: 'falha_consulta', message: 'não consegui consultar o sistema escolar agora — siga sem esse dado, ou peça pra tentar de novo em instantes.' },
-          };
+          desfecho = desfechoDaFalhaDaConsulta();
         }
+        if (desfecho.acao === 'passar_para_equipe') {
+          await passarParaAEquipePeloSistema(desfecho.porQue);
+        }
+        return desfecho.resposta;
       },
     }),
     consultar_catalogo_cursos: tool({

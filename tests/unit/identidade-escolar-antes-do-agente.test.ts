@@ -328,3 +328,19 @@ describe("moverContatoParaEtapaAcademica — a etapa é achada pela POLÍTICA, n
     expect(await moverContatoParaEtapaAcademica(sb, { organizationId: "org", contactId: "contato" })).toMatchObject({ motivo: "sem_lead_aberto" });
   });
 });
+
+describe("decidirIdentidadeEscolar — contrato v2 (sem a data de nascimento a lista vem vazia)", () => {
+  it("quantidade > 0 com alunos vazio → relacionado (o número é de aluno; nenhum dado saiu)", () => {
+    expect(
+      decidirIdentidadeEscolar({ encontrado: true, match_type: "exact", confirmacao: "nao_informada", quantidade: 1, alunos: [] }),
+    ).toBe("relacionado_a_aluno");
+  });
+  it("quantidade 0 → desconhecido", () => {
+    expect(
+      decidirIdentidadeEscolar({ encontrado: true, match_type: "exact", confirmacao: "nao_informada", quantidade: 0, alunos: [] }),
+    ).toBe("desconhecido");
+  });
+  it("v2 sem casamento exato continua desconhecido, mesmo com quantidade", () => {
+    expect(decidirIdentidadeEscolar({ encontrado: true, quantidade: 3, alunos: [] })).toBe("desconhecido");
+  });
+});

@@ -11,7 +11,9 @@
  * depois, que desambigua pedindo o nome completo.
  *
  * `relacionado_a_aluno` exige as TRÊS coisas: a API achou alguém, afirmou casamento
- * pelo número COMPLETO (`match_type === 'exact'`) e devolveu pelo menos um aluno.
+ * pelo número COMPLETO (`match_type === 'exact'`) e contou pelo menos um aluno
+ * (`quantidade` no contrato v2, que não traz dado sem a data de nascimento; o
+ * tamanho de `alunos` na API anterior).
  * Qualquer outra resposta — API antiga sem `match_type` (casava pelo sufixo: um
  * aluno de outro DDD), casamento não exato, erro, timeout, payload inválido — é
  * `desconhecido`. Fail-closed: errar para "desconhecido" deixa o contato no fluxo
@@ -40,7 +42,12 @@ export function decidirIdentidadeEscolar(resposta: RespostaAlunoPorTelefone | nu
   if (resposta === null) return "desconhecido";
   if (!resposta.encontrado) return "desconhecido";
   if (resposta.match_type !== "exact") return "desconhecido";
-  if (!Array.isArray(resposta.alunos) || resposta.alunos.length === 0) return "desconhecido";
+  // Contrato v2: sem a data de nascimento a API devolve `alunos: []` e a
+  // `quantidade` que casou pelo número. Relacionar o NÚMERO a um aluno não expõe
+  // dado nenhum — só leva o card à etapa acadêmica, onde o agente pede a
+  // confirmação antes de qualquer resposta.
+  const quantidade = resposta.quantidade ?? (Array.isArray(resposta.alunos) ? resposta.alunos.length : 0);
+  if (quantidade === 0) return "desconhecido";
   return "relacionado_a_aluno";
 }
 
