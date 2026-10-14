@@ -149,6 +149,7 @@ import {
 } from './entrega-de-capacidade';
 import { composeSystemPrompt, loadOrgMemory, renderOrgMemory } from './org-memory';
 import { AVISOS_INDISPONIVEIS, carregarAvisosVigentes, renderAvisosVigentes } from '@/lib/ai/avisos-temporarios';
+import { mensagemAposRegistro, registrarPreMatricula, validarPreMatricula } from '@/lib/pre-matricula/registrar';
 import {
   carregarConfig as carregarConfigSistemaEscolar,
   buscarAlunoPorTelefone,
@@ -401,6 +402,26 @@ export const AGENT_TOOL_DEFS = {
       'de curso para um lead — é a fonte de verdade sobre valores, mais atual que qualquer material ' +
       'anexado. Sem resultado ou dado desatualizado: caia para search_knowledge.',
     inputSchema: z.object({}),
+  },
+  registrar_pre_matricula: {
+    description:
+      'Registra a PRÉ-MATRÍCULA de quem quer se matricular e passa a conversa para um consultor. ' +
+      'Use quando a pessoa disser claramente que quer se matricular ou garantir a vaga num curso. ' +
+      'Peça, um de cada vez e sem interrogatório: nome completo, e-mail, curso (do catálogo) e turno ' +
+      'de interesse. O telefone é este WhatsApp — só pergunte se ela preferir outro número. NUNCA peça ' +
+      'CPF, RG, endereço ou documento. Antes de chamar, confirme os dados e pergunte: "Posso registrar ' +
+      'sua pré-matrícula com esses dados para um consultor continuar o atendimento?" — só com o sim, ' +
+      'chame com consentimento: true. Depois dela você não fala mais com a pessoa nesta conversa.',
+    inputSchema: z
+      .object({
+        nome_completo: z.string().describe('nome e sobrenome do futuro aluno'),
+        email: z.string().describe('e-mail para contato da secretaria'),
+        curso: z.string().describe('nome do curso de interesse, como está no catálogo'),
+        turno: z.enum(['manha', 'tarde', 'noite', 'sem_preferencia']).describe('turno preferido'),
+        telefone_contato: z.string().optional().describe('só se a pessoa quiser outro número além deste WhatsApp'),
+        consentimento: z.boolean().describe('true SÓ depois de a pessoa autorizar o registro'),
+      })
+      .passthrough(),
   },
   request_human_handoff: {
     description:
@@ -3957,6 +3978,39 @@ async function executarTurnoDoAgente(
     // F4-06: handoff humano acionado pelo PRÓPRIO modelo (cidadão de 1ª classe). MUTANTE
     // (seta force_human no CRM + cancela crons + inbox), fora de READ_ONLY_TOOLS. tenant/
     // lead/conversation vêm da ROW do job (closure), nunca do payload do modelo.
+    // Pré-matrícula (0659): MUTANTE (grava o pedido e passa a conversa para a
+    // equipe). Organização/contato/conversa/agente vêm da closure, nunca do payload.
+    registrar_pre_matricula: tool({
+      ...AGENT_TOOL_DEFS.registrar_pre_matricula,
+      execute: async (raw) => {
+        const validacao = validarPreMatricula(raw, openingContext.context.contact.phone ?? null);
+        if (!validacao.ok) return { ok: false, error: validacao.erro };
+        try {
+          const res = await registrarPreMatricula(
+            pool,
+            {
+              organizationId: tenantId,
+              contactId: leadId,
+              conversationId: input.conversationId ?? null,
+              agentId: agentConfig?.agentId ?? null,
+            },
+            validacao.dados,
+          );
+          if (!res.ok) return { ok: false, error: res.erro };
+          await passarParaAEquipePeloSistema(
+            `pré-matrícula ${res.status === 'registrada' ? 'registrada' : 'já existente'}: ` +
+              `${validacao.dados.curso}, turno ${validacao.dados.turno}`,
+          );
+          return { ok: true, status: res.status, message: mensagemAposRegistro(res.status) };
+        } catch (err) {
+          noteRunError(err instanceof Error ? err : new Error(String(err)));
+          return {
+            ok: false,
+            error: { code: 'internal_error', message: 'não consegui registrar a pré-matrícula agora — ofereça passar para a equipe.' },
+          };
+        }
+      },
+    }),
     request_human_handoff: tool({
       ...AGENT_TOOL_DEFS.request_human_handoff,
       execute: async (raw) => {
@@ -4232,6 +4286,13 @@ async function executarTurnoDoAgente(
     });
     if (!gate.aluno) delete rawTools.consultar_aluno_sistema_escolar;
     if (!gate.catalogo) delete rawTools.consultar_catalogo_cursos;
+  }
+
+  // Pré-matrícula (0659) é da ESCOLA e do atendimento COMERCIAL: só entra para o
+  // agente comercial de uma organização com a integração escolar ativa. Qualquer
+  // outra instalação nunca vê a ferramenta.
+  if (sistemaEscolarConfig === null || agentConfig === null || agentConfig.serviceScope !== 'comercial') {
+    delete rawTools.registrar_pre_matricula;
   }
 
   // A ferramenta de template só entra em canal que EXIGE template fora da janela.

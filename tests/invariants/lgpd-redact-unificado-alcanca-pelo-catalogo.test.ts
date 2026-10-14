@@ -222,6 +222,11 @@ const DECISOES: Record<string, Decisao> = {
     caminho: "gatilho",
     razao: "Payload do trabalho em curso esvaziado na virada (fn_meet_redact_contact / fn_reply_redact), com o job derrubado para failed: o payload carrega ids do compromisso e do contato.",
   },
+  pre_matriculas: {
+    decidida: "redigir",
+    caminho: "gatilho",
+    razao: "0659: nome completo, e-mail, telefone e anotação da equipe são dado da pessoa — redigidos na virada de is_anonymized por fn_redigir_pre_matriculas_ao_anonimizar (desenho da 0210/0391). Curso, turno, status, consentimento e datas ficam: são registro do negócio (houve um pedido de matrícula e quando).",
+  },
   lead_checkpoints: {
     decidida: "redigir",
     caminho: "gatilho",

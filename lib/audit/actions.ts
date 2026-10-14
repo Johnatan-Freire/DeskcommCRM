@@ -344,6 +344,8 @@ export const AUDIT_ACTIONS = [
   // Avisos temporários dos agentes de IA (0658).
   "ai.aviso_temporario_criado",
   "ai.aviso_temporario_alterado",
+  // Pré-matrícula (0659): a equipe dá andamento ao pedido registrado pela IA.
+  "pre_matricula.alterada",
   "followup.silence_sweep_run",
   // Roteiros de atendimento encerrados por prazo (0397) — só quando houve efeito.
   "followup.roteiros_expirados",

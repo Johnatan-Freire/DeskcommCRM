@@ -154,6 +154,9 @@ describe("inventário: quem reage a uma linha nova", () => {
         "contacts.trg_redigir_captacoes_ao_anonimizar",
         "contacts.trg_redigir_conversas_ao_anonimizar",
         "contacts.trg_redigir_exclusoes_anonimizado",
+        // 0659: AFTER UPDATE OF is_anonymized — redige as pré-matrículas do
+        // contato anonimizado. A importação não muda is_anonymized, então nem dispara.
+        "contacts.trg_redigir_pre_matriculas_ao_anonimizar",
         "contacts.trg_redigir_tarefas_ao_anonimizar",
         "contacts.trg_reply_redact",
       ].sort(),
