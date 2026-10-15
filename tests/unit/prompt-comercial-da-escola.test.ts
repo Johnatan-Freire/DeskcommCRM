@@ -11,7 +11,7 @@ describe("prompt comercial da escola", () => {
   it.each([
     ["não repete o que já foi respondido", /já disse .* não se pergunta de novo/s],
     ["segue o curso novo quando a pessoa muda de interesse", /mudou de curso de interesse, siga o novo/],
-    ["descoberta consultiva (situação, problema, implicação, necessidade)", /situação dela hoje.*o que quer resolver.*o que acontece se não resolver.*o que\s+mudaria/s],
+    ["descoberta consultiva (situação, problema, implicação, necessidade)", /situação dela hoje.*o que quer resolver.*o que acontece se não resolver.*o\s+que\s+mudaria/s],
     ["uma pergunta por vez, sem interrogatório", /no máximo uma pergunta por mensagem e sem interrogatório/],
     ["matrícula, pagamento e certificado só pelo que os materiais dizem", /matrícula, pagamento e certificado: responda só com o que/],
     ["objeção sem insistência", /respeite e\s+deixe a porta aberta, sem insistir/],
