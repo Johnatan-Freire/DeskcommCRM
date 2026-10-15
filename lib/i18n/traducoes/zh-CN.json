@@ -5478,5 +5478,21 @@
   "Escondido, o campo não aparece no formulário nem é validado como obrigatório, e o valor já gravado continua no registro.": "隐藏时该字段不出现在表单中，也不作为必填校验，已保存的值仍保留在记录里。",
   "Etiqueta juntada em": "标签已合并到",
   "as duas etiquetas viraram uma só.": "两个标签已合并为一个。",
-  "Este nome já existe no vocabulário — confirmar vai juntar as duas etiquetas numa só.": "该名称已存在于标签词表中 —— 确认后会把两个标签合并为一个。"
+  "Este nome já existe no vocabulário — confirmar vai juntar as duas etiquetas numa só.": "该名称已存在于标签词表中 —— 确认后会把两个标签合并为一个。",
+  "Agendar pausa": "预约暂停",
+  "Janela de manutenção": "维护窗口",
+  "A pausa e a retomada acontecem sozinhas no horário marcado. A mensagem que chegar durante a pausa fica gravada e volta na retomada.": "暂停和恢复会在设定的时间自动进行。暂停期间收到的消息会被保存，并在恢复后重新进入。",
+  "A pausa começa (hora local)": "暂停开始（本地时间）",
+  "A pausa termina (hora local)": "暂停结束（本地时间）",
+  "Fuso da organização": "组织时区",
+  "Para todas as conexões": "所有连接",
+  "Janelas agendadas": "已预约的窗口",
+  "Cancelar janela": "取消窗口",
+  "Agendando…": "正在预约…",
+  "Informe os dois horários da janela.": "请填写窗口的两个时间。",
+  "O fim precisa ser depois do início.": "结束时间必须晚于开始时间。",
+  "Janela agendada: a pausa e a retomada acontecem sozinhas.": "窗口已预约：暂停和恢复会自动进行。",
+  "Não foi possível agendar a janela.": "无法预约窗口。",
+  "Janela cancelada. O que ela já pausou continua pausado.": "窗口已取消。它已暂停的连接将保持暂停。",
+  "Não foi possível cancelar a janela.": "无法取消窗口。"
 }

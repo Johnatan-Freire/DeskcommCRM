@@ -263,10 +263,11 @@ export const AUDIT_ACTIONS = [
   // Rótulo interno do canal (channel_sessions.display_name); nada vai ao
   // provedor. Emitida por app/api/v1/channel-sessions/[id]/name.
   "channel.renamed",
-  // A janela de manutenção (#2388): criar e cancelar são mutações da tela e
-  // auditam como toda mutação. A pausa e a retomada que a janela aplica saem
-  // como `channel.disabled`/`channel.enabled`, com `origem: schedule`.
+  // A janela de manutenção (#2388): criar, editar e cancelar são mutações da
+  // tela e auditam como toda mutação. A pausa e a retomada que a janela aplica
+  // saem como `channel.disabled`/`channel.enabled`, com `origem: schedule`.
   "channel.schedule_created",
+  "channel.schedule_updated",
   "channel.schedule_cancelled",
   // Chamada de voz WhatsApp (WaCalls, spec 18) — pareamento do segundo
   // dispositivo vinculado, opt-in por org. Admin only.
