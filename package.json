@@ -47,7 +47,7 @@
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.16",
     "@ai-sdk/google": "^4.0.18",
-    "@ai-sdk/openai": "^4.0.68",
+    "@ai-sdk/openai": "^4.0.87",
     "@emoji-mart/data": "^1.2.1",
     "@emoji-mart/react": "^1.1.1",
     "@hello-pangea/dnd": "^18.0.1",
@@ -76,7 +76,7 @@
     "@tanstack/react-virtual": "^3.14.13",
     "@upstash/redis": "^1.38.4",
     "@xyflow/react": "^12.11.6",
-    "ai": "^7.0.103",
+    "ai": "^7.0.131",
     "class-variance-authority": "^0.7.0",
     "clsx": "^2.1.1",
     "date-fns": "^4.4.0",
