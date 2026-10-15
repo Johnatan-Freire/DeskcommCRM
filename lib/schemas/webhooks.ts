@@ -36,6 +36,13 @@ export const ENTIDADE_ESPERADA_POR_GATILHO = {
   "message.received": "message",
   "lead.tag_added": "crm_lead",
   "contact.tag_added": "contact",
+  // O contato GANHOU telefone (#2812): a ficha que estava sem número passa a ter
+  // um. É o gatilho que faltava para a operação que só consegue chamar o cliente
+  // no WhatsApp depois que ele informa o número — sem ele, a única saída era o
+  // operador fazer à mão. A entidade é o CONTATO (é dele o dado que mudou), como
+  // os irmãos `contact.tag_added` e `contact.birthday`. O emissor vive em
+  // `app/api/v1/contacts/_handler.ts`, depois do UPDATE que grava o número.
+  "contact.phone_added": "contact",
   // O aniversário nasce do cron `contact-birthdays`, e não de uma ação de
   // alguém: a entidade que ele traz é o próprio contato que faz aniversário.
   "contact.birthday": "contact",

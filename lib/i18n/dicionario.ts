@@ -4588,6 +4588,8 @@ export const DICIONARIO: Traducoes = {
   "Quando chegar mensagem no WhatsApp": { es: "Cuando llegue un mensaje por WhatsApp" },
   "Quando um lead ganhar uma tag": { es: "Cuando un lead reciba una etiqueta" },
   "Quando um contato ganhar uma tag": { es: "Cuando un contacto reciba una etiqueta" },
+  // #2812 — o gatilho de ficha SEM número que recebe um.
+  "Quando um contato ganhar um telefone": { es: "Cuando un contacto reciba un teléfono" },
   "alterado pelo assistente": { es: "cambiado por el asistente" },
   "alterado automaticamente pelo sistema": { es: "cambiado automáticamente por el sistema" },
   é: { es: "es" },

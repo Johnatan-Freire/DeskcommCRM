@@ -20,6 +20,10 @@ export const TRIGGER_LABELS: Record<TriggerEvent, string> = {
   "message.received": "Quando chegar mensagem no WhatsApp",
   "lead.tag_added": "Quando um lead ganhar uma tag",
   "contact.tag_added": "Quando um contato ganhar uma tag",
+  // #2812 — a frase diz a TRANSIÇÃO (ficha que estava SEM número recebe um), e
+  // não "contato atualizado": o que interessa a quem monta a regra é o fato
+  // novo, e "atualizado" aconteceria em toda edição de ficha.
+  "contact.phone_added": "Quando um contato ganhar um telefone",
   // A frase evita "agendamento criado", que não diz ao operador o que ele vê na
   // agenda: um horário marcado pode nascer pendente (o tipo pede confirmação) ou
   // já confirmado, e os dois caem aqui.
