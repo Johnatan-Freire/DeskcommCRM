@@ -42680,6 +42680,126 @@ grant execute on function public.comando_da_conversa(public.conversations) to au
 
 notify pgrst, 'reload schema';
 
+-- ---- pedido de LGPD sem e-mail vira revisão pendente (migration 0651) ----
+--
+-- O CHECK de `lgpd_requests.status` passa a aceitar `pending_review` (que os
+-- workers de LGPD gravam desde o EPIC-08 e o banco recusava com 23514), e os
+-- pedidos que ficaram presos em `processing` por isso — os que têm a prova no
+-- `api_audit_log` — são levados ao estado que o worker teria gravado. Bloco
+-- IDÊNTICO, letra a letra, ao de
+-- `supabase/migrations/20261013000001_0651_pedido_lgpd_sem_email_vira_revisao_pendente.sql`
+-- (o racional inteiro mora no cabeçalho dela); preso por
+-- `tests/invariants/pedido-lgpd-sem-email-vira-revisao-pendente.test.ts`. Não
+-- cria função, então fica antes da VARREDURA anon só por ordem de apêndice.
+-- Reaplicável: a troca do CHECK é pulada quando ele já aceita o estado, e
+-- pedido curado não está mais em `processing`.
+
+do $$
+declare
+  v_exportacoes integer;
+  v_sem_pegada integer;
+  v_tenants integer;
+begin
+  -- 1. O CHECK passa a aceitar o estado que o código grava. Drop e add no MESMO
+  --    statement: se o add falhar, a transação desfaz o drop junto.
+  if not exists (
+    select 1
+      from pg_constraint
+     where conrelid = 'public.lgpd_requests'::regclass
+       and conname = 'lgpd_requests_status_check'
+       and pg_get_constraintdef(oid) like '%''pending_review''%'
+  ) then
+    alter table public.lgpd_requests drop constraint if exists lgpd_requests_status_check;
+    alter table public.lgpd_requests add constraint lgpd_requests_status_check
+      check (status = any (array['received'::text, 'processing'::text, 'completed'::text,
+                                 'failed'::text, 'expired'::text, 'pending_review'::text]));
+  end if;
+
+  -- 2. Exportação presa: sem transporte de e-mail, ou titular sem endereço.
+  with prova as (
+    select distinct on (a.resource_id) a.resource_id, a.organization_id, a.metadata
+      from public.api_audit_log a
+     where a.action = 'lgpd.export_generated'
+       and a.resource_type = 'lgpd_request'
+       and (a.metadata->>'warning' = 'email_not_configured'
+            or a.metadata->>'delivery' = 'pending_review_no_email')
+     order by a.resource_id, a.created_at desc
+  )
+  update public.lgpd_requests r
+     set status = 'pending_review',
+         error_message = case when p.metadata->>'warning' = 'email_not_configured'
+                              then 'email_not_configured' else 'no_delivery_email' end,
+         result = jsonb_build_object(
+                    'pdf_path', r.organization_id::text || '/' || r.id::text || '/report.pdf',
+                    'json_path', r.organization_id::text || '/' || r.id::text || '/data.json',
+                    'sha256', p.metadata->'sha256',
+                    'signed_pades', p.metadata->'signed_pades',
+                    'warning', case when (p.metadata->>'signed_pades')::boolean
+                                    then null else 'pades_key_missing' end
+                  )
+                  || case when p.metadata->>'warning' = 'email_not_configured'
+                          then jsonb_build_object('delivered_to_hash', p.metadata->'delivered_to_hash')
+                          else '{}'::jsonb end
+    from prova p
+   where r.id = p.resource_id
+     and r.organization_id = p.organization_id
+     and r.request_type = 'data_request'
+     and r.status = 'processing'
+     and r.result is null;
+  get diagnostics v_exportacoes = row_count;
+
+  -- 3. Anonimização de contato sem pegada local.
+  update public.lgpd_requests r
+     set status = 'pending_review',
+         error_message = 'no_local_footprint',
+         result = jsonb_build_object('reason', 'no_local_footprint')
+   where r.request_type in ('redact', 'store_redact')
+     and r.status = 'processing'
+     and r.result is null
+     and exists (
+       select 1
+         from public.api_audit_log a
+        where a.action = 'lgpd.redact_no_local_footprint'
+          and a.resource_type = 'lgpd_request'
+          and a.resource_id = r.id
+          and a.organization_id = r.organization_id
+     );
+  get diagnostics v_sem_pegada = row_count;
+
+  -- 4. Anonimização de tenant com falha parcial.
+  with prova as (
+    select distinct on (a.resource_id) a.resource_id, a.organization_id, a.metadata, a.created_at
+      from public.api_audit_log a
+     where a.action = 'lgpd.tenant_redacted'
+       and a.resource_type = 'lgpd_request'
+       and a.metadata->>'partial_failure' = 'true'
+     order by a.resource_id, a.created_at desc
+  )
+  update public.lgpd_requests r
+     set status = 'pending_review',
+         completed_at = p.created_at,
+         error_message = 'partial_failure',
+         cascaded_to = p.metadata->'aggregate_counts',
+         result = jsonb_build_object(
+                    'scope', 'tenant',
+                    'processed', p.metadata->'processed',
+                    'failed_contacts_count', p.metadata->'failed_count',
+                    'aggregate_counts', p.metadata->'aggregate_counts',
+                    'callback_status', p.metadata->'callback_status',
+                    'organization_status', 'redacted'
+                  )
+    from prova p
+   where r.id = p.resource_id
+     and r.organization_id = p.organization_id
+     and r.request_type in ('redact', 'store_redact')
+     and r.status = 'processing'
+     and r.result is null;
+  get diagnostics v_tenants = row_count;
+
+  raise notice '0651: pedidos presos levados a pending_review — exportacao %, sem pegada %, tenant %',
+    v_exportacoes, v_sem_pegada, v_tenants;
+end $$;
+
 -- ---- o export do titular é reivindicado pelo worker (migration 0652, issue #2751) ----
 -- O worker de exportação LGPD só pulava pedido `completed`, então dois eventos
 -- do MESMO pedido — o webhook da Nuvemshop e a aprovação emitem

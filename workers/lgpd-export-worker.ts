@@ -282,7 +282,10 @@ export async function processLgpdExport(event: EventRow): Promise<HandlerResult>
 
     if (!deliveryEmail) {
       // Mark as pending_review — operator must contact manually.
-      await admin
+      // O erro é lido: até a 0651 o CHECK recusava este estado (23514) e o pedido
+      // ficava em `processing` para sempre, auditado como exportado. Lançar leva ao
+      // catch do handler (pedido volta à fila com o código em error_message).
+      const { error: semEnderecoErr } = await admin
         .from("lgpd_requests")
         .update({
           status: "pending_review",
@@ -297,6 +300,8 @@ export async function processLgpdExport(event: EventRow): Promise<HandlerResult>
         })
         .eq("organization_id", orgId)
         .eq("id", requestId);
+      // Só o código: o detalhe do Postgres traz a linha, e a linha traz o e-mail.
+      if (semEnderecoErr) throw new Error(`pending_review_update_failed: ${semEnderecoErr.code}`);
       await audit({
         action: "lgpd.export_generated",
         organizationId: orgId,
@@ -335,8 +340,8 @@ export async function processLgpdExport(event: EventRow): Promise<HandlerResult>
       messageId = sent.messageId;
     } catch (err) {
       if (err instanceof EmailNotConfigured) {
-        // Operator gap — mark pending_review (no retry helps).
-        await admin
+        // Operator gap — mark pending_review (no retry helps). Erro lido, como acima.
+        const { error: semTransporteErr } = await admin
           .from("lgpd_requests")
           .update({
             status: "pending_review",
@@ -352,6 +357,7 @@ export async function processLgpdExport(event: EventRow): Promise<HandlerResult>
           })
           .eq("organization_id", orgId)
           .eq("id", requestId);
+        if (semTransporteErr) throw new Error(`pending_review_update_failed: ${semTransporteErr.code}`);
         await audit({
           action: "lgpd.export_generated",
           organizationId: orgId,
