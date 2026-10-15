@@ -37,6 +37,7 @@ import type { Idioma } from "./idiomas";
 type Traducoes = Record<string, Partial<Record<Exclude<Idioma, "pt-BR">, string>>>;
 
 export const DICIONARIO: Traducoes = {
+  "O modelo padrão gravado não existe no catálogo deste provedor. Os pontos que usam o padrão vão falhar até você escolher um modelo do provedor e salvar.": { es: "El modelo predeterminado guardado no existe en el catálogo de este proveedor. Los puntos que usan el predeterminado fallarán hasta que elijas un modelo del proveedor y guardes." },
   "Pontos facultativos de {ano} cadastrados.": { es: "Días facultativos de {ano} registrados." },
   "Adicionar Carnaval e Corpus Christi de {ano}": { es: "Agregar Carnaval y Corpus Christi de {ano}" },
   "Os feriados nacionais não incluem feriados do estado, do Distrito Federal ou da cidade (no DF, por exemplo, o Dia do Evangélico em 30/11): cadastre esses dias um a um.": { es: "Los feriados nacionales no incluyen los feriados del estado, del Distrito Federal o de la ciudad (en el DF, por ejemplo, el Día del Evangélico el 30/11): regístralos uno por uno." },

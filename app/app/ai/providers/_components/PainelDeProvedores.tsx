@@ -24,6 +24,7 @@
  * carrega o sintoma em português de gente — é o que liga uma linha de
  * configuração a algo que a pessoa já viu acontecer no negócio dela.
  */
+import { padraoIncoerente } from "@/lib/ai/pontos/padrao-incoerente";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -299,6 +300,18 @@ function CartaoDoPadrao({ dados, aoSalvar }: { dados: Dados; aoSalvar: () => Pro
         {t("Vale em todo ponto que você não configurou individualmente — hoje,")} {herdam.length}{" "}
         {t("de")} {dados.pontos.length}. {t("Trocar aqui muda todos eles de uma vez.")}
       </p>
+
+      {padraoIncoerente(dados.padrao, dados.modelos) ? (
+        <p
+          role="alert"
+          className="mt-3 rounded-md border border-warning/40 bg-warning-bg px-3 py-2 text-sm text-text"
+          data-testid="padrao-incoerente"
+        >
+          {t(
+            "O modelo padrão gravado não existe no catálogo deste provedor. Os pontos que usam o padrão vão falhar até você escolher um modelo do provedor e salvar.",
+          )}
+        </p>
+      ) : null}
 
       <div className="mt-4 flex flex-wrap items-end gap-3">
         <div className="min-w-48">
