@@ -33,7 +33,7 @@ import { extrairEEstamparAtribuicaoGoogle } from "@/lib/plataformas-de-anuncio/g
 import { extrairAtribuicaoWaha } from "@/lib/waha/atribuicao-de-anuncio";
 import { previaDaMensagem } from "@/lib/messaging/previa-da-mensagem";
 import type { createAdminClient } from "@/lib/supabase/admin";
-import { ackToStatus } from "@/lib/types/messaging";
+import { ACK_ESPERA, ackDeProgresso, camposDoAck } from "@/lib/messaging/progresso-da-entrega";
 import type { WahaEnvelope, WahaPayload } from "@/lib/waha/envelope";
 import {
   bodyOf,
@@ -1095,13 +1095,12 @@ async function handleOutboundFromUserPhone(
 
 async function handleAck(admin: Admin, session: Session, p: WahaPayload): Promise<void> {
   if (!p.id) return;
-  const ack = p.ack ?? 0;
-  const status = ackToStatus(ack);
-  const now = new Date().toISOString();
-
-  const update: Record<string, unknown> = { ack, status };
-  if (ack >= 2) update.delivered_at = now;
-  if (ack >= 3) update.read_at = now;
+  // Só degrau de progresso muda alguma coisa, e só para cima
+  // (`lib/messaging/progresso-da-entrega.ts`): um ack 0 tardio rebaixava para
+  // `sending` uma mensagem já entregue.
+  const ack = ackDeProgresso(p.ack);
+  if (ack === null) return;
+  const update = camposDoAck(ack, new Date().toISOString());
 
   // O ack do WAHA 2026.x vem como `{fromMe}_{chatId}_{bareId}`. O NOWEB grava
   // `external_id` = bareId (id interno), o WEBJS grava o `_serialized` completo.
@@ -1109,11 +1108,44 @@ async function handleAck(admin: Admin, session: Session, p: WahaPayload): Promis
   // inbound (que é full e sustenta o dedup 23505).
   const bare = bareWaMessageId(p.id);
   const candidates = bare === p.id ? [p.id] : [p.id, bare];
-  await admin
-    .from("messages")
-    .update(update)
-    .eq("organization_id", session.organization_id)
-    .in("external_id", candidates);
+
+  // O ack chega ~0,2 s depois do envio, e o envio só grava o `external_id` na
+  // linha dele quando o canal responde (0,7–2,6 s medidos). Sem esperar, o ack
+  // não acha a linha e o ✓✓ se perde para sempre. Espera curta, e só quando há
+  // envio nosso em voo — ack de mensagem que o CRM não tem não segura o webhook.
+  for (let tentativa = 1; ; tentativa++) {
+    const { data: atualizadas } = await admin
+      .from("messages")
+      .update(update)
+      .eq("organization_id", session.organization_id)
+      .in("external_id", candidates)
+      .or(`ack.is.null,ack.lt.${ack}`)
+      .select("id");
+    if ((atualizadas?.length ?? 0) > 0) return;
+    if (tentativa >= ACK_ESPERA.tentativas) return;
+
+    // A linha existe e já está neste degrau ou acima: nada a fazer.
+    const { data: existentes } = await admin
+      .from("messages")
+      .select("id")
+      .eq("organization_id", session.organization_id)
+      .in("external_id", candidates)
+      .limit(1);
+    if ((existentes?.length ?? 0) > 0) return;
+
+    const { data: emVoo } = await admin
+      .from("messages")
+      .select("id")
+      .eq("organization_id", session.organization_id)
+      .eq("direction", "outbound")
+      .is("external_id", null)
+      .in("status", ["queued", "sending"])
+      .gte("created_at", new Date(Date.now() - ACK_ESPERA.janelaDoEnvioMs).toISOString())
+      .limit(1);
+    if ((emVoo?.length ?? 0) === 0) return;
+
+    await new Promise((r) => setTimeout(r, ACK_ESPERA.intervaloMs));
+  }
 }
 
 interface SessionStatusRow extends Session {

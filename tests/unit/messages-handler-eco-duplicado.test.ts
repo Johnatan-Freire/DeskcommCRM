@@ -162,9 +162,14 @@ function makeSupabase(preexistentes: Row[] = []) {
             filtros.push((r) => typeof r[col] === 'string' && re.test(r[col] as string));
             return q;
           },
-          then(resolve: (v: { error: null }) => unknown) {
-            for (const alvo of filtrar(filtros)) messages.splice(messages.indexOf(alvo), 1);
-            return Promise.resolve({ error: null }).then(resolve);
+          // `.delete().….select()` devolve as linhas apagadas, como o PostgREST.
+          select() {
+            return q;
+          },
+          then(resolve: (v: { data: Row[]; error: null }) => unknown) {
+            const apagadas: Row[] = [];
+            for (const alvo of filtrar(filtros)) apagadas.push(...messages.splice(messages.indexOf(alvo), 1));
+            return Promise.resolve({ data: apagadas, error: null as null }).then(resolve);
           },
         };
         return q;
@@ -234,6 +239,32 @@ describe('eco do próprio envio na janela em que a linha ainda não tem external
     const sobrou = messages.find((m) => m.external_id === BARE || m.external_id === COMPOSTO)!;
     expect(sobrou.sent_by_user_id).toBe(USER);
     expect(sobrou.sent_via).toBe('user');
+    expect(sobrou.status).toBe('sent');
+  });
+
+  it('o ✓✓ que o eco já tinha ouvido passa para a linha do envio (medido em 15/10/2026)', async () => {
+    // O `message.ack` chega ~0,2 s depois do envio e casa com o ECO (a linha do
+    // envio ainda não tem id). A limpeza apaga o eco; sem herdar o degrau, o
+    // envio gravava `sent/ack=0` e a mensagem entregue ficava com um ✓ para sempre.
+    wahaRespondendo(BARE);
+    const { supabase, messages } = makeSupabase([ecoDoWebhook({ ack: 2, status: 'delivered' })]);
+
+    await sendMessageHandler(supabase, ctx, input);
+
+    const sobrou = messages.find((m) => m.external_id === BARE || m.external_id === COMPOSTO)!;
+    expect(sobrou.sent_via, 'sobrou a linha do envio').toBe('user');
+    expect(sobrou.status, 'o ✓✓ se perdeu na limpeza do eco').toBe('delivered');
+    expect(sobrou.ack).toBe(2);
+    expect(sobrou.delivered_at).toEqual(expect.any(String));
+  });
+
+  it('eco sem degrau de entrega: o envio fica `sent`, como sempre', async () => {
+    wahaRespondendo(BARE);
+    const { supabase, messages } = makeSupabase([ecoDoWebhook({ ack: 1, status: 'sent' })]);
+
+    await sendMessageHandler(supabase, ctx, input);
+
+    const sobrou = messages.find((m) => m.external_id === BARE || m.external_id === COMPOSTO)!;
     expect(sobrou.status).toBe('sent');
   });
 
