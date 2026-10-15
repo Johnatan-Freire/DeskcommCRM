@@ -121,7 +121,16 @@ import { GET as detalhe } from "@/app/api/v1/lgpd/requests/[id]/route";
 
 const ORG = ORG_DA_SESSAO;
 const PEDIDO = "22222222-2222-4222-8222-222222222222";
-const evento = { id: 1, organization_id: ORG, entity_id: PEDIDO, payload: { request_id: PEDIDO } } as unknown as EventRow;
+// Desde o #2897 (doc 134) o worker só exporta o evento que a rota de aprovação
+// emite, com `manually_approved` + `approved_by`. Este teste mede o pedido SEM
+// e-mail DEPOIS de aprovado, então o evento leva a marca da aprovação.
+const APROVADOR = "33333333-3333-4333-8333-333333333333";
+const evento = {
+  id: 1,
+  organization_id: ORG,
+  entity_id: PEDIDO,
+  payload: { request_id: PEDIDO, manually_approved: true, approved_by: APROVADOR },
+} as unknown as EventRow;
 
 const auditouExportado = () =>
   vi.mocked(audit).mock.calls.some(([e]) => (e as { action: string }).action === "lgpd.export_generated");
