@@ -45506,6 +45506,230 @@ grant  execute on function public.fn_tags_normalizar(text[], text, text, boolean
 revoke execute on function public.fn_vocabulario_de_tags_operar(uuid, text, text, text, text) from public, anon;
 grant  execute on function public.fn_vocabulario_de_tags_operar(uuid, text, text, text, text) to authenticated, service_role;
 
+
+
+-- ---- a marca "sempre atendimento humano" vale no envio da agenda (migration 0676) ----
+-- O envio do link de reunião decidia a elegibilidade com `aiOptOut: false` fixo,
+-- confiando que ligar `contacts.ai_opt_out` também deixa `force_human` ligado.
+-- Agora a política devolve a marca e quem decide a lê. O settle precisa aceitar
+-- o motivo novo, senão a recusa vira exceção e o job fica sem acerto.
+create or replace function public.fn_meet_delivery_policy(p_org uuid,p_job uuid,p_worker text,p_acquired_at timestamptz)
+returns jsonb language plpgsql stable security definer set search_path=public as $$
+declare r record;
+begin
+ select a.meeting_delivery,a.contact_id,v.channel_session_id,c.is_blocked,c.is_anonymized,c.force_human,c.ai_opt_out,c.ai_authorized_at,v.assignee_kind,v.bot_silenced_until,cs.metadata,cs.archived_at,
+  public.fn_meet_delivery_current(p_org,p_job,p_worker,p_acquired_at) as current
+ into r from public.job_queue j join public.calendar_appointments a on a.organization_id=j.organization_id and a.id::text=j.payload->>'appointment_id'
+ join public.contacts c on c.organization_id=a.organization_id and c.id=a.contact_id
+ join public.conversations v on v.organization_id=a.organization_id and v.contact_id=a.contact_id and v.id::text=j.payload->'service_boundary'->>'conversation_id'
+ join public.channel_sessions cs on cs.organization_id=v.organization_id and cs.id=v.channel_session_id
+ where j.organization_id=p_org and j.id=p_job and j.kind='transactional_delivery' and j.status='running' and j.locked_by=p_worker and j.locked_at=p_acquired_at
+  and a.meeting_delivery_job_id=j.id and a.meeting_delivery->>'generation'=j.payload->>'delivery_generation';
+ if not found then return jsonb_build_object('current',false,'reason','stale');end if;
+ if not r.current then return jsonb_build_object('current',false,'reason',case when r.is_anonymized then 'lgpd' when r.is_blocked then 'opt_out' when r.archived_at is not null then 'channel' else 'access_or_stale' end);end if;
+ return jsonb_build_object('current',true,'contact_id',r.contact_id,'channel_session_id',r.channel_session_id,'human_command',r.meeting_delivery->'authorized_by'->>'kind'='user',
+  'force_human',r.force_human,'ai_opt_out',r.ai_opt_out,'ai_gate',r.metadata->>'ai_gate','ai_authorized_at',r.ai_authorized_at,'assignee_kind',r.assignee_kind,'bot_silenced_until',r.bot_silenced_until);
+end;$$;
+revoke all on function public.fn_meet_delivery_policy(uuid,uuid,text,timestamptz) from public,anon,authenticated;
+grant execute on function public.fn_meet_delivery_policy(uuid,uuid,text,timestamptz) to service_role;
+
+create or replace function public.fn_meet_delivery_settle(p_org uuid,p_job uuid,p_worker text,p_acquired_at timestamptz,p_state text,p_retry_at timestamptz default null)
+returns boolean language plpgsql security definer set search_path=public as $$
+declare j public.job_queue; a public.calendar_appointments; contact uuid; current_intent boolean; reason text;
+begin
+ select contact_id into contact from public.job_queue where organization_id=p_org and id=p_job;
+ if contact is null then return false;end if;
+ perform public.fn_service_lock(p_org,contact);
+ select * into j from public.job_queue where organization_id=p_org and id=p_job for update;
+ if not found or j.kind<>'transactional_delivery' or j.status<>'running' or j.locked_by is distinct from p_worker or j.locked_at is distinct from p_acquired_at then return false;end if;
+ select * into a from public.calendar_appointments where organization_id=p_org and id::text=j.payload->>'appointment_id' for update;
+ current_intent:=a.meeting_delivery_job_id=j.id and a.meeting_delivery->>'generation'=j.payload->>'delivery_generation';
+ if p_state like 'blocked:%' then
+  reason:=substring(p_state from 9);
+  if reason not in ('opt_out','lgpd','channel','access_or_stale','force_human','conversa_silenciada','conversa_de_humano','sem_autorizacao','autorizacao_expirada','ai_opt_out','limits','guardrail') then raise exception 'meet_reason_invalid' using errcode='22023';end if;
+  p_state:='blocked';
+ end if;
+ if p_state not in ('sent','queued','retry','failed','blocked','stale') then raise exception 'meet_state_invalid' using errcode='22023';end if;
+ if p_state in ('sent','queued','retry') and not public.fn_meet_delivery_current(p_org,p_job,p_worker,p_acquired_at) then p_state:='stale';end if;
+ if p_state='sent' and not exists(select 1 from public.send_ledger where organization_id=p_org and job_id=p_job and seq=1 and status='accepted') then raise exception 'meet_delivery_not_accepted' using errcode='PT409';end if;
+ if p_state='retry' and j.attempts>=j.max_attempts then p_state:='failed';end if;
+ if p_state in ('queued','retry') then
+  update public.job_queue set status='pending',locked_by=null,locked_at=null,attempts=case when p_state='queued' then greatest(0,attempts-1) else attempts end,run_after=coalesce(p_retry_at,now()+interval '1 minute'),last_error='meet_delivery_waiting' where id=p_job and organization_id=p_org;
+ else
+  update public.job_queue set status=case when p_state='sent' then 'done' else 'failed' end,locked_by=null,locked_at=null,last_error=case when p_state='sent' then null else coalesce(reason,'meet_delivery_'||p_state) end where id=p_job and organization_id=p_org;
+  if current_intent then
+   update public.calendar_appointments set meeting_delivery=meeting_delivery||jsonb_build_object('state',p_state,'error',case when p_state='sent' then null else coalesce(reason,'meet_delivery_'||p_state) end,'settled_at',now()) where id=a.id and organization_id=p_org;
+   if p_state<>'sent' then perform public.fn_meet_notice(p_org,a.id,p_state);
+   else update public.agent_inbox_items set status='resolved',resolved_at=now() where organization_id=p_org and ref_kind='appointment' and ref_id=a.id and kind='other' and status='open';end if;
+  end if;
+ end if;
+ return true;
+end;$$;
+revoke all on function public.fn_meet_delivery_settle(uuid,uuid,text,timestamptz,text,timestamptz) from public,anon,authenticated;
+grant execute on function public.fn_meet_delivery_settle(uuid,uuid,text,timestamptz,text,timestamptz) to service_role;
+
+-- ---- o lote não troca o motivo de quem já estava perdido (migration 0674, issue #2887) ----
+--
+-- ─── O defeito, medido ──────────────────────────────────────────────────────
+--
+-- A função nasceu (0209) trocando só o `stage_id`, e a 0263 lhe deu
+-- `p_lost_reason` para a etapa de perda não recusar o lote inteiro com 23514.
+-- Nas duas, a escrita do motivo é uma só para o lote todo:
+--
+--   if v_motivo is not null then v_coluna_motivo := ', lost_reason = $4';
+--
+-- `p_lost_reason` é UM motivo para N negócios, e ele caía em TODOS os cards do
+-- alvo — inclusive nos que já estavam perdidos e já tinham o motivo DELES. Quem
+-- perdeu por preço em março e aparece no lote de hoje sai com o motivo de hoje,
+-- sem evento (o `status` não muda), sem linha de timeline e sem auditoria: as
+-- três superfícies do produto continuam contando a perda de março, e a coluna
+-- passa a dizer outra coisa. Medido no baseline (pg16), lote de um card já
+-- perdido + um aberto para a etapa de perda:
+--
+--   card já perdido, motivo 'price', lote com 'no_response'
+--     → lost_reason = 'no_response'   (era 'price')
+--
+-- ─── O que o conserto faz ───────────────────────────────────────────────────
+--
+-- Divide a escrita pelo `status` da linha, que é a MESMA pergunta que o
+-- `/lose` faz. A rota individual é idempotente por `jaEstava`
+-- (`lead.status === 'lost'` → não escreve nada); aqui o card já perdido
+-- continua sendo MOVIDO (o lote pediu o movimento, e a timeline do movimento é
+-- dele), mas a coluna do motivo fica fora daquela escrita.
+--
+-- ⚠️ O DISCRIMINADOR É O `status`, NUNCA `lost_reason is null`. O card
+-- REABERTO carrega o motivo da perda anterior, e uma perda NOVA o substitui —
+-- é o que o `/lose` faz (escreve `lost_reason = input.motivo` sempre que o
+-- `status` não é 'lost') e é o que `decideMotivoDaPerda` já autoriza
+-- (`motivoAtual` só dispensa motivo NOVO; motivo informado sempre vale).
+-- Perguntar pela coluna em vez do `status` deixaria um negócio perdido hoje por
+-- "no_response" com o motivo "price" da perda de março.
+--
+-- ⚠️ POR QUE UM RAMO SEPARADO, e não `coalesce(lost_reason, $4)` (a alternativa
+-- que a issue oferece). `trg_validate_lost_reason_required` é
+-- `before update of status, lost_reason`: a lista de colunas do `update` decide
+-- se ele roda, e o que ele confere é o valor RESULTANTE, não o valor que mudou.
+-- Com a coluna sempre na lista, um card cujo motivo saiu de
+-- `crm_pipelines.settings.lost_reasons` depois de usado — motivo gravado e
+-- legítimo, que a 0263 protege de propósito — é recusado com 22023
+-- `lost_reason_invalid`, e como a função é uma transação só, o LOTE INTEIRO
+-- falha. O arrasto do MESMO card (que não toca a coluna) continuaria passando:
+-- dois caminhos respondendo diferente para o mesmo card é o defeito da #917 com
+-- outro nome. Os dois ramos deixam a coluna fora da lista de quem preserva.
+--
+-- ─── Os chamadores (medido, não presumido) ──────────────────────────────────
+--
+-- O único chamador de `fn_mover_leads_em_lote` é a rota `POST /api/v1/leads/bulk`
+-- (`supabase.rpc("fn_mover_leads_em_lote", …)`) — o arrasto do quadro vai por
+-- `PATCH /api/v1/leads/[id]/move`, que escreve a coluna direto e passa por
+-- `decideMotivoDaPerda`; a IA não move (`agent-stage-sync.ts` recusa e abre item
+-- de inbox). Assinatura (`uuid, uuid[], uuid, text`, com default), colunas de
+-- retorno (`lead_id, from_stage_id, pipeline_id`) e atomicidade continuam as
+-- mesmas, então nenhum chamador muda — nem o `select` de tipos gerados.
+--
+-- ⚠️ ATOMICIDADE: os dois ramos são CTEs que MODIFICAM dados na MESMA sentença
+-- — um `return query execute` só, um `now()` só, um `alvo` só. Os predicados são
+-- disjuntos pelo mesmo `status` lido do mesmo snapshot (`is distinct from 'lost'`
+-- e `= 'lost'`), então nenhuma linha é escrita duas vezes; e como `alvo` é o
+-- mesmo nos dois ramos, a `ordem` do `row_number()` continua sendo a do lote
+-- inteiro — é isso que mantém as posições DISTINTAS entre os dois grupos, a
+-- razão de existir da 0209.
+--
+-- ⚠️ `%` no texto do `format` é marcador: o corpo abaixo não pode conter nenhum
+-- além dos três `%s` (não contém). Quem for editar, confira.
+--
+-- Sem coluna nova, sem backfill, sem dado tocado: quem já estava perdido
+-- simplesmente para de ser reescrito. Idempotente (`create or replace`), e a
+-- assinatura é a mesma da 0263, então NÃO há `drop function` aqui — quem aplica
+-- a cadeia não perde os grants no meio do caminho.
+
+create or replace function public.fn_mover_leads_em_lote(
+  p_organization_id uuid,
+  p_lead_ids uuid[],
+  p_stage_id uuid,
+  p_lost_reason text default null
+) returns table (lead_id uuid, from_stage_id uuid, pipeline_id uuid)
+language plpgsql
+set search_path = public
+as $$
+declare
+  v_piso numeric;
+  -- Motivo em branco é ausência de motivo, nunca um motivo de uma letra.
+  v_motivo text := nullif(btrim(coalesce(p_lost_reason, '')), '');
+  v_coluna_motivo text := '';
+  v_filtro_novos text := '';
+  v_filtro_preservados text := 'false';
+begin
+  -- `coalesce(..., 0)` cobre a etapa vazia; o DEFAULT da coluna é 1000, então
+  -- o primeiro card de um lote para uma etapa vazia cai em 1000, como um card
+  -- criado à mão.
+  select coalesce(max(l.position_in_stage), 0)
+    into v_piso
+    from public.crm_leads l
+   where l.organization_id = p_organization_id
+     and l.stage_id = p_stage_id
+     and not (l.id = any(p_lead_ids));
+
+  -- Só com motivo a gravar a coluna entra na escrita (0263; ver o cabeçalho) —
+  -- e só quem NÃO estava perdido recebe a coluna (#2887). Sem motivo, o ramo dos
+  -- novos leva o lote inteiro e o dos preservados não casa nenhuma linha.
+  if v_motivo is not null then
+    v_coluna_motivo := ', lost_reason = $4';
+    v_filtro_novos := ' and l.status is distinct from ''lost''';
+    v_filtro_preservados := 'l.status = ''lost''';
+  end if;
+
+  return query execute format($f$
+  with alvo as (
+    select l.id,
+           l.stage_id    as from_stage_id,
+           l.pipeline_id as pipeline_id,
+           -- A ordem do lote no destino é a ordem em que ele estava no quadro:
+           -- etapa, depois posição. `id` só desempata para o resultado ser
+           -- determinístico (dois cards podem legitimamente empatar hoje —
+           -- é justamente o estado que a migration 0209 deixa de produzir).
+           row_number() over (order by l.stage_id, l.position_in_stage, l.id) as ordem
+      from public.crm_leads l
+     where l.organization_id = $1
+       and l.id = any($2)
+  ),
+  novos as (
+    update public.crm_leads l
+       set stage_id          = $3,
+           position_in_stage = $5 + (a.ordem * 1000),
+           updated_at        = now()%s
+      from alvo a
+     where l.id = a.id
+       and l.organization_id = $1%s
+    returning l.id, a.from_stage_id, a.pipeline_id
+  ),
+  preservados as (
+    update public.crm_leads l
+       set stage_id          = $3,
+           position_in_stage = $5 + (a.ordem * 1000),
+           updated_at        = now()
+      from alvo a
+     where l.id = a.id
+       and l.organization_id = $1
+       and %s
+    returning l.id, a.from_stage_id, a.pipeline_id
+  )
+  select n.id, n.from_stage_id, n.pipeline_id from novos n
+  union all
+  select p.id, p.from_stage_id, p.pipeline_id from preservados p
+  $f$, v_coluna_motivo, v_filtro_novos, v_filtro_preservados)
+  using p_organization_id, p_lead_ids, p_stage_id, v_motivo, v_piso;
+end;
+$$;
+
+comment on function public.fn_mover_leads_em_lote(uuid, uuid[], uuid, text) is
+  'Move um lote de leads para uma etapa dando a cada um posição DISTINTA (piso da etapa de destino + 1000 por card, na ordem em que estavam no quadro). Existe porque gravar a mesma position_in_stage em N linhas quebra o midpoint() do arrasto seguinte (prev === next → NaN) e deixa a ordem do quadro indefinida. `p_lost_reason` (0263, issue #917) grava o motivo da perda na MESMA escrita quando a etapa de destino é de perda — sem ele a CHECK crm_leads_lost_reason_required recusava o lote inteiro com 23514; a coluna só entra na escrita quando há motivo, para não revalidar o valor que já estava na linha. #2887: a coluna só entra na escrita de quem NÃO estava perdido (`status is distinct from ''lost''`) — o negócio que já estava perdido é movido por um segundo ramo sem a coluna, e preserva o motivo dele; reescrever o valor que já estava na linha dispararia trg_validate_lost_reason_required e derrubaria o lote inteiro de um card cujo motivo saiu do vocabulário do funil. Devolve uma linha por card movido, com a etapa de ORIGEM, para o handler emitir a atividade de timeline de cada um.';
+
+revoke all     on function public.fn_mover_leads_em_lote(uuid, uuid[], uuid, text) from public;
+revoke execute on function public.fn_mover_leads_em_lote(uuid, uuid[], uuid, text) from anon;
+grant  execute on function public.fn_mover_leads_em_lote(uuid, uuid[], uuid, text)
+  to authenticated, service_role;
+
 -- ---- VARREDURA anon: função nova nasce exposta em quem ATUALIZA (migration 0116) ----
 --
 -- ⚠️ DE PROPÓSITO, NENHUMA FUNÇÃO É CRIADA DEPOIS DESTE BLOCO. Apêndice que cria
