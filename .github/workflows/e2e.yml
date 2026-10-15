@@ -947,6 +947,7 @@ jobs:
       # todas. Os 3 arquivos que o cancelamento impediu de medir vêm junto, porque
       # eles são justamente o fim da fila.
       SPECS_PARTE_3: >-
+        agentes-da-escola-telas.spec.ts
         autonomia-assistida.spec.ts
         roteamento-por-canal.spec.ts
         whatsapp-pareamento-por-codigo.spec.ts
@@ -1057,7 +1058,6 @@ jobs:
         vps-fresh-onboarding.spec.ts
 
       SPECS_PARTE_5: >-
-        agentes-da-escola-telas.spec.ts
         inbox-busca-e-filtros-dizem-a-verdade.spec.ts
         importacao-historico-whatsapp.spec.ts
         extensoes-da-instalacao.spec.ts
