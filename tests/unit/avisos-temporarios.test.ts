@@ -30,6 +30,12 @@ describe("bloco do prompt", () => {
     expect(bloco).toContain("- Matrícula com 10% off (válido até 20/10/2026, 23:59): 10% no curso de Excel. Cursos: Excel.");
   });
 
+  it("conflito com o permanente: vale o aviso só no que ele diz e até a data; entre avisos, o de maior prioridade", () => {
+    const bloco = renderAvisosVigentes([], "America/Sao_Paulo");
+    expect(bloco).toMatch(/vale o aviso, só no que ele disser e só até a data dele; no resto, e\s+depois do fim, vale o catálogo/);
+    expect(bloco).toMatch(/vale o primeiro da lista\s+\(o de maior prioridade\)/);
+  });
+
   it("leitura falhou: o turno segue, mas nenhuma condição especial pode ser oferecida", () => {
     expect(AVISOS_INDISPONIVEIS).toMatch(/Não ofereça promoção, desconto, data de turma nem condição especial/);
   });

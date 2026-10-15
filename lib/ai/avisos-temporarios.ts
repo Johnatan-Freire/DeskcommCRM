@@ -115,7 +115,11 @@ export function renderAvisosVigentes(avisos: readonly AvisoVigente[], fuso: stri
     "=== avisos temporários vigentes (informação com prazo, cadastrada pela equipe) ===\n" +
     "Use um aviso só enquanto ele estiver nesta lista e apenas com o que está escrito nele. " +
     "Promoção, desconto, data de turma ou condição especial que NÃO estiver aqui nem no " +
-    "catálogo não existe: não ofereça, não invente e não estenda prazo.";
+    "catálogo não existe: não ofereça, não invente e não estenda prazo. " +
+    "Se um aviso daqui contradisser o catálogo ou os materiais (um preço promocional, um " +
+    "horário diferente), vale o aviso, só no que ele disser e só até a data dele; no resto, e " +
+    "depois do fim, vale o catálogo. Se dois avisos se contradisserem, vale o primeiro da lista " +
+    "(o de maior prioridade) e, na dúvida, confirme com a equipe.";
   if (avisos.length === 0) {
     return `${cabecalho}\n(nenhum aviso vigente agora)`;
   }
