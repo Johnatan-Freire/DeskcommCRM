@@ -73,3 +73,63 @@ describe("próxima abertura pula o feriado", () => {
     expect(proximaAberturaDeUmaAgenda({ ...JORNADA, feriados }, sexta19h)?.toISOString()).toBe("2027-02-11T11:00:00.000Z");
   });
 });
+
+import { feriadosNacionaisDoAno, pontosFacultativosDoAno } from "@/lib/escalacao/feriados-do-ano";
+
+describe("cenários da jornada seg–sáb 08–12/14–18 com feriados", () => {
+  const ag = (feriados: string[]) => ({ ...JORNADA, feriados });
+  const brt = (iso: string) => new Date(`${iso}-03:00`);
+
+  it("feriado num SÁBADO (Natal 2027): sábado fora; volta segunda 08h", () => {
+    const agenda = ag(["2027-12-25"]);
+    expect(isWithinSchedule(agenda, brt("2027-12-25T09:00:00"))).toBe(false);
+    expect(proximaAberturaDeUmaAgenda(agenda, brt("2027-12-24T18:30:00"))?.toISOString()).toBe(brt("2027-12-27T08:00:00").toISOString());
+  });
+
+  it("DOMINGO nunca está no horário, com ou sem feriado", () => {
+    expect(isWithinSchedule(JORNADA, brt("2026-11-15T10:00:00"))).toBe(false);
+  });
+
+  it("VÉSPERA de feriado é dia normal até 18h", () => {
+    const agenda = ag(["2026-11-02"]);
+    expect(isWithinSchedule(agenda, brt("2026-10-31T17:59:00"))).toBe(true);
+    expect(isWithinSchedule(agenda, brt("2026-10-31T18:00:00"))).toBe(false);
+  });
+
+  it("almoço (12h–14h) é fora do horário e a volta é às 14h", () => {
+    expect(isWithinSchedule(JORNADA, brt("2026-10-15T12:30:00"))).toBe(false);
+    expect(proximaAberturaDeUmaAgenda(JORNADA, brt("2026-10-15T12:30:00"))?.toISOString()).toBe(brt("2026-10-15T14:00:00").toISOString());
+  });
+
+  it("vários dias fechados (Carnaval + Cinzas cadastrada): volta no primeiro dia aberto", () => {
+    const agenda = ag(["2027-02-08", "2027-02-09", "2027-02-10"]);
+    expect(proximaAberturaDeUmaAgenda(agenda, brt("2027-02-06T18:30:00"))?.toISOString()).toBe(brt("2027-02-11T08:00:00").toISOString());
+  });
+});
+
+describe("calendário importável", () => {
+  it("feriados nacionais POR LEI de 2026, com nome — sem Carnaval nem Corpus Christi", () => {
+    const d = feriadosNacionaisDoAno(2026);
+    expect(d.map((x) => x.data)).toEqual([
+      "2026-01-01", "2026-04-03", "2026-04-21", "2026-05-01", "2026-09-07",
+      "2026-10-12", "2026-11-02", "2026-11-15", "2026-11-20", "2026-12-25",
+    ]);
+    expect(d.every((x) => x.tipo === "feriado_nacional" && x.descricao.length > 3)).toBe(true);
+    expect(d.find((x) => x.data === "2026-04-03")?.descricao).toBe("Sexta-feira Santa");
+  });
+
+  it("2027: Sexta-feira Santa em 26/03; 20/11 cai no sábado", () => {
+    const d = feriadosNacionaisDoAno(2027);
+    expect(d.find((x) => x.descricao === "Sexta-feira Santa")?.data).toBe("2027-03-26");
+    expect(d.some((x) => x.data === "2027-11-20")).toBe(true);
+  });
+
+  it("pontos facultativos separados: Carnaval (seg e ter) e Corpus Christi", () => {
+    expect(pontosFacultativosDoAno(2026).map((x) => `${x.data} ${x.descricao}`)).toEqual([
+      "2026-02-16 Carnaval (segunda-feira)",
+      "2026-02-17 Carnaval (terça-feira)",
+      "2026-06-04 Corpus Christi",
+    ]);
+    expect(pontosFacultativosDoAno(2027).map((x) => x.data)).toEqual(["2027-02-08", "2027-02-09", "2027-05-27"]);
+  });
+});

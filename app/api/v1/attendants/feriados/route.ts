@@ -17,7 +17,8 @@ import { ok, fail } from "@/lib/api/wrappers";
 import { audit } from "@/lib/audit";
 import { requireRole } from "@/lib/auth/require-role";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { feriadosDoBrasilDoAno, PRIMEIRO_ANO_COBERTO, ULTIMO_ANO_COBERTO } from "@/lib/lgpd/holidays-br";
+import { PRIMEIRO_ANO_COBERTO, ULTIMO_ANO_COBERTO } from "@/lib/lgpd/holidays-br";
+import { feriadosNacionaisDoAno, pontosFacultativosDoAno } from "@/lib/escalacao/feriados-do-ano";
 import { traduzir } from "@/lib/i18n/dicionario";
 
 export const dynamic = "force-dynamic";
@@ -29,9 +30,13 @@ const umDiaSchema = z
   })
   .strict()
   .refine((d) => !Number.isNaN(new Date(`${d.data}T12:00:00Z`).getTime()), { path: ["data"], message: "Data inválida." });
-const nacionaisSchema = z
-  .object({ nacionais: z.number().int().min(PRIMEIRO_ANO_COBERTO).max(ULTIMO_ANO_COBERTO) })
-  .strict();
+const ano = z.number().int().min(PRIMEIRO_ANO_COBERTO).max(ULTIMO_ANO_COBERTO);
+// `nacionais`: só os feriados nacionais POR LEI. `pontos_facultativos`: Carnaval e
+// Corpus Christi, que a escola importa só se fecha nesses dias.
+const nacionaisSchema = z.union([
+  z.object({ nacionais: ano }).strict(),
+  z.object({ pontos_facultativos: ano }).strict(),
+]);
 
 export async function GET(_req: NextRequest): Promise<Response> {
   const requestId = randomUUID();
@@ -64,11 +69,16 @@ export async function POST(req: NextRequest): Promise<Response> {
   if (!nacionais.success && !umDia?.success) {
     return fail("validation_failed", t("Feriado inválido."), 422, { requestId });
   }
-  const linhas = nacionais.success
-    ? feriadosDoBrasilDoAno(nacionais.data.nacionais).map((data) => ({
+  const doCalendario = nacionais.success
+    ? "nacionais" in nacionais.data
+      ? feriadosNacionaisDoAno(nacionais.data.nacionais)
+      : pontosFacultativosDoAno(nacionais.data.pontos_facultativos)
+    : null;
+  const linhas = doCalendario
+    ? doCalendario.map((d) => ({
         organization_id: authz.org.orgId,
-        data,
-        descricao: "Feriado nacional",
+        data: d.data,
+        descricao: d.descricao,
         created_by: authz.user.id,
       }))
     : [{ organization_id: authz.org.orgId, data: umDia!.data!.data, descricao: umDia!.data!.descricao, created_by: authz.user.id }];
@@ -86,7 +96,7 @@ export async function POST(req: NextRequest): Promise<Response> {
     resourceType: "feriados_de_atendimento",
     resourceId: null,
     requestId,
-    metadata: { dias: linhas.map((l) => l.data), nacionais: nacionais.success ? nacionais.data.nacionais : null },
+    metadata: { dias: linhas.map((l) => l.data), importacao: nacionais.success ? nacionais.data : null },
   });
   return ok(data ?? [], { requestId });
 }

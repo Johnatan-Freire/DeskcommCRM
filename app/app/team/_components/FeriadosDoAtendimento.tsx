@@ -56,6 +56,11 @@ export function FeriadosDoAtendimento({ canManage, feriados }: { canManage: bool
             "Nesses dias a equipe inteira está fora: a IA continua atendendo, mas não promete um consultor e informa quando a equipe volta.",
           )}
         </p>
+        <p className="text-xs text-text-muted">
+          {t(
+            "Os feriados nacionais não incluem feriados do estado, do Distrito Federal ou da cidade (no DF, por exemplo, o Dia do Evangélico em 30/11): cadastre esses dias um a um.",
+          )}
+        </p>
       </div>
 
       {feriados.length === 0 ? (
@@ -118,6 +123,23 @@ export function FeriadosDoAtendimento({ canManage, feriados }: { canManage: bool
             </Button>
           </div>
           <div className="flex flex-wrap gap-2">
+            {[anoAtual, anoAtual + 1].map((ano) => (
+              <Button
+                key={`pf-${ano}`}
+                size="sm"
+                variant="ghost"
+                disabled={isPending}
+                onClick={() =>
+                  executar(
+                    () => apiClient.post("/api/v1/attendants/feriados", { pontos_facultativos: ano }),
+                    t("Pontos facultativos de {ano} cadastrados.").replace("{ano}", String(ano)),
+                  )
+                }
+                data-testid={`pontos-facultativos-${ano}`}
+              >
+                {t("Adicionar Carnaval e Corpus Christi de {ano}").replace("{ano}", String(ano))}
+              </Button>
+            ))}
             {[anoAtual, anoAtual + 1].map((ano) => (
               <Button
                 key={ano}
