@@ -289,6 +289,29 @@ beforeAll(() => {
                     (select id from public.crm_leads where organization_id = v_org limit 1));
         end if;
 
+        -- avisos_temporarios (0658): o aviso com prazo, e a linha de histórico
+        -- que o gatilho grava junto (avisos_temporarios_historico).
+        if not exists (select 1 from public.avisos_temporarios where organization_id = v_org) then
+          insert into public.avisos_temporarios (organization_id, titulo, descricao, inicio_em, fim_em)
+            values (v_org, 'RLS aviso', 'aviso de invariante', now(), now() + interval '1 day');
+        end if;
+
+        -- feriados_de_atendimento (0660): um dia por organização.
+        if not exists (select 1 from public.feriados_de_atendimento where organization_id = v_org) then
+          insert into public.feriados_de_atendimento (organization_id, data, descricao)
+            values (v_org, date '2030-01-01', 'RLS feriado');
+        end if;
+
+        -- pre_matriculas (0659): o pedido de matrícula preso a um contato da org.
+        if not exists (select 1 from public.pre_matriculas where organization_id = v_org) then
+          insert into public.pre_matriculas
+            (organization_id, contact_id, nome_completo, email, telefone, curso, turno,
+             consentimento_em, consentimento_texto)
+            values (v_org, (select id from public.contacts where organization_id = v_org limit 1),
+                    'RLS Invariante', 'rls@exemplo.invalid', '5561999990000', 'RLS curso', 'noite',
+                    now(), 'rls');
+        end if;
+
         -- voice_calls (0232): a chamada pendurada na sessão de canal da org.
         -- O wacalls_call_id varia por organizacao porque a tabela tem
         -- unique (organization_id, wacalls_call_id) — mesmo cuidado do endpoint
@@ -644,6 +667,13 @@ export const TABLES = [
   // canal alvo. Leitura org-flat; a escrita é do admin e do servidor. Vazar a
   // linha entrega ao vizinho quando o outro vai mexer nas conexões dele.
   "channel_schedules",
+  // Agentes da escola (14/10/2026). Leitura org-scoped por membro; a ESCRITA por
+  // papel (manager+ em avisos e feriados, agent+ em pré-matrícula; inserção de
+  // pré-matrícula só pelo servidor) é medida nos invariantes de cada uma.
+  "avisos_temporarios",
+  "avisos_temporarios_historico",
+  "feriados_de_atendimento",
+  "pre_matriculas",
 ] as const;
 
 describe("RLS tenant isolation (fn_user_org_ids pattern)", () => {
