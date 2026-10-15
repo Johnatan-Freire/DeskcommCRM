@@ -130,7 +130,17 @@ const alunoSchema = z.object({
  * Ausente = API anterior ao contrato v2: o CRM trata como NÃO confirmado (falha
  * fechada) — ver `selecionarAluno`.
  */
-export const CONFIRMACOES_DE_IDENTIDADE = ["nao_informada", "confere", "nao_confere", "bloqueado"] as const;
+export const CONFIRMACOES_DE_IDENTIDADE = [
+  "nao_informada",
+  "confere",
+  "nao_confere",
+  "bloqueado",
+  // Segundo fator (opcional, ligado no sistema escolar): código no e-mail cadastrado.
+  "codigo_enviado",
+  "codigo_invalido",
+  "nome_necessario",
+  "sem_canal_verificado",
+] as const;
 
 const respostaAlunoPorTelefoneSchema = z.object({
   encontrado: z.boolean(),
@@ -138,6 +148,8 @@ const respostaAlunoPorTelefoneSchema = z.object({
   /** Quantos alunos casaram pelo número — vem mesmo quando `alunos` vem vazio (v2). */
   quantidade: z.number().int().nonnegative().optional(),
   confirmacao: z.enum(CONFIRMACOES_DE_IDENTIDADE).optional(),
+  /** Só com `codigo_enviado`: o e-mail cadastrado mascarado (`j***@g***.com`). */
+  email_mascarado: z.string().max(120).optional(),
   /**
    * "exact" = o sistema escolar casou pelo NÚMERO COMPLETO normalizado. Versões antigas da
    * API casavam pelos 8 últimos dígitos (DDDs diferentes colidiam) e não mandam o campo:
@@ -160,6 +172,14 @@ export type ResultadoSelecaoAluno =
   | { status: "bloqueado" }
   /** API sem o contrato de confirmação (anterior ao v2): nada sai, por construção. */
   | { status: "api_sem_confirmacao" }
+  /** Segundo fator: código enviado ao e-mail cadastrado; nada sai antes dele. */
+  | { status: "codigo_enviado"; emailMascarado: string | null }
+  /** Segundo fator: o código informado não confere (ou expirou). */
+  | { status: "codigo_invalido" }
+  /** Segundo fator com gêmeos: o sistema escolar precisa do nome antes do código. */
+  | { status: "nome_necessario" }
+  /** Segundo fator ligado, mas o aluno não tem e-mail cadastrado para receber o código. */
+  | { status: "sem_canal_verificado" }
   /** A API achou alguém, mas não afirmou casamento pelo número completo — nada sai. */
   | { status: "correspondencia_nao_confirmada" }
   | { status: "ambiguo"; quantidade: number }
@@ -216,6 +236,14 @@ export function selecionarAluno(
       return { status: "nao_confere" };
     case "bloqueado":
       return { status: "bloqueado" };
+    case "codigo_enviado":
+      return { status: "codigo_enviado", emailMascarado: resposta.email_mascarado ?? null };
+    case "codigo_invalido":
+      return { status: "codigo_invalido" };
+    case "nome_necessario":
+      return { status: "nome_necessario" };
+    case "sem_canal_verificado":
+      return { status: "sem_canal_verificado" };
     default:
       return { status: "api_sem_confirmacao" };
   }
@@ -288,10 +316,13 @@ export function normalizarDataDeNascimento(texto: string, agora: Date = new Date
 export async function buscarAlunoPorTelefone(
   config: ConfigSistemaEscolar,
   telefone: string,
-  confirmacao: { dataNascimento?: string } = {},
+  confirmacao: { dataNascimento?: string; codigo?: string; nome?: string } = {},
 ): Promise<RespostaAlunoPorTelefone> {
   const params = new URLSearchParams({ telefone });
   if (confirmacao.dataNascimento) params.set("data_nascimento", confirmacao.dataNascimento);
+  // `nome` só serve ao segundo fator (gêmeos): sem a data ele não diz nada à API.
+  if (confirmacao.dataNascimento && confirmacao.nome) params.set("nome", confirmacao.nome);
+  if (confirmacao.dataNascimento && confirmacao.codigo) params.set("codigo", confirmacao.codigo);
   const out = await chamar(config, `/api/deskcomm/aluno?${params.toString()}`);
   return respostaAlunoPorTelefoneSchema.parse(out);
 }

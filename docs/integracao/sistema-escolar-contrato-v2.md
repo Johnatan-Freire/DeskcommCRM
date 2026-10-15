@@ -18,6 +18,23 @@ acadêmico. Lado Laravel: `app/Http/Controllers/Api/DeskcommAlunoController.php`
 | `nao_confere` | a data não bate com nenhum | vazio |
 | `bloqueado` | 5 datas erradas para o número em 15 min | vazio (a data nem é checada) |
 
+### Segundo fator (opcional — `DESKCOMM_CONFIRMACAO_POR_CODIGO=true` no Laravel, desligado por padrão)
+
+Depois de a data conferir, um código de 6 dígitos vai ao **e-mail cadastrado** do aluno
+(Job criptografado; só o hash fica no cache; uso único; validade `DESKCOMM_CODIGO_VALIDADE_MINUTOS`,
+padrão 10). O CRM reenvia a consulta com `&codigo=`.
+
+| `confirmacao` | Quando |
+|---|---|
+| `codigo_enviado` | data conferiu; código enviado (`email_mascarado` na resposta) |
+| `codigo_invalido` | código errado ou expirado |
+| `nome_necessario` | mais de um aluno com a mesma data (gêmeos): `&nome=` é conferido no Laravel, antes do código |
+| `sem_canal_verificado` | aluno sem e-mail cadastrado — o CRM passa para a equipe |
+| `bloqueado` | também: 3 envios ou 5 códigos errados por número em 15 min |
+
+O contador de datas erradas CONTA antes de conferir (incremento atômico no cache `database`):
+tentativas simultâneas não escapam do limite.
+
 Número sem aluno continua `{"encontrado": false, "match_type": "exact", "alunos": []}`.
 Data mal formada, inexistente, futura ou antes de 1900 → `422`, sem contar tentativa.
 A data cadastrada **nunca** sai na resposta.

@@ -101,6 +101,43 @@ export function desfechoDaConsultaDoAluno(
             'novamente com nome_completo e a mesma data_nascimento.',
         },
       };
+    case 'codigo_enviado':
+      return {
+        acao: 'responder',
+        resposta: {
+          ok: true,
+          encontrado: true,
+          codigo_enviado: true,
+          message:
+            'por segurança, um código de 6 dígitos foi enviado ao e-mail cadastrado do aluno' +
+            (selecao.emailMascarado ? ` (${selecao.emailMascarado})` : '') +
+            '. Peça o código e chame de novo com codigo e a mesma data_nascimento. Não informe nada antes.',
+        },
+      };
+    case 'codigo_invalido':
+      return {
+        acao: 'responder',
+        resposta: {
+          ok: true,
+          encontrado: true,
+          codigo_valido: false,
+          message:
+            'o código não confere ou expirou. Peça para conferir o código do e-mail; se a pessoa não o ' +
+            'recebeu, chame de novo SEM codigo para enviar outro. Não informe nada antes.',
+        },
+      };
+    case 'nome_necessario':
+      return {
+        acao: 'responder',
+        resposta: {
+          ok: true,
+          encontrado: true,
+          ambiguo: true,
+          message: 'peça o nome completo do aluno e chame de novo com nome_completo e a mesma data_nascimento.',
+        },
+      };
+    case 'sem_canal_verificado':
+      return passar('o aluno não tem e-mail cadastrado para receber o código de confirmação', { encontrado: true });
     case 'nome_nao_encontrado':
       return {
         acao: 'responder',

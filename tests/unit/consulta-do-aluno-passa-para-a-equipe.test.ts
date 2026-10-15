@@ -26,6 +26,7 @@ describe("desfechos que passam para a equipe sem perguntar ao modelo", () => {
     ["casamento não exato", { status: "correspondencia_nao_confirmada" }, false],
     ["API sem o contrato de confirmação", { status: "api_sem_confirmacao" }, false],
     ["identidade bloqueada por tentativas", { status: "bloqueado" }, false],
+    ["segundo fator sem e-mail cadastrado", { status: "sem_canal_verificado" }, false],
     ["ambíguo DEPOIS do nome completo", { status: "ambiguo", quantidade: 2 }, true],
   ])("%s → passar_para_equipe", (_nome, selecao, nomeInformado) => {
     const d = desfechoDaConsultaDoAluno(selecao, nomeInformado);
@@ -49,6 +50,9 @@ describe("desfechos que voltam ao modelo", () => {
     ["ambíguo antes do nome", { status: "ambiguo", quantidade: 2 }, false, /nome completo/],
     ["nome que não corresponde", { status: "nome_nao_encontrado" }, true, /confira o nome completo/],
     ["nenhum aluno no número", { status: "nao_encontrado" }, false, /não invente/],
+    ["código enviado ao e-mail", { status: "codigo_enviado", emailMascarado: "j***@g***.com" }, false, /j\*\*\*@g\*\*\*\.com/],
+    ["código que não confere", { status: "codigo_invalido" }, false, /não confere ou expirou/],
+    ["gêmeos no segundo fator", { status: "nome_necessario" }, false, /nome completo/],
   ])("%s → responder", (_nome, selecao, nomeInformado, mensagem) => {
     const d = desfechoDaConsultaDoAluno(selecao, nomeInformado);
     expect(d.acao).toBe("responder");
@@ -65,6 +69,10 @@ describe("desfechos que voltam ao modelo", () => {
       { status: "nao_confere" },
       { status: "ambiguo", quantidade: 3 },
       { status: "nome_nao_encontrado" },
+      { status: "codigo_enviado", emailMascarado: null },
+      { status: "codigo_invalido" },
+      { status: "nome_necessario" },
+      { status: "sem_canal_verificado" },
     ];
     for (const selecao of todos) {
       for (const nome of [false, true]) {
@@ -99,6 +107,8 @@ describe("o turno aplica a decisão", () => {
 
   it("a data de nascimento sai do CRM só normalizada pelo código", () => {
     expect(executor).toContain("normalizarDataDeNascimento(data_nascimento)");
-    expect(executor).toMatch(/dataNascimento === undefined \? \{\} : \{ dataNascimento \}/);
+    expect(executor).toMatch(/dataNascimento === undefined\s*\?\s*\{\}/);
+    // código só segue se for 6 dígitos, e só junto da data
+    expect(executor).toContain("/^\\d{6}$/u.test(codigo.trim())");
   });
 });

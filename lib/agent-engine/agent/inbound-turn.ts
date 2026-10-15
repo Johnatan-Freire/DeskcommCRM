@@ -374,7 +374,8 @@ export const AGENT_TOOL_DEFS = {
       '(faltas/presenças) e situação financeira (só o status — nunca peça ou repita boleto/PIX). Use ' +
       'para QUALQUER pergunta sobre a situação PESSOAL de um aluno já matriculado. ' +
       'IDENTIDADE: nenhum dado sai sem a DATA DE NASCIMENTO DO ALUNO, informada pela pessoa nesta ' +
-      'conversa e conferida pelo sistema escolar. Se a resposta pedir a confirmação, peça a data de ' +
+      'conversa e conferida pelo sistema escolar (e, se a escola exigir, um código enviado ao e-mail ' +
+      'cadastrado). Se a resposta pedir a confirmação, peça a data de ' +
       'nascimento do aluno (dia, mês e ano) e chame de novo com data_nascimento — nunca diga qual é a ' +
       'data certa, nunca dê dica e nunca confirme dado algum antes do "confere". Se a data já foi ' +
       'informada e conferida nesta conversa, reutilize-a sem pedir de novo. Se vier mais de um aluno, ' +
@@ -393,6 +394,12 @@ export const AGENT_TOOL_DEFS = {
         .min(2)
         .optional()
         .describe('nome completo do aluno, só quando a ferramenta pedir para desambiguar'),
+      codigo: z
+        .string()
+        .min(4)
+        .max(12)
+        .optional()
+        .describe('código de confirmação que a pessoa recebeu no e-mail cadastrado, só quando a ferramenta pedir'),
     }),
   },
   consultar_catalogo_cursos: {
@@ -3264,7 +3271,7 @@ async function executarTurnoDoAgente(
     }),
     consultar_aluno_sistema_escolar: tool({
       ...AGENT_TOOL_DEFS.consultar_aluno_sistema_escolar,
-      execute: async ({ nome_completo, data_nascimento }) => {
+      execute: async ({ nome_completo, data_nascimento, codigo }) => {
         // Gate igual ao de search_knowledge: sem config pra esta org, a tool nem
         // deveria ter entrado no turno (ver bloco de montagem de tools abaixo) —
         // este branch é defesa em profundidade, não o caminho normal.
@@ -3292,7 +3299,13 @@ async function executarTurnoDoAgente(
           const out = await buscarAlunoPorTelefone(
             sistemaEscolarConfig,
             telefone,
-            dataNascimento === undefined ? {} : { dataNascimento },
+            dataNascimento === undefined
+              ? {}
+              : {
+                  dataNascimento,
+                  ...(nome_completo?.trim() ? { nome: nome_completo.trim() } : {}),
+                  ...(codigo !== undefined && /^\d{6}$/u.test(codigo.trim()) ? { codigo: codigo.trim() } : {}),
+                },
           );
           const selecao = selecionarAluno(out, nome_completo);
           if (selecao.status === 'correspondencia_nao_confirmada' || selecao.status === 'api_sem_confirmacao') {

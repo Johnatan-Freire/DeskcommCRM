@@ -489,6 +489,34 @@ describe("confirmação de identidade por data de nascimento (contrato v2)", () 
     expect(JSON.stringify(r)).not.toContain("8.5");
   });
 
+  it.each([
+    ["codigo_enviado", { status: "codigo_enviado", emailMascarado: "j***@g***.com" }],
+    ["codigo_invalido", { status: "codigo_invalido" }],
+    ["nome_necessario", { status: "nome_necessario" }],
+    ["sem_canal_verificado", { status: "sem_canal_verificado" }],
+  ] as const)("segundo fator %s: nada sai", (confirmacao, esperado) => {
+    const r = selecionarAluno({
+      ...base,
+      confirmacao,
+      email_mascarado: "j***@g***.com",
+      alunos: [aluno("Ana Souza", 1)],
+    });
+    expect(r).toEqual(esperado);
+    expect(JSON.stringify(r)).not.toContain("Ana Souza");
+  });
+
+  it("nome e código só seguem para a API junto da data", async () => {
+    const fetchFalso = vi.fn(async () => new Response(JSON.stringify({ ...base, confirmacao: "nao_informada", quantidade: 1, alunos: [] }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchFalso);
+    const cfg = { baseUrl: "https://escola.invalid", apiKey: "k" };
+    await buscarAlunoPorTelefone(cfg, "5561999990000", { nome: "Ana", codigo: "123456" });
+    await buscarAlunoPorTelefone(cfg, "5561999990000", { dataNascimento: "2008-03-12", nome: "Ana Souza", codigo: "123456" });
+    const urls = fetchFalso.mock.calls.map((c) => String((c as unknown[])[0]));
+    expect(urls[0]).toMatch(/\/aluno\?telefone=5561999990000$/u);
+    expect(urls[1]).toMatch(/&data_nascimento=2008-03-12&nome=Ana\+Souza&codigo=123456$/u);
+    vi.unstubAllGlobals();
+  });
+
   it("'confere' sem aluno nenhum é contradição do contrato: trata como não conferido", () => {
     expect(selecionarAluno({ ...base, confirmacao: "confere", alunos: [] })).toEqual({ status: "nao_confere" });
   });
