@@ -1057,6 +1057,7 @@ jobs:
         vps-fresh-onboarding.spec.ts
 
       SPECS_PARTE_5: >-
+        agentes-da-escola-telas.spec.ts
         inbox-busca-e-filtros-dizem-a-verdade.spec.ts
         importacao-historico-whatsapp.spec.ts
         extensoes-da-instalacao.spec.ts
