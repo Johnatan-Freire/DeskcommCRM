@@ -4039,6 +4039,25 @@ async function executarTurnoDoAgente(
             validacao.dados,
           );
           if (!res.ok) return { ok: false, error: res.erro };
+          if (res.status === 'registrada') {
+            // A pré-matrícula entra na timeline do NEGÓCIO (o card no funil), sem
+            // dado pessoal no payload — quem abre o card vê que houve o pedido.
+            await emitAgentActivityForContact({
+              pool,
+              organizationId: tenantId,
+              contactId: leadId,
+              type: 'note',
+              reason: `Pré-matrícula registrada pelo agente — ${validacao.dados.curso}, turno ${validacao.dados.turno}`,
+              sourceModule: 'pre_matricula',
+              sourceId: res.id,
+              agentId: agentConfig?.agentId ?? null,
+              payload: { pre_matricula_id: res.id, curso: validacao.dados.curso, turno: validacao.dados.turno },
+            }).catch((err: unknown) =>
+              runLog.warn('pré-matrícula: atividade na timeline falhou', {
+                error: err instanceof Error ? err.message : String(err),
+              }),
+            );
+          }
           await passarParaAEquipePeloSistema(
             `pré-matrícula ${res.status === 'registrada' ? 'registrada' : 'já existente'}: ` +
               `${validacao.dados.curso}, turno ${validacao.dados.turno}`,

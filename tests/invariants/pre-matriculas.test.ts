@@ -18,7 +18,7 @@ import { GOV_AGENT_A, GOV_ORG, GOV_VIEWER, countAs, lastLine, seedGov, sql, writ
  */
 
 const PORT = Number(process.env.TEST_DB_PORT ?? 54329);
-const pool = new pg.Pool({ connectionString: `postgresql://postgres:postgres@127.0.0.1:${PORT}/postgres`, max: 2 });
+const pool = new pg.Pool({ connectionString: `postgresql://postgres:postgres@127.0.0.1:${PORT}/postgres`, max: 8 });
 
 const CONTATO = randomUUID();
 const DADOS = {
@@ -77,6 +77,54 @@ describe("0659 · registrar", () => {
     sql(`update public.pre_matriculas set status = 'desistiu' where id = '${primeira}';`);
     const denovo = await registrarPreMatricula(pool, { organizationId: GOV_ORG, contactId: CONTATO, conversationId: null, agentId: null }, DADOS);
     expect(denovo).toMatchObject({ ok: true, status: "registrada" });
+  });
+});
+
+describe("0659 · concorrência", () => {
+  it("⭐ seis confirmações SIMULTÂNEAS do mesmo curso: um pedido só, e nenhuma resposta de falha", async () => {
+    const contato = randomUUID();
+    sql(`insert into public.contacts (id, organization_id, display_name, phone_number)
+         values ('${contato}', '${GOV_ORG}', 'Concorrente', '+5561988887777');`);
+    const ctx = { organizationId: GOV_ORG, contactId: contato, conversationId: null, agentId: null };
+    const resultados = await Promise.all(
+      Array.from({ length: 6 }, () => registrarPreMatricula(pool, ctx, { ...DADOS, curso: "Programação" })),
+    );
+    expect(resultados.every((r) => r.ok)).toBe(true);
+    const status = resultados.map((r) => (r.ok ? r.status : "falhou")).sort();
+    expect(status).toEqual(["ja_existia", "ja_existia", "ja_existia", "ja_existia", "ja_existia", "registrada"]);
+    const ids = new Set(resultados.map((r) => (r.ok ? r.id : "")));
+    expect(ids.size).toBe(1);
+    expect(lastLine(sql(`select count(*) from public.pre_matriculas where contact_id = '${contato}';`))).toBe("1");
+  });
+});
+
+describe("0659 · corrida determinística", () => {
+  it("⭐ a confirmação que espera outra em voo devolve a que existe (não 'não consegui registrar')", async () => {
+    const contato = randomUUID();
+    sql(`insert into public.contacts (id, organization_id, display_name, phone_number)
+         values ('${contato}', '${GOV_ORG}', 'Em voo', '+5561977776666');`);
+    const segura = await pool.connect();
+    try {
+      // A: insere e SEGURA o commit — a linha existe, mas ainda não está visível.
+      await segura.query("begin");
+      await segura.query(
+        `insert into public.pre_matriculas (organization_id, contact_id, nome_completo, email, telefone, curso, turno, consentimento_em, consentimento_texto)
+         values ($1, $2, 'Em Voo Teste', 'voo@exemplo.invalid', '5561977776666', 'Robótica', 'tarde', now(), 'x')`,
+        [GOV_ORG, contato],
+      );
+      // B: a tool chega no meio — o ON CONFLICT espera A terminar.
+      const emEspera = registrarPreMatricula(
+        pool,
+        { organizationId: GOV_ORG, contactId: contato, conversationId: null, agentId: null },
+        { ...DADOS, curso: "Robótica" },
+      );
+      await new Promise((r) => setTimeout(r, 300));
+      await segura.query("commit");
+      const r = await emEspera;
+      expect(r).toMatchObject({ ok: true, status: "ja_existia" });
+    } finally {
+      segura.release();
+    }
   });
 });
 

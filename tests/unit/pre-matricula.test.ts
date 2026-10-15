@@ -90,4 +90,12 @@ describe("o turno", () => {
     expect(exec.indexOf("passarParaAEquipePeloSistema(")).toBeGreaterThan(exec.indexOf("registrarPreMatricula("));
     expect(exec).toContain("contactId: leadId");
   });
+
+  it("registrou → a pré-matrícula aparece na timeline do negócio, sem dado pessoal no payload", () => {
+    const ini = fonte.indexOf("registrar_pre_matricula: tool({");
+    const exec = fonte.slice(ini, fonte.indexOf("request_human_handoff: tool({", ini));
+    expect(exec).toContain("sourceModule: 'pre_matricula'");
+    const payload = exec.slice(exec.indexOf("payload: {"), exec.indexOf("}", exec.indexOf("payload: {")));
+    expect(payload).not.toMatch(/nome_completo|email|telefone/);
+  });
 });

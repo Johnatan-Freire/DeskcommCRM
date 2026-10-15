@@ -154,8 +154,22 @@ export async function registrarPreMatricula(
     ],
   );
   const linha = rows[0];
-  if (!linha) return { ok: false, erro: { code: "nao_registrada", message: "não consegui registrar agora." } };
-  return { ok: true, status: linha.inserida ? "registrada" : "ja_existia", id: linha.id };
+  if (linha) return { ok: true, status: linha.inserida ? "registrada" : "ja_existia", id: linha.id };
+
+  // CORRIDA: duas confirmações simultâneas do mesmo curso. A segunda espera a
+  // primeira gravar e o ON CONFLICT não insere nada — mas o SELECT do mesmo
+  // comando enxerga o banco como estava quando o comando COMEÇOU, sem a linha da
+  // primeira. Um comando novo (snapshot novo) a encontra.
+  const { rows: existentes } = await db.query<{ id: string }>(
+    `select id from pre_matriculas
+      where organization_id = $1 and contact_id = $2 and lower(btrim(curso)) = lower(btrim($3))
+        and status in ('nova', 'em_atendimento')
+      limit 1`,
+    [ctx.organizationId, ctx.contactId, dados.curso],
+  );
+  const existente = existentes[0];
+  if (existente) return { ok: true, status: "ja_existia", id: existente.id };
+  return { ok: false, erro: { code: "nao_registrada", message: "não consegui registrar agora." } };
 }
 
 /** O que a tool devolve ao modelo depois de registrar (e passar para a equipe). */
