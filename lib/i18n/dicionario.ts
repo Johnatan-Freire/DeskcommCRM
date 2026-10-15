@@ -9748,6 +9748,16 @@ export const DICIONARIO: Traducoes = {
 
   // ─── Tarefas (extraídas do PR #418) ───
   "Tarefas": { es: "Tareas" },
+  "Tarefas desta demanda": { es: "Tareas de esta demanda" },
+  "Nenhuma tarefa nesta demanda. Anote o próximo passo combinado, com prazo e responsável.": {
+    es: "Ninguna tarea en esta demanda. Anota el próximo paso acordado, con plazo y responsable.",
+  },
+  "O negócio, o contato ou a demanda vinculada não existe.": {
+    es: "El negocio, el contacto o la demanda vinculada no existe.",
+  },
+  "Esta demanda já foi encerrada. Crie a tarefa numa demanda em andamento.": {
+    es: "Esta demanda ya fue cerrada. Crea la tarea en una demanda en curso.",
+  },
   "O que ficou combinado, com prazo. Tarefa presa a um negócio aparece na linha do tempo dele.": {
     es: "Lo que quedó acordado, con plazo. Una tarea vinculada a un negocio aparece en su línea de tiempo.",
   },
