@@ -260,3 +260,102 @@ export async function duplicateAgentAction(id: string): Promise<ActionResult<{ n
   revalidatePath("/app/ai/agents");
   return { ok: true, data: { new_id: cloned.id } };
 }
+
+/**
+ * PAUSAR TODOS os agentes da organização de uma vez (auditoria de agentes,
+ * 14/10/2026 — antes só havia o menu de cada agente).
+ *
+ * Mesma semântica do `pauseAgentAction`, aplicada a todos os não arquivados e
+ * ainda não pausados: grava `paused_at`, e o banco já faz o resto — o gate
+ * `fn_ia_pode_responder_mensagem` deixa de autorizar, e `assertAgentOperation`
+ * derruba no instante do envio o turno que estava em voo. Uma linha de auditoria
+ * POR agente (`ai_agent.paused`, com `em_lote: true`), como se cada um tivesse
+ * sido pausado no menu: o histórico de um agente não depende de alguém lembrar
+ * que houve uma ação em lote.
+ */
+export async function pauseAllAgentsAction(): Promise<ActionResult<{ pausados: number }>> {
+  const guard = await ensureAdmin();
+  if (guard.kind === "fail") return guard.result;
+  const { authUser, activeOrg } = guard;
+
+  const admin = createAdminClient();
+  const agora = new Date().toISOString();
+  const { data, error } = await admin
+    .from("ai_agents")
+    .update({ paused_at: agora, updated_at: agora })
+    .eq("organization_id", activeOrg.orgId)
+    .is("archived_at", null)
+    .is("paused_at", null)
+    .select("id, published_version_id");
+  if (error) return { ok: false, error: "internal_error", message: error.message };
+
+  const requestId = randomUUID();
+  for (const agente of (data ?? []) as Array<{ id: string; published_version_id: string | null }>) {
+    void audit({
+      action: "ai_agent.paused",
+      actorUserId: authUser.id,
+      organizationId: activeOrg.orgId,
+      resourceType: "ai_agent",
+      resourceId: agente.id,
+      requestId,
+      metadata: { previous_version_id: agente.published_version_id, em_lote: true },
+    });
+  }
+  revalidatePath("/app/ai/agents");
+  return { ok: true, data: { pausados: (data ?? []).length } };
+}
+
+/**
+ * RETOMAR TODOS os agentes pausados que TÊM versão publicada — a mesma régua do
+ * `unpauseAgentAction`: rascunho não volta ao ar por um clique em lote, e a
+ * resposta conta quantos ficaram de fora por isso. Retomar carimba
+ * `service_enabled_at` (trigger da 0403): a IA só responde mensagens que chegarem
+ * DEPOIS deste clique, nunca o acumulado da pausa.
+ */
+export async function unpauseAllAgentsAction(): Promise<
+  ActionResult<{ retomados: number; sem_versao_publicada: number }>
+> {
+  const guard = await ensureAdmin();
+  if (guard.kind === "fail") return guard.result;
+  const { authUser, activeOrg } = guard;
+
+  const admin = createAdminClient();
+  const { data: pausados, error: erroLeitura } = await admin
+    .from("ai_agents")
+    .select("id, published_version_id")
+    .eq("organization_id", activeOrg.orgId)
+    .is("archived_at", null)
+    .not("paused_at", "is", null);
+  if (erroLeitura) return { ok: false, error: "internal_error", message: erroLeitura.message };
+
+  const lista = (pausados ?? []) as Array<{ id: string; published_version_id: string | null }>;
+  const publicados = lista.filter((a) => a.published_version_id !== null).map((a) => a.id);
+  const semVersao = lista.length - publicados.length;
+  if (publicados.length === 0) {
+    return { ok: true, data: { retomados: 0, sem_versao_publicada: semVersao } };
+  }
+
+  const { data, error } = await admin
+    .from("ai_agents")
+    .update({ paused_at: null, updated_at: new Date().toISOString() })
+    .eq("organization_id", activeOrg.orgId)
+    .in("id", publicados)
+    .not("published_version_id", "is", null)
+    .select("id");
+  if (error) return { ok: false, error: "internal_error", message: error.message };
+
+  const requestId = randomUUID();
+  for (const agente of (data ?? []) as Array<{ id: string }>) {
+    void audit({
+      action: "ai_agent.updated",
+      actorUserId: authUser.id,
+      organizationId: activeOrg.orgId,
+      resourceType: "ai_agent",
+      resourceId: agente.id,
+      requestId,
+      metadata: { unpaused: true, em_lote: true },
+    });
+  }
+  revalidatePath("/app/ai/agents");
+  return { ok: true, data: { retomados: (data ?? []).length, sem_versao_publicada: semVersao } };
+}

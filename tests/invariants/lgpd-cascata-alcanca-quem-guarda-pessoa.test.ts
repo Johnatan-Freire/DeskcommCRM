@@ -76,6 +76,13 @@ const DIVIDA_LGPD_CONHECIDA: Record<string, string> = {
     "estão aqui, as duas também já cobertas por trigger. Sai no dia em que " +
     "`tabelasNaCascata()` passar a derivar do catálogo também os triggers de " +
     "`contacts`, ou no dia em que a função ganhar o passo.",
+  pre_matriculas:
+    "Migration 0659: nome_completo, email, telefone e observacao da pré-matrícula registrada pelo " +
+    "agente. ⚠️ ELA JÁ ESTÁ PROTEGIDA: o gatilho `trg_redigir_pre_matriculas_ao_anonimizar` redige " +
+    "os quatro na virada `is_anonymized false → true`, e `tests/invariants/pre-matriculas.test.ts` " +
+    "prova o efeito pelo comportamento. A entrada existe só porque ESTE instrumento lê UMA função e " +
+    "não enxerga trigger — a mesma razão de crm_tasks. Sai junto com as irmãs, no dia em que " +
+    "`tabelasNaCascata()` derivar também os triggers de `contacts`.",
   webhook_lead_captures:
     "captured_name, captured_email e captured_phone — o payload cru de captação. " +
     "A própria migration 0174 escreveu que 'o cascade de anonimização precisa alcançar esta tabela' " +

@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Agentes da escola — o que entrou na auditoria de 14/10/2026",
+    "subtitle": "identidade pela data de nascimento, pré-matrícula, avisos com prazo, feriados e pausa geral",
+    "output": "agentes-da-escola-p0.html",
+    "quality_profile": "standard"
+  },
+  "lanes": [
+    { "id": "conversa", "label": "WhatsApp e turno do agente" },
+    { "id": "crm", "label": "CRM (banco e regras)" },
+    { "id": "escola", "label": "Sistema escolar Laravel" },
+    { "id": "equipe", "label": "Equipe (telas)" }
+  ],
+  "mainPath": ["turno", "consulta", "laravel", "desfecho", "passagem"],
+  "nodes": [
+    { "id": "turno", "lane": "conversa", "col": 1, "type": "backend", "label": "inbound-turn", "sublabel": "ferramentas + blocos do prompt" },
+    { "id": "consulta", "lane": "crm", "col": 2, "type": "lib", "label": "consulta-do-aluno.ts", "sublabel": "decide responder × passar para a equipe" },
+    { "id": "laravel", "lane": "escola", "col": 3, "type": "api", "label": "GET /api/deskcomm/aluno (v2)", "sublabel": "dado só com data_nascimento que confere; 5 erros = bloqueado" },
+    { "id": "desfecho", "lane": "crm", "col": 4, "type": "lib", "label": "selecionarAluno", "sublabel": "sem 'confere' nada sai — API antiga também fecha" },
+    { "id": "passagem", "lane": "equipe", "col": 5, "type": "frontend", "label": "Central + Inbox", "sublabel": "handoff com o porquê" },
+    { "id": "prematricula", "lane": "conversa", "col": 2, "type": "tool", "label": "registrar_pre_matricula", "sublabel": "só agente comercial com escola ativa; consentimento em código" },
+    { "id": "tabela_pm", "lane": "crm", "col": 3, "type": "table", "label": "pre_matriculas (0659)", "sublabel": "uma aberta por contato e curso; LGPD por gatilho" },
+    { "id": "fila_pm", "lane": "equipe", "col": 4, "type": "frontend", "label": "/app/pre-matriculas", "sublabel": "assumir, matriculado, desistiu" },
+    { "id": "avisos", "lane": "crm", "col": 1, "type": "table", "label": "avisos_temporarios (0658)", "sublabel": "fn_avisos_vigentes: só publicado e no período" },
+    { "id": "tela_avisos", "lane": "equipe", "col": 1, "type": "frontend", "label": "/app/ai/avisos", "sublabel": "criar, publicar, arquivar, histórico" },
+    { "id": "feriados", "lane": "crm", "col": 5, "type": "table", "label": "feriados_de_atendimento (0660)", "sublabel": "isWithinSchedule: feriado vence a jornada" },
+    { "id": "tela_equipe", "lane": "equipe", "col": 3, "type": "frontend", "label": "Equipe › Atendimento", "sublabel": "jornada + feriados" },
+    { "id": "pausa", "lane": "crm", "col": 6, "type": "table", "label": "organizations.followups_pausados_em (0657)", "sublabel": "claim congela; inscrição nova nasce cancelada" },
+    { "id": "tela_pausa", "lane": "equipe", "col": 6, "type": "frontend", "label": "Pausar todos", "sublabel": "agentes (admin) e follow-ups (manager pausa, admin retoma)" }
+  ],
+  "edges": [
+    { "id": "e1", "from": "turno", "to": "consulta", "label": "consultar_aluno com data_nascimento normalizada" },
+    { "id": "e2", "from": "consulta", "to": "laravel", "label": "telefone da conversa + data" },
+    { "id": "e3", "from": "laravel", "to": "desfecho", "label": "confirmacao: nao_informada | confere | nao_confere | bloqueado" },
+    { "id": "e4", "from": "desfecho", "to": "passagem", "label": "falha, bloqueio, API sem contrato ou ambíguo após o nome" },
+    { "id": "e5", "from": "turno", "to": "prematricula", "label": "a pessoa quer se matricular" },
+    { "id": "e6", "from": "prematricula", "to": "tabela_pm", "label": "grava com consentimento" },
+    { "id": "e7", "from": "prematricula", "to": "passagem", "label": "consultor continua" },
+    { "id": "e8", "from": "tabela_pm", "to": "fila_pm", "label": "a equipe dá andamento" },
+    { "id": "e9", "from": "tela_avisos", "to": "avisos", "label": "cadastra com prazo" },
+    { "id": "e10", "from": "avisos", "to": "turno", "label": "bloco 'avisos vigentes' no prompt" },
+    { "id": "e11", "from": "tela_equipe", "to": "feriados", "label": "dias em que a equipe está fora" },
+    { "id": "e12", "from": "feriados", "to": "passagem", "label": "handoff não promete consultor; volta estimada pula o dia" },
+    { "id": "e13", "from": "tela_pausa", "to": "pausa", "label": "chave geral" },
+    { "id": "e14", "from": "pausa", "to": "turno", "label": "follow-up adiado, nunca pulado" }
+  ]
+}

@@ -148,13 +148,22 @@ import {
   catalogoEntregueAoOperador,
 } from './entrega-de-capacidade';
 import { composeSystemPrompt, loadOrgMemory, renderOrgMemory } from './org-memory';
+import { AVISOS_INDISPONIVEIS, carregarAvisosVigentes, renderAvisosVigentes } from '@/lib/ai/avisos-temporarios';
+import { mensagemAposRegistro, registrarPreMatricula, validarPreMatricula } from '@/lib/pre-matricula/registrar';
+import { decidirAntiLoop } from './anti-loop';
 import {
   carregarConfig as carregarConfigSistemaEscolar,
   buscarAlunoPorTelefone,
   buscarCatalogoCursos,
+  normalizarDataDeNascimento,
   selecionarAluno,
 } from '@/lib/integracoes/sistema-escolar';
 import { toolsDoSistemaEscolarNoTurno } from './sistema-escolar-gate';
+import {
+  desfechoDaConsultaDoAluno,
+  desfechoDaFalhaDaConsulta,
+  RESPOSTA_DATA_INVALIDA,
+} from './consulta-do-aluno';
 import { ferramentasOcultasPeloEscopo } from './ferramentas-por-escopo';
 import { matchesHandoffKeyword, type PublishedAgentConfig } from './agent-config';
 import { garantirPerguntaDoRoteiro, prepararRoteiroDoTurno } from './roteiro-no-turno';
@@ -364,16 +373,34 @@ export const AGENT_TOOL_DEFS = {
       'Busca no SISTEMA ESCOLAR (dado real, não a base de conhecimento) o cadastro do aluno pelo ' +
       'número de WhatsApp deste lead: matrícula, curso/turma, horário de aula, notas, frequência ' +
       '(faltas/presenças) e situação financeira (só o status — nunca peça ou repita boleto/PIX). Use ' +
-      'para QUALQUER pergunta sobre a situação PESSOAL de um aluno já matriculado. Se não achar (aluno ' +
-      'não cadastrado com este número), ou se vier mais de um cadastro para o mesmo número (ambíguo), ' +
-      'NÃO invente — se a resposta pedir desambiguação, pergunte o nome completo e chame de novo ' +
-      'preenchendo nome_completo. Use search_knowledge apenas para pergunta genérica, não pessoal.',
+      'para QUALQUER pergunta sobre a situação PESSOAL de um aluno já matriculado. ' +
+      'IDENTIDADE: nenhum dado sai sem a DATA DE NASCIMENTO DO ALUNO, informada pela pessoa nesta ' +
+      'conversa e conferida pelo sistema escolar (e, se a escola exigir, um código enviado ao e-mail ' +
+      'cadastrado). Se a resposta pedir a confirmação, peça a data de ' +
+      'nascimento do aluno (dia, mês e ano) e chame de novo com data_nascimento — nunca diga qual é a ' +
+      'data certa, nunca dê dica e nunca confirme dado algum antes do "confere". Se a data já foi ' +
+      'informada e conferida nesta conversa, reutilize-a sem pedir de novo. Se vier mais de um aluno, ' +
+      'pergunte o nome completo e chame de novo com nome_completo. Não invente nada; quando a ' +
+      'ferramenta disser que passou a conversa para a equipe, avise isso e encerre o turno. Use ' +
+      'search_knowledge apenas para pergunta genérica, não pessoal.',
     inputSchema: z.object({
+      data_nascimento: z
+        .string()
+        .min(6)
+        .max(20)
+        .optional()
+        .describe('data de nascimento DO ALUNO como a pessoa escreveu (ex.: 12/03/2008); omita até ela informar'),
       nome_completo: z
         .string()
         .min(2)
         .optional()
-        .describe('nome completo informado pelo aluno; omita na primeira busca por telefone'),
+        .describe('nome completo do aluno, só quando a ferramenta pedir para desambiguar'),
+      codigo: z
+        .string()
+        .min(4)
+        .max(12)
+        .optional()
+        .describe('código de confirmação que a pessoa recebeu no e-mail cadastrado, só quando a ferramenta pedir'),
     }),
   },
   consultar_catalogo_cursos: {
@@ -383,6 +410,26 @@ export const AGENT_TOOL_DEFS = {
       'de curso para um lead — é a fonte de verdade sobre valores, mais atual que qualquer material ' +
       'anexado. Sem resultado ou dado desatualizado: caia para search_knowledge.',
     inputSchema: z.object({}),
+  },
+  registrar_pre_matricula: {
+    description:
+      'Registra a PRÉ-MATRÍCULA de quem quer se matricular e passa a conversa para um consultor. ' +
+      'Use quando a pessoa disser claramente que quer se matricular ou garantir a vaga num curso. ' +
+      'Peça, um de cada vez e sem interrogatório: nome completo, e-mail, curso (do catálogo) e turno ' +
+      'de interesse. O telefone é este WhatsApp — só pergunte se ela preferir outro número. NUNCA peça ' +
+      'CPF, RG, endereço ou documento. Antes de chamar, confirme os dados e pergunte: "Posso registrar ' +
+      'sua pré-matrícula com esses dados para um consultor continuar o atendimento?" — só com o sim, ' +
+      'chame com consentimento: true. Depois dela você não fala mais com a pessoa nesta conversa.',
+    inputSchema: z
+      .object({
+        nome_completo: z.string().describe('nome e sobrenome do futuro aluno'),
+        email: z.string().describe('e-mail para contato da secretaria'),
+        curso: z.string().describe('nome do curso de interesse, como está no catálogo'),
+        turno: z.enum(['manha', 'tarde', 'noite', 'sem_preferencia']).describe('turno preferido'),
+        telefone_contato: z.string().optional().describe('só se a pessoa quiser outro número além deste WhatsApp'),
+        consentimento: z.boolean().describe('true SÓ depois de a pessoa autorizar o registro'),
+      })
+      .passthrough(),
   },
   request_human_handoff: {
     description:
@@ -2380,6 +2427,24 @@ async function executarTurnoDoAgente(
   // testada (o bloco da cadeia nomeia `crm_list_event_types`, e nomear
   // ferramenta ausente faz o modelo tentar chamá-la).
   if (agentConfig !== null) blocosResidentes.push(...blocosDeAgendaResidentes(agentConfig.toolIds));
+  // Avisos temporários (0658): informação com prazo cadastrada pela equipe. Vai
+  // DEPOIS dos blocos fixos para não invalidar o prefixo cacheável quando um aviso
+  // entra ou vence. A régua do prazo é `fn_avisos_vigentes` (banco). Falha de
+  // leitura não derruba o turno — mas fecha: o modelo é instruído a não oferecer
+  // promoção nem condição especial que não possa conferir.
+  try {
+    const avisos = await carregarAvisosVigentes(pool, {
+      organizationId: tenantId,
+      escopoDoAgente: agentConfig?.serviceScope ?? null,
+      agentId: agentConfig?.agentId ?? null,
+    });
+    blocosResidentes.push(renderAvisosVigentes(avisos, fusoDaOrg));
+  } catch (err) {
+    runLog.warn('avisos temporários: leitura falhou — turno segue sem avisos', {
+      error: err instanceof Error ? err.message : String(err),
+    });
+    blocosResidentes.push(AVISOS_INDISPONIVEIS);
+  }
   if (preview)
     blocosResidentes.push(
       'MODO PRÉVIA: proponha a resposta com send_message. Operações são propostas separadas; nunca diga que executou uma proposta. Nenhum envio real acontece.',
@@ -2720,6 +2785,8 @@ async function executarTurnoDoAgente(
   // correção do turno que terminou sem falar com o cliente (ver depois da chamada principal).
   let tentativasDeEnvio = 0;
   let passouParaAEquipe = false;
+  // Anti-loop: envios recusados por repetição neste turno (o segundo passa para a equipe).
+  let recusasPorRepeticao = 0;
   // Teto de mensagens físicas por turno (F2-15b) — `seq` JÁ é a contagem certa: ele só
   // avança quando o envio de fato sai pro canal (send_message + send_template, bolhas
   // incluídas), nunca em veto de gate. Checar `seq` antes de tentar o próximo envio
@@ -2953,6 +3020,44 @@ async function executarTurnoDoAgente(
    */
   const mcpToolIdsDoTurno: string[] = [];
 
+  /**
+   * Passagem para a equipe decidida pelo CÓDIGO, não pelo modelo — o mesmo caminho
+   * da tool `request_human_handoff` (aviso ao lead, passagem com o porquê, silêncio,
+   * item na Central), para os desfechos em que continuar com a IA seria inventar ou
+   * insistir: consulta ao sistema escolar que falhou, identidade bloqueada por
+   * tentativas, API sem o contrato de confirmação e ambiguidade que o nome não
+   * resolveu. Antes disto, esses desfechos voltavam ao modelo como "siga sem o dado"
+   * e a passagem dependia de ele obedecer ao prompt (auditoria de 14/10/2026, R-06).
+   */
+  const passarParaAEquipePeloSistema = async (porQue: string): Promise<{ ok: boolean }> => {
+    passouParaAEquipe = true;
+    try {
+      const aviso =
+        seq === 0
+          ? await avisarLeadDaEscalacao(pool, avisoDaEscalacao().ids, {
+              ...avisoDaEscalacao().base,
+              motivo: 'outro',
+            })
+          : ({ avisado: true } as const);
+      const res = await applyRequestHumanHandoff(
+        pool,
+        { tenantId, leadId, conversationId: input.conversationId },
+        {
+          conversationSummary: buildHandoffSummary(previous),
+          contextoDoTurno: { checkpoint: previous, pendentesDoCliente: inboundsPendentes },
+          avisoAoLead: aviso,
+          gatilho: { inboundMessageId: input.inboundMessageId },
+          log: runLog,
+        },
+        { por_que: porQue },
+      );
+      return { ok: res.ok };
+    } catch (err) {
+      noteRunError(err instanceof Error ? err : new Error(String(err)));
+      return { ok: false };
+    }
+  };
+
   const rawTools: ToolSet = {
     get_lead_context: tool({
       ...AGENT_TOOL_DEFS.get_lead_context,
@@ -3169,7 +3274,7 @@ async function executarTurnoDoAgente(
     }),
     consultar_aluno_sistema_escolar: tool({
       ...AGENT_TOOL_DEFS.consultar_aluno_sistema_escolar,
-      execute: async ({ nome_completo }) => {
+      execute: async ({ nome_completo, data_nascimento, codigo }) => {
         // Gate igual ao de search_knowledge: sem config pra esta org, a tool nem
         // deveria ter entrado no turno (ver bloco de montagem de tools abaixo) —
         // este branch é defesa em profundidade, não o caminho normal.
@@ -3186,53 +3291,42 @@ async function executarTurnoDoAgente(
             error: { code: 'sem_telefone', message: 'este contato não tem telefone registrado — não dá pra buscar.' },
           };
         }
+        let dataNascimento: string | undefined;
+        if (data_nascimento !== undefined) {
+          const normalizada = normalizarDataDeNascimento(data_nascimento);
+          if (normalizada === null) return RESPOSTA_DATA_INVALIDA;
+          dataNascimento = normalizada;
+        }
+        let desfecho;
         try {
-          const out = await buscarAlunoPorTelefone(sistemaEscolarConfig, telefone);
+          const out = await buscarAlunoPorTelefone(
+            sistemaEscolarConfig,
+            telefone,
+            dataNascimento === undefined
+              ? {}
+              : {
+                  dataNascimento,
+                  ...(nome_completo?.trim() ? { nome: nome_completo.trim() } : {}),
+                  ...(codigo !== undefined && /^\d{6}$/u.test(codigo.trim()) ? { codigo: codigo.trim() } : {}),
+                },
+          );
           const selecao = selecionarAluno(out, nome_completo);
-          if (selecao.status === 'nao_encontrado') {
-            return {
-              ok: true,
-              encontrado: false,
-              message: 'nenhum aluno foi encontrado com o telefone desta conversa; não invente dados.',
-            };
+          if (selecao.status === 'correspondencia_nao_confirmada' || selecao.status === 'api_sem_confirmacao') {
+            runLog.warn('sistema escolar sem casamento exato ou sem confirmação de identidade — nenhum dado repassado', {
+              status: selecao.status,
+            });
           }
-          if (selecao.status === 'correspondencia_nao_confirmada') {
-            runLog.warn('sistema escolar respondeu sem match_type=exact — nenhum dado de aluno repassado', {});
-            return {
-              ok: true,
-              encontrado: false,
-              message:
-                'não foi possível confirmar que este número pertence a um aluno; não informe nenhum dado ' +
-                'acadêmico nem financeiro, não invente, e ofereça passar para uma pessoa da equipe.',
-            };
-          }
-          if (selecao.status === 'ambiguo') {
-            return {
-              ok: true,
-              encontrado: true,
-              ambiguo: true,
-              quantidade: selecao.quantidade,
-              message: 'este telefone pertence a mais de um aluno; peça o nome completo e chame esta ferramenta novamente com nome_completo.',
-            };
-          }
-          if (selecao.status === 'nome_nao_encontrado') {
-            return {
-              ok: true,
-              encontrado: true,
-              ambiguo: true,
-              message: 'o nome informado não corresponde exatamente a nenhum aluno deste telefone; confira o nome completo, sem sugerir nomes.',
-            };
-          }
-          return { ok: true, encontrado: true, ambiguo: false, aluno: selecao.aluno };
+          desfecho = desfechoDaConsultaDoAluno(selecao, Boolean(nome_completo?.trim()));
         } catch (err) {
           runLog.warn('consulta ao sistema escolar (aluno) falhou', {
             error: err instanceof Error ? err.message : String(err),
           });
-          return {
-            ok: false,
-            error: { code: 'falha_consulta', message: 'não consegui consultar o sistema escolar agora — siga sem esse dado, ou peça pra tentar de novo em instantes.' },
-          };
+          desfecho = desfechoDaFalhaDaConsulta();
         }
+        if (desfecho.acao === 'passar_para_equipe') {
+          await passarParaAEquipePeloSistema(desfecho.porQue);
+        }
+        return desfecho.resposta;
       },
     }),
     consultar_catalogo_cursos: tool({
@@ -3315,6 +3409,32 @@ async function executarTurnoDoAgente(
                 'NÃO envie mais nada agora — encerre o turno e espere a resposta do lead.',
             },
           };
+        }
+        // ANTI-LOOP (auditoria de agentes): a mesma mensagem que a IA já mandou nesta
+        // conversa não sai de novo, e conversa em que a IA já falou demais na
+        // última hora passa para a equipe. Ver `anti-loop.ts`.
+        if (!preview) {
+          const antiLoop = decidirAntiLoop({
+            candidato: body,
+            historico: openingContext.context.messages,
+            agora: clock(),
+            recusasNoTurno: recusasPorRepeticao,
+          });
+          if (antiLoop.acao === 'recusar_repeticao') {
+            recusasPorRepeticao += 1;
+            return { ok: false, error: { code: 'mensagem_repetida', message: antiLoop.message } };
+          }
+          if (antiLoop.acao === 'passar_para_equipe') {
+            runLog.warn('anti-loop: conversa passada para a equipe', { motivo: antiLoop.motivo });
+            await passarParaAEquipePeloSistema(antiLoop.porQue);
+            return {
+              ok: false,
+              error: {
+                code: 'anti_loop',
+                message: 'a conversa foi passada para uma pessoa da equipe. Não envie mais nada; encerre o turno.',
+              },
+            };
+          }
         }
         // RESPOSTA OBSOLETA: o cliente escreveu de novo enquanto este turno pensava.
         // Só antes do PRIMEIRO envio — cortar a meio uma resposta já começada é pior
@@ -3900,6 +4020,58 @@ async function executarTurnoDoAgente(
     // F4-06: handoff humano acionado pelo PRÓPRIO modelo (cidadão de 1ª classe). MUTANTE
     // (seta force_human no CRM + cancela crons + inbox), fora de READ_ONLY_TOOLS. tenant/
     // lead/conversation vêm da ROW do job (closure), nunca do payload do modelo.
+    // Pré-matrícula (0659): MUTANTE (grava o pedido e passa a conversa para a
+    // equipe). Organização/contato/conversa/agente vêm da closure, nunca do payload.
+    registrar_pre_matricula: tool({
+      ...AGENT_TOOL_DEFS.registrar_pre_matricula,
+      execute: async (raw) => {
+        const validacao = validarPreMatricula(raw, openingContext.context.contact.phone ?? null);
+        if (!validacao.ok) return { ok: false, error: validacao.erro };
+        try {
+          const res = await registrarPreMatricula(
+            pool,
+            {
+              organizationId: tenantId,
+              contactId: leadId,
+              conversationId: input.conversationId ?? null,
+              agentId: agentConfig?.agentId ?? null,
+            },
+            validacao.dados,
+          );
+          if (!res.ok) return { ok: false, error: res.erro };
+          if (res.status === 'registrada') {
+            // A pré-matrícula entra na timeline do NEGÓCIO (o card no funil), sem
+            // dado pessoal no payload — quem abre o card vê que houve o pedido.
+            await emitAgentActivityForContact({
+              pool,
+              organizationId: tenantId,
+              contactId: leadId,
+              type: 'note',
+              reason: `Pré-matrícula registrada pelo agente — ${validacao.dados.curso}, turno ${validacao.dados.turno}`,
+              sourceModule: 'pre_matricula',
+              sourceId: res.id,
+              agentId: agentConfig?.agentId ?? null,
+              payload: { pre_matricula_id: res.id, curso: validacao.dados.curso, turno: validacao.dados.turno },
+            }).catch((err: unknown) =>
+              runLog.warn('pré-matrícula: atividade na timeline falhou', {
+                error: err instanceof Error ? err.message : String(err),
+              }),
+            );
+          }
+          await passarParaAEquipePeloSistema(
+            `pré-matrícula ${res.status === 'registrada' ? 'registrada' : 'já existente'}: ` +
+              `${validacao.dados.curso}, turno ${validacao.dados.turno}`,
+          );
+          return { ok: true, status: res.status, message: mensagemAposRegistro(res.status) };
+        } catch (err) {
+          noteRunError(err instanceof Error ? err : new Error(String(err)));
+          return {
+            ok: false,
+            error: { code: 'internal_error', message: 'não consegui registrar a pré-matrícula agora — ofereça passar para a equipe.' },
+          };
+        }
+      },
+    }),
     request_human_handoff: tool({
       ...AGENT_TOOL_DEFS.request_human_handoff,
       execute: async (raw) => {
@@ -4175,6 +4347,13 @@ async function executarTurnoDoAgente(
     });
     if (!gate.aluno) delete rawTools.consultar_aluno_sistema_escolar;
     if (!gate.catalogo) delete rawTools.consultar_catalogo_cursos;
+  }
+
+  // Pré-matrícula (0659) é da ESCOLA e do atendimento COMERCIAL: só entra para o
+  // agente comercial de uma organização com a integração escolar ativa. Qualquer
+  // outra instalação nunca vê a ferramenta.
+  if (sistemaEscolarConfig === null || agentConfig === null || agentConfig.serviceScope !== 'comercial') {
+    delete rawTools.registrar_pre_matricula;
   }
 
   // A ferramenta de template só entra em canal que EXIGE template fora da janela.

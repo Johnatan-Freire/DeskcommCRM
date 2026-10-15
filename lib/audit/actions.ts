@@ -338,6 +338,17 @@ export const AUDIT_ACTIONS = [
   "followup_flow.duplicated",
   "followup_flow.rolled_back",
   "followup.worker_run",
+  // Pausa global de follow-ups da organização (0657).
+  "followups.paused_all",
+  "followups.resumed_all",
+  // Avisos temporários dos agentes de IA (0658).
+  "ai.aviso_temporario_criado",
+  "ai.aviso_temporario_alterado",
+  // Pré-matrícula (0659): a equipe dá andamento ao pedido registrado pela IA.
+  "pre_matricula.alterada",
+  // Feriados do atendimento humano (0660).
+  "atendimento.feriado_cadastrado",
+  "atendimento.feriado_removido",
   "followup.silence_sweep_run",
   // Roteiros de atendimento encerrados por prazo (0397) — só quando houve efeito.
   "followup.roteiros_expirados",

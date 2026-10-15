@@ -6,6 +6,7 @@ import { traduzir } from "@/lib/i18n/dicionario";
 import { createClient } from "@/lib/supabase/server";
 import type { AgentRow } from "@/hooks/ai/useAgent";
 import { AgentsList } from "./_components/AgentsList";
+import { PausaGeralDosAgentes } from "./_components/PausaGeralDosAgentes";
 import { logger } from "@/lib/logger";
 
 export const dynamic = "force-dynamic";
@@ -63,6 +64,12 @@ export default async function AgentsListPage() {
             {traduzir("Configure o comportamento dos agents que respondem no WhatsApp.", idioma)}
           </p>
         </div>
+        {canWrite ? (
+          <PausaGeralDosAgentes
+            algumNoAr={agents.some((a) => !a.archived_at && !a.paused_at)}
+            algumPausado={agents.some((a) => !a.archived_at && Boolean(a.paused_at))}
+          />
+        ) : null}
       </header>
       <AgentsList initialData={agents} canWrite={canWrite} />
     </div>

@@ -116,9 +116,40 @@ const alunoSchema = z.object({
   matched_contact_field: z.string().optional(),
 });
 
+/**
+ * A confirmação de identidade do contrato v2 (decisão do dono, 14/10/2026): o
+ * sistema escolar só devolve dado acadêmico quando a DATA DE NASCIMENTO do aluno,
+ * informada na conversa, confere com o cadastro. A régua mora NO LARAVEL — o CRM
+ * nunca recebe a data cadastrada para comparar sozinho.
+ *
+ *  - `nao_informada` — a busca veio sem data: só `quantidade`, `alunos` vazio;
+ *  - `confere`       — `alunos` traz SÓ os cadastros cuja data conferiu;
+ *  - `nao_confere`   — a data não bate com nenhum aluno do número; nada sai;
+ *  - `bloqueado`     — tentativas demais para este número; nada sai, nem a checagem roda.
+ *
+ * Ausente = API anterior ao contrato v2: o CRM trata como NÃO confirmado (falha
+ * fechada) — ver `selecionarAluno`.
+ */
+export const CONFIRMACOES_DE_IDENTIDADE = [
+  "nao_informada",
+  "confere",
+  "nao_confere",
+  "bloqueado",
+  // Segundo fator (opcional, ligado no sistema escolar): código no e-mail cadastrado.
+  "codigo_enviado",
+  "codigo_invalido",
+  "nome_necessario",
+  "sem_canal_verificado",
+] as const;
+
 const respostaAlunoPorTelefoneSchema = z.object({
   encontrado: z.boolean(),
   ambiguo: z.boolean().optional(),
+  /** Quantos alunos casaram pelo número — vem mesmo quando `alunos` vem vazio (v2). */
+  quantidade: z.number().int().nonnegative().optional(),
+  confirmacao: z.enum(CONFIRMACOES_DE_IDENTIDADE).optional(),
+  /** Só com `codigo_enviado`: o e-mail cadastrado mascarado (`j***@g***.com`). */
+  email_mascarado: z.string().max(120).optional(),
   /**
    * "exact" = o sistema escolar casou pelo NÚMERO COMPLETO normalizado. Versões antigas da
    * API casavam pelos 8 últimos dígitos (DDDs diferentes colidiam) e não mandam o campo:
@@ -133,6 +164,22 @@ export type RespostaAlunoPorTelefone = z.infer<typeof respostaAlunoPorTelefoneSc
 
 export type ResultadoSelecaoAluno =
   | { status: "nao_encontrado" }
+  /** O número casou, mas a data de nascimento ainda não foi informada — nenhum dado sai. */
+  | { status: "confirmacao_necessaria"; quantidade: number }
+  /** A data informada não confere com nenhum aluno deste número. */
+  | { status: "nao_confere" }
+  /** Tentativas demais para este número: o sistema escolar parou de checar. */
+  | { status: "bloqueado" }
+  /** API sem o contrato de confirmação (anterior ao v2): nada sai, por construção. */
+  | { status: "api_sem_confirmacao" }
+  /** Segundo fator: código enviado ao e-mail cadastrado; nada sai antes dele. */
+  | { status: "codigo_enviado"; emailMascarado: string | null }
+  /** Segundo fator: o código informado não confere (ou expirou). */
+  | { status: "codigo_invalido" }
+  /** Segundo fator com gêmeos: o sistema escolar precisa do nome antes do código. */
+  | { status: "nome_necessario" }
+  /** Segundo fator ligado, mas o aluno não tem e-mail cadastrado para receber o código. */
+  | { status: "sem_canal_verificado" }
   /** A API achou alguém, mas não afirmou casamento pelo número completo — nada sai. */
   | { status: "correspondencia_nao_confirmada" }
   | { status: "ambiguo"; quantidade: number }
@@ -165,7 +212,9 @@ export function selecionarAluno(
   resposta: RespostaAlunoPorTelefone,
   nomeCompleto?: string,
 ): ResultadoSelecaoAluno {
-  if (!resposta.encontrado || resposta.alunos.length === 0) {
+  // Só `encontrado` decide "não há aluno": no contrato v2 a lista vem VAZIA de
+  // propósito antes da confirmação, e isso não é "não encontrado".
+  if (!resposta.encontrado) {
     return { status: "nao_encontrado" };
   }
 
@@ -173,6 +222,34 @@ export function selecionarAluno(
   // completo, os dados podem ser de um aluno de outro DDD. Nenhum dado sai, nem a contagem.
   if (resposta.match_type !== "exact") {
     return { status: "correspondencia_nao_confirmada" };
+  }
+
+  // Confirmação de identidade (contrato v2). Só `confere` deixa dado sair; todo
+  // outro estado — inclusive a AUSÊNCIA do campo, que é a API antiga devolvendo o
+  // cadastro inteiro sem checar nada — fecha.
+  switch (resposta.confirmacao) {
+    case "confere":
+      break;
+    case "nao_informada":
+      return { status: "confirmacao_necessaria", quantidade: resposta.quantidade ?? resposta.alunos.length };
+    case "nao_confere":
+      return { status: "nao_confere" };
+    case "bloqueado":
+      return { status: "bloqueado" };
+    case "codigo_enviado":
+      return { status: "codigo_enviado", emailMascarado: resposta.email_mascarado ?? null };
+    case "codigo_invalido":
+      return { status: "codigo_invalido" };
+    case "nome_necessario":
+      return { status: "nome_necessario" };
+    case "sem_canal_verificado":
+      return { status: "sem_canal_verificado" };
+    default:
+      return { status: "api_sem_confirmacao" };
+  }
+  if (resposta.alunos.length === 0) {
+    // `confere` sem aluno é contradição do contrato — trata como não conferido.
+    return { status: "nao_confere" };
   }
 
   if (resposta.alunos.length === 1) {
@@ -198,12 +275,55 @@ export function selecionarAluno(
   return { status: "encontrado", aluno: semIdentificadorInterno(unico) };
 }
 
-/** `telefone` vai cru (dígitos, com ou sem DDI) — a API do sistema escolar normaliza dos dois lados. */
+/**
+ * Data de nascimento como a pessoa escreve no WhatsApp → `AAAA-MM-DD`, ou `null`.
+ *
+ * Aceita `DD/MM/AAAA`, `DD-MM-AAAA`, `DD.MM.AAAA` (dia e mês com 1 ou 2 dígitos) e
+ * `AAAA-MM-DD`. Recusa data que não existe no calendário (31/02), ano de 2 dígitos
+ * (ambíguo: 08 é 1908 ou 2008?), antes de 1900 e no futuro. É a ÚNICA forma da data
+ * que sai do CRM: o modelo transcreve, este código decide se é uma data.
+ */
+export function normalizarDataDeNascimento(texto: string, agora: Date = new Date()): string | null {
+  const t = texto.trim();
+  let dia: number;
+  let mes: number;
+  let ano: number;
+  const br = /^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})$/u.exec(t);
+  const iso = /^(\d{4})-(\d{2})-(\d{2})$/u.exec(t);
+  if (br) {
+    dia = Number(br[1]);
+    mes = Number(br[2]);
+    ano = Number(br[3]);
+  } else if (iso) {
+    ano = Number(iso[1]);
+    mes = Number(iso[2]);
+    dia = Number(iso[3]);
+  } else {
+    return null;
+  }
+  if (ano < 1900 || mes < 1 || mes > 12 || dia < 1) return null;
+  const data = new Date(Date.UTC(ano, mes - 1, dia));
+  if (data.getUTCFullYear() !== ano || data.getUTCMonth() !== mes - 1 || data.getUTCDate() !== dia) return null;
+  if (data.getTime() > agora.getTime()) return null;
+  return `${String(ano).padStart(4, "0")}-${String(mes).padStart(2, "0")}-${String(dia).padStart(2, "0")}`;
+}
+
+/**
+ * `telefone` vai cru (dígitos, com ou sem DDI) — a API do sistema escolar normaliza dos dois lados.
+ * `dataNascimento` (já normalizada, `AAAA-MM-DD`) é a confirmação de identidade do contrato v2:
+ * sem ela a API devolve só a quantidade, nunca dado acadêmico.
+ */
 export async function buscarAlunoPorTelefone(
   config: ConfigSistemaEscolar,
   telefone: string,
+  confirmacao: { dataNascimento?: string; codigo?: string; nome?: string } = {},
 ): Promise<RespostaAlunoPorTelefone> {
-  const out = await chamar(config, `/api/deskcomm/aluno?telefone=${encodeURIComponent(telefone)}`);
+  const params = new URLSearchParams({ telefone });
+  if (confirmacao.dataNascimento) params.set("data_nascimento", confirmacao.dataNascimento);
+  // `nome` só serve ao segundo fator (gêmeos): sem a data ele não diz nada à API.
+  if (confirmacao.dataNascimento && confirmacao.nome) params.set("nome", confirmacao.nome);
+  if (confirmacao.dataNascimento && confirmacao.codigo) params.set("codigo", confirmacao.codigo);
+  const out = await chamar(config, `/api/deskcomm/aluno?${params.toString()}`);
   return respostaAlunoPorTelefoneSchema.parse(out);
 }
 

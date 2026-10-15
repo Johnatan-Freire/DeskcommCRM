@@ -24,8 +24,9 @@
  * (pg) formam sobre `buildLeadActivityRow`: dois leitores, uma regra.
  */
 import { ROLE_RANK, type Role } from "@/lib/auth/types";
-import { isAttendantEligible, isWithinSchedule, OPEN_LOAD_STATUSES } from "@/lib/routing/eligibility";
-import { availabilityScheduleSchema, type AvailabilitySchedule } from "@/lib/schemas/routing";
+import { isAttendantEligible, isWithinSchedule, OPEN_LOAD_STATUSES, type AgendaDeAtendimento } from "@/lib/routing/eligibility";
+import { feriadosDaOrganizacaoPg } from "./feriados";
+import { availabilityScheduleSchema } from "@/lib/schemas/routing";
 import { proximaAberturaGeral, fraseDaProximaAbertura } from "./proxima-abertura";
 
 import type { Queryable } from "../agent-engine/queue/queue";
@@ -60,7 +61,7 @@ export interface QuemPodeAssumir {
    * sempre falso, e a estimativa de horário nunca apareceria se dependesse
    * disso.
    */
-  agendas?: Pick<AvailabilitySchedule, "timezone" | "windows">[];
+  agendas?: AgendaDeAtendimento[];
 }
 
 interface LinhaDeDisponibilidade {
@@ -113,7 +114,10 @@ export async function quemPodeAssumirAgora(
   // continua aqui, com a linha, só com `is_available: false`.
   const configurados = atendentes.filter((r) => r.capacity !== null);
 
-  const agendas = configurados.map((r) => availabilityScheduleSchema.parse(r.schedule ?? {}));
+  // Feriados (0660) viajam com a agenda: a mesma função pura decide horário e
+  // reabertura, sem segunda regra.
+  const feriados = await feriadosDaOrganizacaoPg(db, tenantId, now);
+  const agendas = configurados.map((r) => ({ ...availabilityScheduleSchema.parse(r.schedule ?? {}), feriados }));
 
   // `disponiveis` (quem pode assumir DE VERDADE agora) continua exigindo
   // is_available AO VIVO — é o mesmo cálculo que o roteamento usa, e prometer

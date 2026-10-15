@@ -150,6 +150,13 @@ export const NAV_CATALOG = [
     contador: "fila",
   },
   {
+    href: "/app/pre-matriculas",
+    label: "Pré-matrículas",
+    description: "Quem pediu para se matricular pelo WhatsApp e espera um consultor.",
+    icon: "GraduationCap",
+    group: "atendimento",
+  },
+  {
     href: "/app/radar",
     label: "Radar",
     description: "Quem esfriou e ainda está aberto — o que corre risco de morrer sem resposta.",
@@ -495,6 +502,15 @@ export const NAV_CATALOG = [
     group: "ia",
     section: "Ensinar o agente",
     minRole: "manager",
+  },
+  {
+    href: "/app/ai/avisos",
+    label: "Avisos temporários",
+    description: "Promoções, início de turma e mudanças com prazo que os agentes usam só enquanto valem.",
+    icon: "ClockCountdown",
+    group: "ia",
+    section: "Ensinar o agente",
+    minRole: "agent",
   },
   {
     href: "/app/ai/memory",

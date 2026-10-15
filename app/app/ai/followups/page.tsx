@@ -8,6 +8,8 @@ import type { FollowupFlowPointerRow } from "@/hooks/followup/useFollowupFlows";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { FlowsList } from "./_components/FlowsList";
 import { QueueTab } from "./_components/QueueTab";
+import { PausaGeralDosFollowups } from "./_components/PausaGeralDosFollowups";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 export const dynamic = "force-dynamic";
 
@@ -36,6 +38,15 @@ export default async function FollowupFlowsPage() {
   const flows = (data ?? []) as unknown as FollowupFlowPointerRow[];
   const canWrite = ROLE_RANK[activeOrg.role] >= ROLE_RANK.manager;
 
+  // A chave geral (0657) mora na organização; lida pelo servidor com o id da
+  // organização ATIVA da sessão — nunca de parâmetro da requisição.
+  const { data: org } = await createAdminClient()
+    .from("organizations")
+    .select("followups_pausados_em")
+    .eq("id", activeOrg.orgId)
+    .maybeSingle();
+  const pausadosEm = (org as { followups_pausados_em: string | null } | null)?.followups_pausados_em ?? null;
+
   return (
     <div className="flex h-full flex-col gap-6 p-6">
       <header className="flex flex-wrap items-end justify-between gap-2">
@@ -46,6 +57,11 @@ export default async function FollowupFlowsPage() {
           </p>
         </div>
       </header>
+      <PausaGeralDosFollowups
+        pausadosEm={pausadosEm}
+        podePausar={canWrite}
+        podeRetomar={ROLE_RANK[activeOrg.role] >= ROLE_RANK.admin}
+      />
       <Tabs defaultValue="fluxos" className="flex flex-1 flex-col">
         <TabsList>
           <TabsTrigger value="fluxos">{t("Fluxos")}</TabsTrigger>

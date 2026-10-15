@@ -75,17 +75,42 @@ export function localMoment(now: Date, timezone: string): { dow: number; hhmm: s
 }
 
 /**
+ * A jornada de um atendente com o calendário de feriados da organização
+ * (migration 0660). `feriados` são datas LOCAIS `AAAA-MM-DD`, no fuso da jornada.
+ * Quem lê a jornada anexa os feriados — a regra mora só aqui.
+ */
+export type AgendaDeAtendimento = Pick<AvailabilitySchedule, "timezone" | "windows"> & {
+  feriados?: readonly string[];
+};
+
+/** `AAAA-MM-DD` de `now` no fuso dado — o dia que o calendário de feriados compara. */
+export function dataLocal(now: Date, timezone: string): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(now);
+}
+
+/**
  * `now` cai dentro de alguma janela do schedule?
  * `windows` vazio (default do DB `{}`) = sem restrição de horário ⇒ true (24/7);
  * janelas existem para RESTRINGIR, não para habilitar.
+ *
+ * FERIADO VENCE A JORNADA (0660), inclusive a 24/7: o dia cadastrado como
+ * feriado é a equipe inteira fora. A IA não passa por aqui — ela segue atendendo.
  */
 export function isWithinSchedule(
-  schedule: Pick<AvailabilitySchedule, "timezone" | "windows"> | null | undefined,
+  schedule: AgendaDeAtendimento | null | undefined,
   now: Date,
 ): boolean {
+  const timezone = schedule?.timezone || "America/Sao_Paulo";
+  if (schedule?.feriados && schedule.feriados.length > 0 && schedule.feriados.includes(dataLocal(now, timezone))) {
+    return false;
+  }
   const windows = schedule?.windows ?? [];
   if (windows.length === 0) return true;
-  const timezone = schedule?.timezone || "America/Sao_Paulo";
   const { dow, hhmm } = localMoment(now, timezone);
   return windows.some((w) => w.dow === dow && hhmm >= w.start && hhmm < w.end);
 }
@@ -111,7 +136,7 @@ export function isWithinSchedule(
  * diziam — a tela lia presença e o roteador lia a jornada.
  */
 export function estaDePlantao(
-  input: { isAvailable: boolean; schedule?: Pick<AvailabilitySchedule, "timezone" | "windows"> | null },
+  input: { isAvailable: boolean; schedule?: AgendaDeAtendimento | null },
   now: Date,
 ): boolean {
   return input.isAvailable && isWithinSchedule(input.schedule ?? null, now);
@@ -122,7 +147,7 @@ export interface AttendantEligibilityInput {
   capacity: number;
   /** Conversas abertas atribuídas ao atendente (carga atual). */
   currentLoad: number;
-  schedule?: Pick<AvailabilitySchedule, "timezone" | "windows"> | null;
+  schedule?: AgendaDeAtendimento | null;
 }
 
 /** disponível ∧ com folga (carga < capacidade) ∧ dentro do horário (§5). */

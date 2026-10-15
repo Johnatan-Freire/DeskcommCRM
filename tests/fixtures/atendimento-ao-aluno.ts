@@ -33,10 +33,17 @@ const matricula = (over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
+/**
+ * Contrato v2 (confirmação por data de nascimento): os payloads com dado acadêmico são o que a
+ * API devolve DEPOIS de a data conferir (`confirmacao: "confere"`). Sem a data, a mesma busca
+ * devolve só a quantidade — ver `API_UM_ALUNO_SEM_DATA`.
+ */
 export const API_UM_ALUNO = {
   encontrado: true,
   ambiguo: false,
   match_type: "exact",
+  confirmacao: "confere",
+  quantidade: 1,
   alunos: [
     {
       id: 101,
@@ -63,6 +70,8 @@ export const API_DOIS_ALUNOS = {
   encontrado: true,
   ambiguo: true,
   match_type: "exact",
+  confirmacao: "confere",
+  quantidade: 2,
   alunos: [
     { id: 201, nome: "Pedro Ficticio Lima", situacao_financeira: "Pendente", matriculas: [matricula({ turma: "PROG-T1" })] },
     {
@@ -75,6 +84,45 @@ export const API_DOIS_ALUNOS = {
 };
 
 export const API_NAO_ENCONTRADO = { encontrado: false, match_type: "exact", alunos: [] };
+
+/** Contrato v2: o número casou, a data ainda não foi informada — só a quantidade, nenhum dado. */
+export const API_UM_ALUNO_SEM_DATA = {
+  encontrado: true,
+  ambiguo: false,
+  match_type: "exact",
+  confirmacao: "nao_informada",
+  quantidade: 1,
+  alunos: [],
+};
+
+/** Contrato v2: a data informada não confere com nenhum aluno do número. */
+export const API_DATA_NAO_CONFERE = {
+  encontrado: true,
+  match_type: "exact",
+  confirmacao: "nao_confere",
+  quantidade: 1,
+  alunos: [],
+};
+
+/** Contrato v2: tentativas demais para o número — a API parou de checar. */
+export const API_BLOQUEADO = {
+  encontrado: true,
+  match_type: "exact",
+  confirmacao: "bloqueado",
+  quantidade: 1,
+  alunos: [],
+};
+
+/**
+ * API ANTERIOR ao contrato v2: devolve o cadastro inteiro sem checar data nenhuma. O CRM
+ * precisa fechar mesmo assim — é o cenário do deploy do CRM antes do Laravel.
+ */
+export const API_SEM_CONTRATO_DE_CONFIRMACAO = {
+  encontrado: true,
+  ambiguo: false,
+  match_type: "exact",
+  alunos: [{ id: 401, nome: "Aluno Sem Confirmacao", situacao_financeira: "Em dia", matriculas: [matricula()] }],
+};
 
 /**
  * Palavras-chave de passagem DO AGENTE (campo "palavras que chamam uma pessoa" da versão).

@@ -43975,6 +43975,666 @@ $$;
 revoke execute on function public.fn_importar_conversa_historica(uuid, jsonb, jsonb) from public, anon, authenticated;
 grant execute on function public.fn_importar_conversa_historica(uuid, jsonb, jsonb) to service_role;
 
+-- ---- pausa global de follow-ups da organização (migration 0657) ----
+-- Auditoria dos agentes de IA (14/10/2026): não havia como parar TODOS os
+-- follow-ups de uma vez pela tela — só fluxo a fluxo e inscrição a inscrição.
+--
+-- PAUSAR CONGELA, NÃO PULA. A recusa no instante do envio (fn_followup_pode_enviar)
+-- vira passo `skipped` e o fluxo segue adiante sem a mensagem — pausar por ali
+-- perderia passos. Por isso a pausa age em três pontos:
+--
+--   1. o claim (fn_claim_due_followup_enrollments) não reivindica inscrição de
+--      organização pausada: as vivas ficam paradas onde estavam e retomam ao
+--      despausar, no mesmo nó;
+--   2. inscrição criada DURANTE a pausa nasce `cancelled` com
+--      cancel_reason='followups_pausados' (gatilho BEFORE INSERT): são sete os
+--      caminhos que inscrevem (silêncio, lead, etapa, caso, retorno, presença,
+--      manual) e um gatilho só alcança todos. Uma boas-vindas que "acorda" dias
+--      depois é pior que nenhuma;
+--   3. as duas funções de corte devolvem 'followups_pausados' primeiro — os
+--      emissores tratam esse motivo como ADIAMENTO, não como passo pulado
+--      (defesa para o turno que já estava em voo quando a pausa entrou).
+--
+-- Quem pausa/retoma e quando: colunas na própria organização + api_audit_log.
+
+alter table public.organizations add column if not exists followups_pausados_em timestamptz;
+alter table public.organizations add column if not exists followups_pausados_por uuid;
+
+do $$ begin
+  alter table public.organizations
+    add constraint organizations_followups_pausados_por_fkey
+    foreign key (followups_pausados_por) references auth.users(id) on delete set null;
+exception when duplicate_object then null; end $$;
+
+comment on column public.organizations.followups_pausados_em is
+  'Pausa global de follow-ups (0657): preenchida = nenhum follow-up da organização anda, inscreve ou envia. Nula = normal.';
+comment on column public.organizations.followups_pausados_por is
+  'Quem ligou a pausa global de follow-ups (0657).';
+
+-- (2) inscrição nascida durante a pausa
+create or replace function public.fn_followup_inscricao_respeita_pausa()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+begin
+  if new.status in ('active', 'waiting_reply', 'dormente')
+     and exists (select 1 from organizations o
+                  where o.id = new.organization_id and o.followups_pausados_em is not null) then
+    new.status := 'cancelled';
+    new.cancel_reason := 'followups_pausados';
+    new.next_eval_at := null;
+    new.completed_at := now();
+  end if;
+  return new;
+end;
+$$;
+
+revoke execute on function public.fn_followup_inscricao_respeita_pausa() from public, anon;
+revoke execute on function public.fn_followup_inscricao_respeita_pausa() from authenticated, service_role;
+
+drop trigger if exists trg_followup_inscricao_respeita_pausa on public.followup_enrollments;
+create trigger trg_followup_inscricao_respeita_pausa
+  before insert on public.followup_enrollments
+  for each row execute function public.fn_followup_inscricao_respeita_pausa();
+
+-- (1) o claim não enxerga organização pausada
+create or replace function fn_claim_due_followup_enrollments(p_limit int, p_lease_seconds int)
+returns setof followup_enrollments
+language sql
+security definer
+set search_path = public
+as $$
+  with orgs as (
+    -- Sem a condição de claim aqui de propósito: o lateral abaixo a aplica, e uma
+    -- organização cujos vencidos estão todos com lease apenas devolve zero linhas.
+    -- Organização com follow-ups pausados (0657) não entra: as inscrições dela
+    -- ficam paradas no nó em que estavam até a retomada.
+    select distinct fe.organization_id
+      from followup_enrollments fe
+      join organizations o on o.id = fe.organization_id
+     where fe.status in ('active','waiting_reply','dormente')
+       and fe.next_eval_at <= now()
+       and o.followups_pausados_em is null
+  ),
+  fila as (
+    select f.id, f.next_eval_at, f.posicao_na_org
+      from orgs
+      cross join lateral (
+        select d.id,
+               d.next_eval_at,
+               row_number() over (order by d.next_eval_at) as posicao_na_org
+          from followup_enrollments d
+         where d.organization_id = orgs.organization_id
+           and d.status in ('active','waiting_reply','dormente')
+           and d.next_eval_at <= now()
+           and (d.claimed_until is null or d.claimed_until < now())
+         order by d.next_eval_at
+         limit p_limit
+      ) f
+  ),
+  escolhidos as (
+    -- O rodízio: posição 1 de todas as organizações, depois a 2 de todas, etc.
+    -- Empate na mesma posição vai para quem esperou mais.
+    select id from fila order by posicao_na_org, next_eval_at limit p_limit
+  ),
+  travados as (
+    select e.id from followup_enrollments e
+     where e.id in (select id from escolhidos)
+     for update skip locked
+  )
+  update followup_enrollments e
+     set claimed_until = now() + make_interval(secs => p_lease_seconds),
+         updated_at = now()
+   where e.id in (select id from travados)
+     -- A condição de lease É REPETIDA AQUI, e não é redundante com a CTE `fila`
+     -- (duas conexões simultâneas reclamariam as mesmas linhas — ver a 0145).
+     and (e.claimed_until is null or e.claimed_until < now())
+  returning e.*;
+$$;
+
+revoke execute on function fn_claim_due_followup_enrollments(int, int) from public, anon, authenticated;
+grant execute on function fn_claim_due_followup_enrollments(int, int) to service_role;
+
+-- (3) as funções de corte respondem a pausa primeiro
+create or replace function public.fn_silencio_pode_reengajar(
+  p_org uuid, p_conversation uuid, p_para_inscrever boolean)
+returns text
+language plpgsql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  c record;
+  ultima record;
+  ultimo_inbound record;
+begin
+  -- 0657: pausa global de follow-ups vence todo o resto.
+  if exists (select 1 from organizations o where o.id = p_org and o.followups_pausados_em is not null) then
+    return 'followups_pausados';
+  end if;
+
+  select cv.status, cv.assignee_kind, cv.bot_silenced_until, cv.is_group, cv.contact_id,
+         ct.force_human, ct.is_blocked
+    into c
+    from conversations cv
+    join contacts ct on ct.id = cv.contact_id and ct.organization_id = cv.organization_id
+   where cv.organization_id = p_org and cv.id = p_conversation;
+  if not found then return 'conversa_desconhecida'; end if;
+  if c.is_group then return 'grupo'; end if;
+  if c.status in ('closed', 'resolved', 'archived') then return 'conversa_encerrada'; end if;
+  if coalesce(c.is_blocked, false) then return 'contato_bloqueado'; end if;
+  if coalesce(c.force_human, false) or c.assignee_kind = 'user'
+     or (c.bot_silenced_until is not null and c.bot_silenced_until > now()) then
+    return 'humano_atendendo';
+  end if;
+  -- Follow-up é COMERCIAL: só etapa de política comercial (0404). Desistiu,
+  -- Desqualificado, Equipe e a etapa acadêmica ficam fora, por regra do banco.
+  if public.fn_politica_de_atendimento_do_contato(p_org, c.contact_id) <> 'comercial' then
+    return 'etapa_fora_do_follow_up';
+  end if;
+
+  select direction, sent_via into ultima
+    from messages where organization_id = p_org and conversation_id = p_conversation
+   order by sent_at desc, created_at desc, id desc limit 1;
+  if not found then return 'conversa_sem_mensagens'; end if;
+  -- O lead falou por último e ninguém respondeu: isso é a EMPRESA devendo
+  -- resposta, não "lead sem resposta". Um lembrete aqui seria cobrar o cliente.
+  if ultima.direction = 'inbound' then return 'contato_aguardando_resposta'; end if;
+  -- Humano (celular, tela, API) falou por último: é ele quem conduz — inclusive
+  -- quando encerrou a conversa com um "por nada" sem clicar em encerrar.
+  if ultima.sent_via is null or ultima.sent_via not in ('ai', 'automation') then
+    return 'humano_falou_por_ultimo';
+  end if;
+
+  select id, sent_at into ultimo_inbound
+    from messages where organization_id = p_org and conversation_id = p_conversation
+     and direction = 'inbound'
+   order by sent_at desc, created_at desc, id desc limit 1;
+  if not found then return 'contato_nunca_falou'; end if;
+
+  -- Um reengajamento por silêncio: sem isto, o lembrete (sent_via automation)
+  -- vira ele mesmo "o atendimento falou por último", e o lead que não responde
+  -- seria reinscrito a cada varredura, para sempre.
+  if p_para_inscrever and exists (
+       select 1 from followup_enrollments e
+        where e.organization_id = p_org and e.conversation_id = p_conversation
+          and e.started_at >= ultimo_inbound.sent_at) then
+    return 'ja_reengajado_neste_silencio';
+  end if;
+
+  return public.fn_ia_pode_responder_mensagem(p_org, ultimo_inbound.id, null);
+end;
+$$;
+
+revoke execute on function public.fn_silencio_pode_reengajar(uuid, uuid, boolean) from public, anon;
+revoke execute on function public.fn_silencio_pode_reengajar(uuid, uuid, boolean) from authenticated;
+grant  execute on function public.fn_silencio_pode_reengajar(uuid, uuid, boolean) to service_role;
+
+create or replace function public.fn_followup_pode_enviar(p_org uuid, p_enrollment uuid)
+returns text
+language plpgsql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  r record;
+begin
+  -- 0657: pausa global de follow-ups vence todo o resto (os emissores ADIAM).
+  if exists (select 1 from organizations o where o.id = p_org and o.followups_pausados_em is not null) then
+    return 'followups_pausados';
+  end if;
+  select e.conversation_id, e.contact_id, p.status as pointer_status,
+         p.trigger_config->>'kind' as gatilho
+    into r
+    from followup_enrollments e
+    left join followup_flow_pointers p
+      on p.id = e.pointer_id and p.organization_id = e.organization_id
+   where e.organization_id = p_org and e.id = p_enrollment;
+  if not found then return 'inscricao_desconhecida'; end if;
+  -- Follow-up é comercial em QUALQUER gatilho (0404): nenhum fluxo — silêncio,
+  -- manual, webhook, etapa — fala com contato de etapa não comercial.
+  if r.contact_id is not null
+     and public.fn_politica_de_atendimento_do_contato(p_org, r.contact_id) <> 'comercial' then
+    return 'etapa_fora_do_follow_up';
+  end if;
+  -- A régua é do gatilho de SILÊNCIO. Manual/webhook são escolha explícita de
+  -- quem inscreveu; os demais gatilhos seguem as regras que já tinham.
+  if r.gatilho is distinct from 'silence' then return 'autorizado'; end if;
+  if r.pointer_status is distinct from 'active' then return 'fluxo_desligado'; end if;
+  if r.conversation_id is null then return 'conversa_desconhecida'; end if;
+  return public.fn_silencio_pode_reengajar(p_org, r.conversation_id, false);
+end;
+$$;
+
+revoke execute on function public.fn_followup_pode_enviar(uuid, uuid) from public, anon;
+revoke execute on function public.fn_followup_pode_enviar(uuid, uuid) from authenticated;
+grant  execute on function public.fn_followup_pode_enviar(uuid, uuid) to service_role;
+
+notify pgrst, 'reload schema';
+
+-- ---- avisos temporários para os agentes de IA (migration 0658) ----
+-- Auditoria dos agentes (14/10/2026): promoção de 7 dias, início de turma,
+-- mudança temporária de horário, aviso institucional — não havia onde cadastrar
+-- informação COM PRAZO. A "Memória da Org" é permanente: uma promoção posta lá
+-- continuaria sendo oferecida depois de acabar.
+--
+-- A régua do prazo é do BANCO: o turno lê só o que `fn_avisos_vigentes` devolve
+-- (publicado E agora entre início e fim). Aviso vencido não chega ao modelo por
+-- construção — não depende de alguém lembrar de despublicar.
+--
+-- Escopo: `publico` (leads | alunos | todos) casa com o escopo do agente
+-- (comercial → leads, acadêmico → alunos); `agente_ids` vazio = todos os agentes
+-- daquele público. `cursos` é rótulo livre para o modelo ligar o aviso ao curso.
+--
+-- Histórico: toda criação e alteração vira uma linha APPEND-ONLY em
+-- `avisos_temporarios_historico` (quem, quando, o retrato), gravada por gatilho —
+-- o histórico não depende do handler lembrar de gravar.
+
+create table if not exists public.avisos_temporarios (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  titulo text not null,
+  descricao text not null,
+  inicio_em timestamptz not null,
+  fim_em timestamptz not null,
+  status text not null default 'rascunho',
+  publico text not null default 'todos',
+  agente_ids uuid[] not null default '{}',
+  cursos text[] not null default '{}',
+  prioridade smallint not null default 0,
+  created_by uuid references auth.users(id) on delete set null,
+  updated_by uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+do $$ begin
+  alter table public.avisos_temporarios add constraint avisos_temporarios_titulo_tamanho
+    check (char_length(btrim(titulo)) between 1 and 120);
+exception when duplicate_object then null; end $$;
+do $$ begin
+  alter table public.avisos_temporarios add constraint avisos_temporarios_descricao_tamanho
+    check (char_length(btrim(descricao)) between 1 and 2000);
+exception when duplicate_object then null; end $$;
+do $$ begin
+  alter table public.avisos_temporarios add constraint avisos_temporarios_periodo
+    check (fim_em > inicio_em);
+exception when duplicate_object then null; end $$;
+do $$ begin
+  alter table public.avisos_temporarios add constraint avisos_temporarios_status_valido
+    check (status in ('rascunho', 'publicado', 'arquivado'));
+exception when duplicate_object then null; end $$;
+do $$ begin
+  alter table public.avisos_temporarios add constraint avisos_temporarios_publico_valido
+    check (publico in ('leads', 'alunos', 'todos'));
+exception when duplicate_object then null; end $$;
+do $$ begin
+  alter table public.avisos_temporarios add constraint avisos_temporarios_prioridade_faixa
+    check (prioridade between 0 and 100);
+exception when duplicate_object then null; end $$;
+
+create index if not exists avisos_temporarios_vigencia
+  on public.avisos_temporarios (organization_id, fim_em)
+  where status = 'publicado';
+
+comment on table public.avisos_temporarios is
+  'Informação COM PRAZO que os agentes de IA usam como contexto (0658): só entra no turno publicada e dentro de [inicio_em, fim_em). Complementa — nunca substitui — o conhecimento permanente.';
+
+create table if not exists public.avisos_temporarios_historico (
+  id bigserial primary key,
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  aviso_id uuid not null references public.avisos_temporarios(id) on delete cascade,
+  operacao text not null check (operacao in ('criado', 'alterado')),
+  autor_id uuid references auth.users(id) on delete set null,
+  retrato jsonb not null,
+  registrado_em timestamptz not null default now()
+);
+
+create index if not exists avisos_temporarios_historico_aviso
+  on public.avisos_temporarios_historico (organization_id, aviso_id, registrado_em desc);
+
+-- `updated_at` antes de gravar; o histórico DEPOIS (a linha do aviso precisa
+-- existir para a FK do histórico).
+create or replace function public.fn_avisos_temporarios_carimbo()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+begin
+  new.updated_at := now();
+  return new;
+end;
+$$;
+
+revoke execute on function public.fn_avisos_temporarios_carimbo() from public, anon;
+revoke execute on function public.fn_avisos_temporarios_carimbo() from authenticated, service_role;
+
+create or replace function public.fn_avisos_temporarios_historico()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+begin
+  insert into avisos_temporarios_historico (organization_id, aviso_id, operacao, autor_id, retrato)
+  values (
+    new.organization_id, new.id,
+    case when tg_op = 'INSERT' then 'criado' else 'alterado' end,
+    coalesce(new.updated_by, new.created_by),
+    jsonb_build_object(
+      'titulo', new.titulo, 'descricao', new.descricao,
+      'inicio_em', new.inicio_em, 'fim_em', new.fim_em,
+      'status', new.status, 'publico', new.publico,
+      'agente_ids', new.agente_ids, 'cursos', new.cursos, 'prioridade', new.prioridade));
+  return null;
+end;
+$$;
+
+revoke execute on function public.fn_avisos_temporarios_historico() from public, anon;
+revoke execute on function public.fn_avisos_temporarios_historico() from authenticated, service_role;
+
+drop trigger if exists trg_avisos_temporarios_carimbo on public.avisos_temporarios;
+create trigger trg_avisos_temporarios_carimbo
+  before update on public.avisos_temporarios
+  for each row execute function public.fn_avisos_temporarios_carimbo();
+
+drop trigger if exists trg_avisos_temporarios_historico on public.avisos_temporarios;
+create trigger trg_avisos_temporarios_historico
+  after insert or update on public.avisos_temporarios
+  for each row execute function public.fn_avisos_temporarios_historico();
+
+-- RLS: leitura para membros da organização; escrita a partir de manager.
+alter table public.avisos_temporarios enable row level security;
+alter table public.avisos_temporarios_historico enable row level security;
+
+drop policy if exists "avisos_temporarios_select" on public.avisos_temporarios;
+create policy "avisos_temporarios_select" on public.avisos_temporarios
+  for select using (
+    public.fn_is_platform_admin()
+    or organization_id in (select public.fn_user_org_ids())
+  );
+drop policy if exists "avisos_temporarios_insert" on public.avisos_temporarios;
+create policy "avisos_temporarios_insert" on public.avisos_temporarios
+  for insert with check (
+    public.fn_is_platform_admin_full()
+    or (organization_id in (select public.fn_user_org_ids())
+        and public.fn_role_at_least(organization_id, 'manager'))
+  );
+drop policy if exists "avisos_temporarios_update" on public.avisos_temporarios;
+create policy "avisos_temporarios_update" on public.avisos_temporarios
+  for update using (
+    public.fn_is_platform_admin_full()
+    or (organization_id in (select public.fn_user_org_ids())
+        and public.fn_role_at_least(organization_id, 'manager'))
+  ) with check (
+    public.fn_is_platform_admin_full()
+    or (organization_id in (select public.fn_user_org_ids())
+        and public.fn_role_at_least(organization_id, 'manager'))
+  );
+
+drop policy if exists "avisos_temporarios_historico_select" on public.avisos_temporarios_historico;
+create policy "avisos_temporarios_historico_select" on public.avisos_temporarios_historico
+  for select using (
+    public.fn_is_platform_admin()
+    or organization_id in (select public.fn_user_org_ids())
+  );
+
+-- Sem DELETE para ninguém da REST: aviso sai do ar por `arquivado`, e o histórico
+-- é append-only (sem UPDATE/DELETE/TRUNCATE para os papéis do PostgREST).
+revoke delete, truncate on public.avisos_temporarios from anon, authenticated, service_role;
+revoke update, delete, truncate on public.avisos_temporarios_historico from anon, authenticated, service_role;
+revoke insert on public.avisos_temporarios_historico from anon, authenticated;
+
+-- O que o TURNO lê: só publicado e vigente, do público e do agente certos,
+-- em ordem de prioridade. `p_agente` nulo = turno sem agente resolvido (só os
+-- avisos sem restrição de agente).
+create or replace function public.fn_avisos_vigentes(p_org uuid, p_publico text, p_agente uuid)
+returns table (titulo text, descricao text, fim_em timestamptz, cursos text[], prioridade smallint)
+language sql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+  select a.titulo, a.descricao, a.fim_em, a.cursos, a.prioridade
+    from avisos_temporarios a
+   where a.organization_id = p_org
+     and a.status = 'publicado'
+     and now() >= a.inicio_em
+     and now() < a.fim_em
+     and (a.publico = 'todos' or a.publico = p_publico)
+     and (cardinality(a.agente_ids) = 0 or (p_agente is not null and p_agente = any(a.agente_ids)))
+   order by a.prioridade desc, a.fim_em asc, a.id
+   limit 20;
+$$;
+
+revoke execute on function public.fn_avisos_vigentes(uuid, text, uuid) from public, anon;
+revoke execute on function public.fn_avisos_vigentes(uuid, text, uuid) from authenticated;
+grant  execute on function public.fn_avisos_vigentes(uuid, text, uuid) to service_role;
+
+notify pgrst, 'reload schema';
+
+-- ---- pré-matrícula registrada pelo agente comercial (migration 0659) ----
+-- Auditoria dos agentes (14/10/2026): quando o interessado quer se matricular, a
+-- IA não tinha onde registrar o pedido — o "pergunte se quer seguir com a
+-- matrícula" do prompt terminava em nada. Decisão da escola: dados mínimos pelo
+-- WhatsApp = nome completo, e-mail, curso e turno de interesse, telefone. CPF e
+-- documentos NUNCA pelo chat.
+--
+-- Quem escreve é o SERVIDOR (a tool do agente pelo motor; a equipe muda o status
+-- pela API) — não há INSERT/DELETE pela REST. A IA nunca confirma matrícula, vaga
+-- ou pagamento: `status` só vira `matriculado` pela mão da equipe.
+--
+-- Idempotência: uma pré-matrícula ABERTA por contato e curso (índice único
+-- parcial) — o lead que confirma duas vezes não vira dois pedidos.
+--
+-- LGPD: o consentimento fica gravado (instante + o texto que a pessoa aceitou), e
+-- a anonimização do contato redige nome, e-mail e telefone pela virada de
+-- `is_anonymized` (mesmo desenho da 0210/0391); curso, turno, status e datas
+-- ficam — são registro do negócio.
+
+create table if not exists public.pre_matriculas (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  contact_id uuid not null references public.contacts(id) on delete cascade,
+  conversation_id uuid references public.conversations(id) on delete set null,
+  lead_id uuid references public.crm_leads(id) on delete set null,
+  agent_id uuid references public.ai_agents(id) on delete set null,
+  nome_completo text not null,
+  email text not null,
+  telefone text not null,
+  curso text not null,
+  turno text not null,
+  consentimento_em timestamptz not null,
+  consentimento_texto text not null,
+  status text not null default 'nova',
+  origem text not null default 'agente_ia',
+  atendida_por uuid references auth.users(id) on delete set null,
+  observacao text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+do $$ begin
+  alter table public.pre_matriculas add constraint pre_matriculas_nome_tamanho
+    check (char_length(btrim(nome_completo)) between 3 and 160);
+exception when duplicate_object then null; end $$;
+do $$ begin
+  alter table public.pre_matriculas add constraint pre_matriculas_email_formato
+    check (email ~ '^[^@[:space:]]+@[^@[:space:]]+$' and char_length(email) <= 254);
+exception when duplicate_object then null; end $$;
+do $$ begin
+  alter table public.pre_matriculas add constraint pre_matriculas_telefone_tamanho
+    check (char_length(btrim(telefone)) between 1 and 32);
+exception when duplicate_object then null; end $$;
+do $$ begin
+  alter table public.pre_matriculas add constraint pre_matriculas_curso_tamanho
+    check (char_length(btrim(curso)) between 1 and 160);
+exception when duplicate_object then null; end $$;
+do $$ begin
+  alter table public.pre_matriculas add constraint pre_matriculas_turno_valido
+    check (turno in ('manha', 'tarde', 'noite', 'sem_preferencia'));
+exception when duplicate_object then null; end $$;
+do $$ begin
+  alter table public.pre_matriculas add constraint pre_matriculas_status_valido
+    check (status in ('nova', 'em_atendimento', 'matriculado', 'desistiu'));
+exception when duplicate_object then null; end $$;
+do $$ begin
+  alter table public.pre_matriculas add constraint pre_matriculas_origem_valida
+    check (origem in ('agente_ia', 'equipe'));
+exception when duplicate_object then null; end $$;
+do $$ begin
+  alter table public.pre_matriculas add constraint pre_matriculas_observacao_tamanho
+    check (observacao is null or char_length(observacao) <= 2000);
+exception when duplicate_object then null; end $$;
+
+create unique index if not exists pre_matriculas_uma_aberta_por_curso
+  on public.pre_matriculas (organization_id, contact_id, lower(btrim(curso)))
+  where status in ('nova', 'em_atendimento');
+create index if not exists pre_matriculas_fila
+  on public.pre_matriculas (organization_id, status, created_at desc);
+
+comment on table public.pre_matriculas is
+  'Pré-matrícula registrada pelo agente comercial com consentimento (0659). A IA nunca confirma matrícula: status matriculado é da equipe.';
+
+create or replace function public.fn_pre_matriculas_carimbo()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+begin
+  new.updated_at := now();
+  return new;
+end;
+$$;
+
+revoke execute on function public.fn_pre_matriculas_carimbo() from public, anon, authenticated;
+grant  execute on function public.fn_pre_matriculas_carimbo() to service_role;
+
+drop trigger if exists trg_pre_matriculas_carimbo on public.pre_matriculas;
+create trigger trg_pre_matriculas_carimbo
+  before update on public.pre_matriculas
+  for each row execute function public.fn_pre_matriculas_carimbo();
+
+-- RLS: membro lê; agent+ atualiza (o consultor muda o status); ninguém insere ou
+-- apaga pela REST.
+alter table public.pre_matriculas enable row level security;
+
+drop policy if exists "pre_matriculas_select" on public.pre_matriculas;
+create policy "pre_matriculas_select" on public.pre_matriculas
+  for select using (
+    public.fn_is_platform_admin()
+    or organization_id in (select public.fn_user_org_ids())
+  );
+drop policy if exists "pre_matriculas_update" on public.pre_matriculas;
+create policy "pre_matriculas_update" on public.pre_matriculas
+  for update using (
+    public.fn_is_platform_admin_full()
+    or (organization_id in (select public.fn_user_org_ids())
+        and public.fn_role_at_least(organization_id, 'agent'))
+  ) with check (
+    public.fn_is_platform_admin_full()
+    or (organization_id in (select public.fn_user_org_ids())
+        and public.fn_role_at_least(organization_id, 'agent'))
+  );
+
+revoke insert, delete, truncate on public.pre_matriculas from anon, authenticated;
+revoke delete, truncate on public.pre_matriculas from service_role;
+
+-- LGPD: a virada de is_anonymized redige o que é DA pessoa.
+create or replace function public.fn_redigir_pre_matriculas_ao_anonimizar()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+begin
+  update public.pre_matriculas
+     set nome_completo = 'Cliente Anonimizado',
+         email = 'anonimizado@anonimizado.invalid',
+         telefone = 'anonimizado',
+         observacao = null
+   where organization_id = new.organization_id
+     and contact_id = new.id;
+  return new;
+end;
+$$;
+
+revoke execute on function public.fn_redigir_pre_matriculas_ao_anonimizar() from public, anon, authenticated;
+grant  execute on function public.fn_redigir_pre_matriculas_ao_anonimizar() to service_role;
+
+drop trigger if exists trg_redigir_pre_matriculas_ao_anonimizar on public.contacts;
+create trigger trg_redigir_pre_matriculas_ao_anonimizar
+  after update of is_anonymized on public.contacts
+  for each row
+  when (new.is_anonymized is true and old.is_anonymized is distinct from true)
+  execute function public.fn_redigir_pre_matriculas_ao_anonimizar();
+
+notify pgrst, 'reload schema';
+
+-- ---- feriados do atendimento humano (migration 0660) ----
+-- Auditoria dos agentes (14/10/2026): a jornada dos atendentes é semanal
+-- (`attendant_availability.schedule`) e não sabia de feriado — num feriado de
+-- segunda o sistema dizia "a equipe volta às 8h" e passava a conversa para quem
+-- não ia estar lá. A IA continua atendendo em feriado; o que muda é a equipe.
+--
+-- Um dia aqui = a equipe inteira da organização FORA naquele dia (no fuso de
+-- cada jornada). A regra é aplicada em TypeScript pela mesma função pura que já
+-- decide o horário (`isWithinSchedule`) e pela estimativa de reabertura — este
+-- arquivo só guarda os dias.
+
+create table if not exists public.feriados_de_atendimento (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  data date not null,
+  descricao text not null,
+  created_by uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now()
+);
+
+do $$ begin
+  alter table public.feriados_de_atendimento add constraint feriados_de_atendimento_descricao_tamanho
+    check (char_length(btrim(descricao)) between 1 and 120);
+exception when duplicate_object then null; end $$;
+
+create unique index if not exists feriados_de_atendimento_um_por_dia
+  on public.feriados_de_atendimento (organization_id, data);
+
+comment on table public.feriados_de_atendimento is
+  'Dias em que a equipe humana inteira não atende (0660). Lido junto com a jornada de cada atendente: feriado = fora do expediente, e a estimativa de reabertura pula o dia.';
+
+alter table public.feriados_de_atendimento enable row level security;
+
+drop policy if exists "feriados_de_atendimento_select" on public.feriados_de_atendimento;
+create policy "feriados_de_atendimento_select" on public.feriados_de_atendimento
+  for select using (
+    public.fn_is_platform_admin()
+    or organization_id in (select public.fn_user_org_ids())
+  );
+drop policy if exists "feriados_de_atendimento_insert" on public.feriados_de_atendimento;
+create policy "feriados_de_atendimento_insert" on public.feriados_de_atendimento
+  for insert with check (
+    public.fn_is_platform_admin_full()
+    or (organization_id in (select public.fn_user_org_ids())
+        and public.fn_role_at_least(organization_id, 'manager'))
+  );
+drop policy if exists "feriados_de_atendimento_delete" on public.feriados_de_atendimento;
+create policy "feriados_de_atendimento_delete" on public.feriados_de_atendimento
+  for delete using (
+    public.fn_is_platform_admin_full()
+    or (organization_id in (select public.fn_user_org_ids())
+        and public.fn_role_at_least(organization_id, 'manager'))
+  );
+
+revoke update, truncate on public.feriados_de_atendimento from anon, authenticated;
+
+notify pgrst, 'reload schema';
+
 -- ---- VARREDURA anon: função nova nasce exposta em quem ATUALIZA (migration 0116) ----
 --
 -- ⚠️ DE PROPÓSITO, NENHUMA FUNÇÃO É CRIADA DEPOIS DESTE BLOCO. Apêndice que cria
