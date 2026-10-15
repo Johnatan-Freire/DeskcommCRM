@@ -150,6 +150,7 @@ import {
 import { composeSystemPrompt, loadOrgMemory, renderOrgMemory } from './org-memory';
 import { AVISOS_INDISPONIVEIS, carregarAvisosVigentes, renderAvisosVigentes } from '@/lib/ai/avisos-temporarios';
 import { mensagemAposRegistro, registrarPreMatricula, validarPreMatricula } from '@/lib/pre-matricula/registrar';
+import { decidirAntiLoop } from './anti-loop';
 import {
   carregarConfig as carregarConfigSistemaEscolar,
   buscarAlunoPorTelefone,
@@ -2784,6 +2785,8 @@ async function executarTurnoDoAgente(
   // correção do turno que terminou sem falar com o cliente (ver depois da chamada principal).
   let tentativasDeEnvio = 0;
   let passouParaAEquipe = false;
+  // Anti-loop: envios recusados por repetição neste turno (o segundo passa para a equipe).
+  let recusasPorRepeticao = 0;
   // Teto de mensagens físicas por turno (F2-15b) — `seq` JÁ é a contagem certa: ele só
   // avança quando o envio de fato sai pro canal (send_message + send_template, bolhas
   // incluídas), nunca em veto de gate. Checar `seq` antes de tentar o próximo envio
@@ -3406,6 +3409,32 @@ async function executarTurnoDoAgente(
                 'NÃO envie mais nada agora — encerre o turno e espere a resposta do lead.',
             },
           };
+        }
+        // ANTI-LOOP (auditoria de agentes): a mesma mensagem que a IA já mandou nesta
+        // conversa não sai de novo, e conversa em que a IA já falou demais na
+        // última hora passa para a equipe. Ver `anti-loop.ts`.
+        if (!preview) {
+          const antiLoop = decidirAntiLoop({
+            candidato: body,
+            historico: openingContext.context.messages,
+            agora: clock(),
+            recusasNoTurno: recusasPorRepeticao,
+          });
+          if (antiLoop.acao === 'recusar_repeticao') {
+            recusasPorRepeticao += 1;
+            return { ok: false, error: { code: 'mensagem_repetida', message: antiLoop.message } };
+          }
+          if (antiLoop.acao === 'passar_para_equipe') {
+            runLog.warn('anti-loop: conversa passada para a equipe', { motivo: antiLoop.motivo });
+            await passarParaAEquipePeloSistema(antiLoop.porQue);
+            return {
+              ok: false,
+              error: {
+                code: 'anti_loop',
+                message: 'a conversa foi passada para uma pessoa da equipe. Não envie mais nada; encerre o turno.',
+              },
+            };
+          }
         }
         // RESPOSTA OBSOLETA: o cliente escreveu de novo enquanto este turno pensava.
         // Só antes do PRIMEIRO envio — cortar a meio uma resposta já começada é pior
