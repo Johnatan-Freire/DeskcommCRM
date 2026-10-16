@@ -4712,6 +4712,7 @@ export type Database = {
           title: string
           updated_at: string
           value_cents: number | null
+          webhook_source_id: string | null
         }
         Insert: {
           assigned_at?: string | null
@@ -4745,6 +4746,7 @@ export type Database = {
           title: string
           updated_at?: string
           value_cents?: number | null
+          webhook_source_id?: string | null
         }
         Update: {
           assigned_at?: string | null
@@ -4778,6 +4780,7 @@ export type Database = {
           title?: string
           updated_at?: string
           value_cents?: number | null
+          webhook_source_id?: string | null
         }
         Relationships: [
           {
@@ -4820,6 +4823,13 @@ export type Database = {
             columns: ["lost_from_stage_id"]
             isOneToOne: false
             referencedRelation: "crm_stages"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "crm_leads_webhook_source_id_fkey"
+            columns: ["webhook_source_id"]
+            isOneToOne: false
+            referencedRelation: "webhook_sources"
             referencedColumns: ["id"]
           },
         ]
@@ -8848,6 +8858,7 @@ export type Database = {
           path_token: string
           redirect_to: string | null
           secret_encrypted: string | null
+          update_existing_lead_on_capture: boolean
           updated_at: string
         }
         Insert: {
@@ -8869,6 +8880,7 @@ export type Database = {
           path_token: string
           redirect_to?: string | null
           secret_encrypted?: string | null
+          update_existing_lead_on_capture?: boolean
           updated_at?: string
         }
         Update: {
@@ -8890,6 +8902,7 @@ export type Database = {
           path_token?: string
           redirect_to?: string | null
           secret_encrypted?: string | null
+          update_existing_lead_on_capture?: boolean
           updated_at?: string
         }
         Relationships: [
