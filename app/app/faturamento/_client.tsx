@@ -16,6 +16,7 @@ import { useState } from "react";
 
 import { showApiError } from "@/components/feedback/ApiErrorToast";
 import { useT } from "@/hooks/i18n/useT";
+import { diaDeHojeLocal } from "@/lib/ai/pacing-knobs";
 import { apiClient } from "@/lib/api/client";
 import { rotuloDoContato } from "@/lib/contacts/rotulo-do-contato";
 import { formatCents } from "@/lib/money";
@@ -45,8 +46,14 @@ type Relatorio = {
 
 type Pessoa = { user_id: string; name: string | null; email: string | null };
 
-const hoje = () => new Date().toISOString().slice(0, 10);
-const primeiroDoMes = () => `${hoje().slice(0, 7)}-01`;
+/**
+ * O período padrão do relatório no calendário de quem usa a tela (#2935).
+ * `toISOString()` dava o dia UTC: depois das 21h em Brasília o "até" pulava para
+ * amanhã e, no último dia do mês, o "dia 1º" saltava para o mês seguinte. O
+ * `primeiroDoMes` é derivado do MESMO `hoje` local, então os dois andam juntos.
+ */
+export const hoje = () => diaDeHojeLocal();
+export const primeiroDoMes = () => `${hoje().slice(0, 7)}-01`;
 
 export function Faturamento({ podeLancar }: { podeLancar: boolean }) {
   const t = useT();
