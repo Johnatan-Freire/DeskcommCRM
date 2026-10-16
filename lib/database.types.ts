@@ -9430,6 +9430,15 @@ export type Database = {
         Args: { p_assigned_to_user_id: string; p_org: string }
         Returns: boolean
       }
+      fn_evento_visivel_ao_atendente: {
+        Args: {
+          p_entity_id: string
+          p_entity_kind: string
+          p_org: string
+          p_payload: Json
+        }
+        Returns: boolean
+      }
       fn_can_view_lead: {
         Args: { p_org: string; p_owner_user_id: string }
         Returns: boolean
