@@ -46,6 +46,7 @@ const AUTORIDADE = [
   "docs/threat-model.md",
   "docs/DEPLOY-CHECKLIST.md",
   "docs/SETUP.md",
+  "docs/apostila-contribuidor.md",
   "docs/doctrine",
   "docs/runbooks",
   "docs/adr",
@@ -62,6 +63,14 @@ const AUTORIDADE = [
  */
 const PONTEIROS_MORTOS_ACEITOS = new Set([
   "docs/runbooks/ai-credentials-rotation.md::scripts/rotate-ai-cred-aes-key.ts",
+  // Fork Capital Code: ADRs do upstream (cobrança do revendedor, módulos de terceiro) que
+  // descrevem recursos não portados para o fork.
+  "docs/adr/0005-plataforma-de-modulos-de-terceiro.md::app/api/v1/modulos/[modulo]/[objeto]/route.ts",
+  "docs/adr/0005-plataforma-de-modulos-de-terceiro.md::components/modulos/FichasDoModulo.tsx",
+  "docs/adr/0005-plataforma-de-modulos-de-terceiro.md::tests/e2e/modulo-de-dados-na-ficha-do-contato.spec.ts",
+  "docs/adr/0005-plataforma-de-modulos-de-terceiro.md::tests/invariants/modulo-de-dados-compilador.test.ts",
+  "docs/adr/0005-plataforma-de-modulos-de-terceiro.md::tests/shell/regras-isolamento-sem-modulo.test.sh",
+  "docs/index.md::adr/0004-cobranca-do-revendedor.md",
 ]);
 
 /**
