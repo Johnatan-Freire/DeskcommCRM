@@ -10606,7 +10606,8 @@ select
   case when cv.status in ('resolved', 'closed') then 'resolvida' else null end,
   case when cv.status in ('resolved', 'closed') then cv.status_changed_at else null end
   from public.conversations cv
- where not exists (
+ where cv.status <> 'archived'
+   and not exists (
    select 1 from public.agent_cases c where c.conversation_id = cv.id
  )
    and not exists (
