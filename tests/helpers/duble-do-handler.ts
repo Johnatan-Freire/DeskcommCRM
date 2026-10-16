@@ -469,15 +469,18 @@ export function criarDubleDoHandler(
                 capturas.filtros.messages!.push({ coluna, valor: `like:${padrao}` });
                 return cadeia;
               },
+              // `.delete().….select()` devolve as linhas apagadas, como o PostgREST.
+              select: () => cadeia,
               then: (
-                resolve: (v: { error: null }) => unknown,
+                resolve: (v: { data: LinhaDoDuble[]; error: null }) => unknown,
                 reject?: (e: unknown) => unknown,
               ) => {
+                const apagadas: LinhaDoDuble[] = [];
                 for (const alvo of filtrarMensagens(filtros)) {
                   const i = mensagens.indexOf(alvo);
-                  if (i >= 0) mensagens.splice(i, 1);
+                  if (i >= 0) apagadas.push(...mensagens.splice(i, 1));
                 }
-                return Promise.resolve({ error: null }).then(resolve, reject);
+                return Promise.resolve({ data: apagadas, error: null as null }).then(resolve, reject);
               },
             };
             return cadeia;

@@ -59,6 +59,7 @@ import {
 import { nomeDoContato } from "@/lib/contacts/rotulo-do-contato";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { Message } from "@/lib/types/messaging";
+import { camposAoConfirmarEnvio, maiorAck } from "@/lib/messaging/progresso-da-entrega";
 
 type SB = SupabaseClient;
 
@@ -108,8 +109,12 @@ async function removerEcoDoProprioEnvio(
   minhaLinhaId: string,
   externalId: string | null,
   candidatos: string[],
-): Promise<void> {
-  if (!externalId || candidatos.length === 0) return;
+): Promise<number | null> {
+  if (!externalId || candidatos.length === 0) return null;
+  // O degrau de entrega que o eco ouviu antes de ser apagado: o `message.ack`
+  // chega ~0,2 s depois do envio e casa com o ECO (a linha do envio ainda não
+  // tem id). Apagar sem guardar é apagar o ✓✓ (`progresso-da-entrega.ts`).
+  const acksDoEco: unknown[] = [];
 
   // BLINDADO DE PROPÓSITO. Esta chamada roda dentro do `try` do envio, e a
   // mensagem JÁ SAIU quando chegamos aqui: deixar uma exceção subir faria o
@@ -117,7 +122,7 @@ async function removerEcoDoProprioEnvio(
   // trocar uma duplicata visível por um status mentiroso. O pior caso aceitável
   // é não conseguir remover, que é exatamente o mundo de antes desta função.
   try {
-    const { error } = await supabase
+    const { data: ecosApagados, error } = await supabase
       .from("messages")
       .delete()
       .eq("organization_id", organizationId)
@@ -132,9 +137,11 @@ async function removerEcoDoProprioEnvio(
       // Fica porque o desfecho que ela impede é o pior que esta função poderia
       // produzir: apagar a própria mensagem que acabou de ser entregue. Quem
       // mexer no filtro de cima não vai ser avisado por teste nenhum.
-      .neq("id", minhaLinhaId);
+      .neq("id", minhaLinhaId)
+      .select("ack");
     if (error)
       console.error("[messages.send] não consegui remover o eco do próprio envio", error.message);
+    for (const e of (ecosApagados ?? []) as Array<{ ack?: unknown }>) acksDoEco.push(e.ack);
 
     // O LIMITE CONHECIDO de `wahaEchoExternalIds` (@lid × @c.us): o composto que
     // construímos usa o chat do ENVIO, e o NOWEB pode ecoar com o outro formato
@@ -144,16 +151,18 @@ async function removerEcoDoProprioEnvio(
     // de chat sem alcançar outra mensagem. Só para id composto (`<fromMe>_<chat>_<id>`) do canal.
     const bare = externalId.slice(externalId.lastIndexOf("_") + 1);
     if (bare.length >= 16 && candidatos.some((c) => c.startsWith("true_"))) {
-      const { error: erroSufixo } = await supabase
+      const { data: ecosPorSufixo, error: erroSufixo } = await supabase
         .from("messages")
         .delete()
         .eq("organization_id", organizationId)
         .eq("conversation_id", conversationId)
         .eq("sent_via", "external_device")
         .like("external_id", `%\\_${bare}`)
-        .neq("id", minhaLinhaId);
+        .neq("id", minhaLinhaId)
+        .select("ack");
       if (erroSufixo)
         console.error("[messages.send] não consegui remover o eco por sufixo", erroSufixo.message);
+      for (const e of (ecosPorSufixo ?? []) as Array<{ ack?: unknown }>) acksDoEco.push(e.ack);
     }
   } catch (err) {
     console.error(
@@ -161,6 +170,7 @@ async function removerEcoDoProprioEnvio(
       err instanceof Error ? err.message : err,
     );
   }
+  return maiorAck(acksDoEco);
 }
 
 /**
@@ -1061,13 +1071,15 @@ export async function sendMessageHandler(
       // que o envio devolveu.
       const idCanonico =
         externalId !== null ? (adapter.canonicalExternalId?.(externalId) ?? externalId) : null;
+      // O degrau que o eco já tinha ouvido (✓✓, lida) passa para a linha do
+      // envio — sem isto o envio gravava `sent/ack=0` e o ✓✓ sumia.
+      let ackHerdado: number | null = null;
       const marcarEnviada = (comId: boolean) =>
         supabase
           .from("messages")
           .update({
-            status: "sent",
+            ...camposAoConfirmarEnvio(ackHerdado, new Date().toISOString()),
             ...(comId ? { external_id: idCanonico } : {}),
-            ack: 0,
             // Colunas só do template — é o que responde custo e conformidade de
             // janela depois, sem varrer jsonb.
             ...(input.type === "template"
@@ -1077,7 +1089,7 @@ export async function sendMessageHandler(
           .eq("id", message.id)
           .select(MSG_COLS)
           .maybeSingle();
-      await limparEco();
+      ackHerdado = await limparEco();
       let { data: updated, error: erroAoMarcar } = await marcarEnviada(true);
       // O eco que o webhook inseriu ENTRE a limpeza e este UPDATE já ocupa o id
       // (o eco grava a mesma forma que o envio — #1855), e o unique recusa. É a
@@ -1085,7 +1097,7 @@ export async function sendMessageHandler(
       // carimbar outra vez; se ainda colidir, a mensagem SAIU e fica `sent` sem
       // o id — nunca `queued`, que é pedir para ser reenviada.
       if (erroAoMarcar?.code === "23505") {
-        await limparEco();
+        ackHerdado = maiorAck([ackHerdado, await limparEco()]);
         ({ data: updated, error: erroAoMarcar } = await marcarEnviada(true));
         if (erroAoMarcar?.code === "23505") ({ data: updated } = await marcarEnviada(false));
       }
