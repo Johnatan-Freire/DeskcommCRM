@@ -1172,6 +1172,282 @@ espaço e acento, que era o gatilho do defeito #6.
 | 16 | `lib/audit/index.ts` | Falha de audit só fazia `console.error` — foi o que manteve #15 invisível | doutrina exige alerta no Sentry |
 | 17 | crons de follow-up/snooze | **95% do audit log** era batida de cron vazia (1.175 de 1.236 linhas em ~9h paradas) numa tabela append-only com retenção de 5 anos | contagem por `action` |
 
+## J35 — Achar onde se liga cada recurso opcional `[P1]` (2026-09-28)
+
+**Origem:** pedido do mantenedor (doc 73; desenho no doc 80) — "até agora não
+entendi onde ficam os lugares para ativar/desativar". Os módulos se ligavam numa
+tela chamada "Comportamento", as chaves da empresa em pelo menos nove telas, e
+os recursos que dependem do servidor em tela nenhuma.
+
+| Caso | Spec | Estado |
+|---|---|---|
+| Admin da empresa chega a Configurações › Recursos opcionais pelo hub, vê a lista e o **Ajustar** de "A conversa fica com quem atendeu" o leva a Distribuição de atendimento | `tests/e2e/recursos-opcionais.spec.ts` | CI (e2e) |
+| Dono do servidor acha **Recursos opcionais** no menu do Admin; a tela tem Módulos, Comportamento e Depende do servidor (só leitura, "configurado"/"não configurado") | idem | CI (e2e) |
+| Módulo/porta novo fora da lista reprova | `tests/unit/recursos-opcionais-catalogo.test.ts` | unit |
+| **Liga o módulo pela tela, a tela diz o caminho, a porta aparece no HUB do CRM ("Ver tudo em CRM"), desliga e ela sai** | `tests/e2e/recursos-opcionais.spec.ts` | CI (e2e) |
+| Toda linha de módulo responde "onde aparece": ou tem porta no menu, ou declara onde fica | `tests/unit/porta-do-modulo-ligado.test.tsx` | unit |
+| Módulo ligado acende a porta mesmo no preset "simplificada"; escolha item-a-item da empresa continua mandando | idem | unit |
+| Ligar/desligar revalida o layout de `/app`, não só `/admin/sistema` | `app/actions/settings/updateModuloDaInstalacao.test.ts` | unit |
+
+> A coluna dizia `PARTE_2` e a spec está em `SPECS_PARTE_6` — número de partição
+> envelhece sozinho a cada rebalanceamento do `e2e.yml`. Quem precisa do número
+> lê a fonte: `grep -n recursos-opcionais .github/workflows/e2e.yml`.
+
+**Não coberto pela tela:** gerente vendo a lista sem os botões de telas de admin
+(regra no `page.tsx`, sem spec); telefonia por SIP é "não dá para ver daqui" —
+ela vive nos contêineres, fora do alcance do app.
+
+### Achados de 2026-10-08 — "liguei e não aparece no CRM": DOIS medidos, um preventivo, e a causa real achada depois
+
+Relato do mantenedor: *"os módulos que são ativados aqui, eles não aparecem no
+CRM. Além de estarem em uma área de recursos opcionais, diferentes dos 'módulos'
+mesmo tendo o mesmo objetivo."* O gate de módulo nunca foi o problema — ele
+sempre soltou a porta assim que o módulo entrou na lista. O sintoma vinha de
+outros lugares — DOIS medidos e um preventivo:
+
+| # | Achado | Como foi medido | Conserto |
+|---|---|---|---|
+| 20 | 🟠 **A tela do interruptor não dizia onde o módulo apareceria.** O dado existia (`portaDoModuloNaEmpresa`, lido do menu) e tinha UM consumidor: `/app/settings/recursos`, a tela da EMPRESA. A tela de quem LIGA não o recebia | `grep -rn portaDoModuloNaEmpresa` devolve 1 consumidor, e ele não é `/admin/sistema` | `lib/navigation/onde-o-modulo-aparece.ts` + a frase em cada linha, antes e depois de ligar |
+| 20b | 🟠 **Dois dos seis módulos por interruptor não criam porta nenhuma no CRM** (`cobranca`, `login_codex`) — ligar e procurar no menu era procurar o que não existe | zero ocorrências deles como `modulo:` em `lib/navigation/catalogo.ts` | cada um declara `foraDoMenu` e a tela diz com todas as letras; invariante reprova módulo novo sem resposta |
+| 21 | 🟡 **PREVENTIVO, não medido.** `updateModuloDaInstalacao` revalidava só `/admin/sistema`, e a irmã que também mexe no menu (`atualizarInterfaceDaEmpresa`) já fazia `revalidatePath("/app", "layout")` com o motivo escrito. A linha entrou por ANALOGIA | ⚠️ **o que NÃO foi medido:** o passo de e2e usa `page.goto` (navegação completa) e afirma no hub `/app/crm`, que lê `modulosLigados()` a cada request — ele ficaria verde com ou sem a linha. Medir de verdade pede navegação pelo CLIENTE, com o cache do router em jogo | a mesma linha da irmã; o defeito segue **não demonstrado** |
+| 22 | 🟠 **Empresa no preset "simplificada" nunca via porta de módulo.** `destinosDaInterface` tratava igual as duas origens de `chosen`, e `SIMPLIFICADA` é lista do PRODUTO, escrita antes de existir módulo opcional | ⚠️ **a primeira medição foi na forma CRUA** `{ preset: "simplificada" }`, que a produção nunca entrega: `combinarInterfaces` (o caminho de `lib/auth/server.ts`) converte qualquer escolha em `{preset:"completa", destinos:[…]}`. O conserto era CÓDIGO MORTO e os 5 vermelhos mediam uma entrada que não existe. A medição que vale entra por `combinarInterfaces` | o preset sobrevive à combinação quando nenhum lado escreveu lista; lista explícita de uma pessoa continua mandando |
+
+### A CAUSA REAL do relato, achada só na revisão (2026-10-08, decisão do dono no doc 124)
+
+Os achados acima são reais (dois medidos, um preventivo) e **nenhum deles era o que o mantenedor tropeçou**. A causa é mais
+simples, e um cético a achou lendo o catálogo:
+
+| # | Achado | Como foi medido | Conserto |
+|---|---|---|---|
+| 23 | 🔴 **As telas de módulo não ficam no menu lateral.** Toda porta com `modulo:`/`capacidade:` tem `sidebar` AUSENTE, e no tipo isso é explícito: `NavMetadata.sidebar` = "Ausente = só no hub". O filtro de `sidebarGroups` é `d.sidebar \|\| (!group.hub && settings?.destinos)` — então elas só aparecem em "Ver tudo em CRM". E o texto que eu havia escrito dizia "CRM › Empresas", **mandando procurar no menu diário** | o número muda, então conte na fonte: `grep -cE '^\s+(modulo|capacidade): "' lib/navigation/catalogo.ts` (9 em `a2da47c5f`, 10 na main de 09/out, que ganhou `financeiro`), e nenhuma delas declara `sidebar`; o comentário do próprio catálogo diz "SEM sidebar… este trio mora no hub para não reabrir a corrida por pixel" | o texto passa a dizer o caminho COM o passo do hub ("CRM › Ver tudo em CRM › Empresas"), derivado do catálogo |
+| 23b | 🟠 **Eu reproduzi o mesmo defeito na prosa.** O texto de `login_codex` dizia "Agente de IA › Credenciais", e `/app/ai/credentials` TAMBÉM é só-no-hub — o caminho real tem "Ver tudo em IA". Nenhuma guarda lia aquele campo | o cético mediu o `sidebar` daquela tela; eu confirmei antes de consertar | o caminho virou DERIVADO (`caminhoDaPorta`), e uma guarda proíbe `›` em texto livre de `foraDoMenu` |
+
+**Por que a porta NÃO subiu para o menu lateral:** o menu foi medido em 15 itens com folga 0 a
+1280×900, e `crm_b2b` sozinho acrescenta 3. Levei três saídas ao dono com o custo de cada uma e ele
+escolheu manter no hub e consertar o texto (**opção B**, registrada em
+`~/DeskcommDecisoes/Decisão PRs - rafael/124 — …`). A opção de subir ao menu (ou subir só a primeira
+porta de cada módulo) segue disponível se a expectativa mudar.
+
+**O que a investigação mediu e NÃO consertou** — é decisão de produto, não
+defeito: as quatro superfícies onde se "instala" algo seguem separadas —
+`/admin/sistema` (bloco Módulos, 6 interruptores), `/admin/modulos` (ADR-0002,
+módulo com tabela própria; o catálogo tem 1), `/admin/extensoes` (só leitura do
+catálogo da instalação) e `/app/extensions` (a extensão declarativa, por
+empresa). A segunda metade do relato do mantenedor é sobre essa fragmentação.
+
+## J36 — Perguntar ao acervo sem sair da conversa `[P1]` (2026-09-28)
+
+**Origem:** #1869 (F1+F2), contribuição de @webtecnica no #1877. O atendente
+consulta o material da empresa pela caixa "Acervo" no painel da conversa, com a
+mesma busca que a IA usa; a pergunta vira linha em `knowledge_searches` com
+`author_kind='human'`, e a Evolução a mostra num gráfico próprio.
+
+| Caso | Spec | Estado |
+|---|---|---|
+| Atendente abre a conversa, pergunta na caixa "Acervo" e recebe o diagnóstico (acervo vazio, ou 409 de chave ausente), nunca o erro genérico | `tests/e2e/busca-na-conversa.spec.ts` | CI (PARTE_3) |
+| 429 por pessoa/organização, pergunta > 1000 caracteres, agentId não-uuid, 409 sem chave | `app/api/v1/ai/knowledge/busca/route.test.ts` | unit |
+| Busca da equipe fora das lacunas do agente e numa série própria | `lib/ai/evolution/aggregate.test.ts` | unit |
+
+**Não coberto:** a busca com material indexado e chave de embedding real (nenhum
+e2e do CI tem chave); o gráfico "Consultas da equipe ao acervo" em tela.
+
+## J37 — Suspender uma empresa cala a IA e os envios dela `[P0]` (2026-09-29)
+
+**Origem:** PR 1 da cobrança do revendedor
+(`docs/superpowers/specs/2026-09-29-cobranca-do-revendedor-design.md`, §1.3, §4 e §9).
+Antes, suspender só tirava a pessoa da tela: a IA, o follow-up, as automações,
+o token de API e o MCP seguiam funcionando, e quem tinha acesso só de leitura ao
+painel suspendia e reativava empresas.
+
+| Caso | Spec | Estado |
+|---|---|---|
+| Quem só tem leitura clica em Suspender: a resposta é 403 `forbidden_scope`, a tela mostra o erro, e a empresa segue ativa | `tests/e2e/suspensao-administrativa.spec.ts` | CI (PARTE_6) |
+| O dono suspende pela tela; o turno agendado e a resposta na fila viram `failed`; o gate (pelo PostgREST real) passa a negar | idem | CI (PARTE_6) |
+| Status, fila e evento mudam numa transação só (`fn_suspender_organizacao`): dentro dela o evento já existe, e o rollback desfaz status, evento e o turno agendado juntos. A tela só confere o resultado depois | `tests/invariants/org-suspensa.test.ts` | test:db |
+| A admin da empresa suspensa cai no hub: pedido de LGPD abrindo no próprio hub; o clique em "Voltar para" a empresa que opera leva ao inbox dela | `tests/e2e/suspensao-administrativa.spec.ts` | CI (PARTE_6) |
+| `/app/inbox` volta para o hub; o token `dsk_` da empresa responde 403 `org_suspended` | idem | CI (PARTE_6) |
+| A captação por `webhooks/in/[token]` é gravada durante a suspensão; nenhuma `llm_calls` nem mensagem de saída nasce | idem | CI (PARTE_6) |
+| A atendente da empresa suspensa lê "Avise o administrador da sua empresa", sem LGPD; "Sair" encerra a sessão e `/app` manda ao login | idem | CI (PARTE_6) |
+| O dono reativa: nada sai em rajada, e a Central mostra o aviso que leva ao Inbox | idem | CI (PARTE_6) |
+| O aviso de reativação conta só conversa que não é de grupo, diz só o fato, e a orientação manda procurar nas abas Fila e Automático (numa empresa com IA a conversa sem dono está em Automático) | `tests/invariants/org-suspensa.test.ts`, `lib/ai/inbox-destino.ts` | test:db |
+| Hub: empresa que opera volta para `/app`, pedido inválido cai na lista, leitura que falha lança | `app/account-suspended/page.test.tsx` | unit |
+| O aviso de reativação leva ao Inbox só para quem atende, e nunca por referência | `lib/ai/inbox-destino.test.ts` | unit |
+| O agendador pula o follow-up da empresa parada, no Postgres real | `tests/invariants/cron-org-parada.test.ts` | test:db |
+| O lembrete da agenda não sai nem abre conversa para a empresa parada | `tests/unit/lembrete-pula-org-parada.test.ts` | unit |
+| Suspensão no meio do envio não pausa a prospecção nem tira o destinatário da campanha | `tests/unit/prospecting-worker.test.ts`, `tests/unit/suspensao-nao-dispara-campanha.test.ts` | unit |
+| Quem tem acesso só de leitura ao painel e é membro comum de uma empresa não apaga os dados dela | `tests/unit/zona-de-perigo-apaga-so-a-propria-org.test.ts` | unit |
+
+**Não coberto pela tela:** a suspensão por falta de pagamento e o painel de
+pagamento no hub (PR 3a); a IA calada com um agente publicado de verdade (a
+spec não publica agente — quem prova o veto é `lib/ai/elegibilidade/gate.test.ts`,
+`tests/invariants/org-suspensa.test.ts` e o controle do gate na própria spec);
+APROVAR um pedido de LGPD pelo hub (a spec abre o pedido, não aprova).
+
+**Evidência:** `evidence/suspensao-administrativa/leitura-recusada.png`,
+`evidence/suspensao-administrativa/hub-admin.png`,
+`evidence/suspensao-administrativa/hub-pedido-lgpd.png`,
+`evidence/suspensao-administrativa/hub-atendente.png`,
+`evidence/suspensao-administrativa/central-apos-reativar.png`.
+
+## J41 — O dono cria planos e os limites de pessoas, números e IA valem de verdade `[P1]` (2026-09-30)
+
+**Origem:** PR 2 da cobrança do revendedor
+(`docs/superpowers/specs/2026-09-29-cobranca-do-revendedor-design.md`, §2.2, §2.3, §5, §7(g)(h), §9).
+A chave `MODULO_COBRANCA` ainda não pode ser ligada pela tela (fica em
+`MODULOS_AINDA_NAO_LIGAVEIS` até a PR 3a), então os casos com a chave ligada
+gravam `platform_config.MODULO_COBRANCA='ligado'` direto no banco pelo fixture.
+
+| Caso | Spec | Estado |
+|---|---|---|
+| O dono acha a porta Cobrança, cria um plano (1 pessoa, 1 número, 5 dias) e o atribui à empresa B pelo card do tenant | `tests/e2e/cobranca-suspensao-e-limites.spec.ts` | CI (PARTE_6) |
+| A admin de B vê a faixa de teste grátis; o convite com o plano cheio é recusado antes do e-mail, com a mensagem do plano | idem | CI (PARTE_6) |
+| Reativar membro acima do teto pela API da sessão: o `PT402` atravessa o PostgREST real e vira 409 `plan_limit_reached` | idem | CI (PARTE_6) |
+| Billing mostra o teste grátis e o uso 1 de 1 | idem | CI (PARTE_6) |
+| B suspensa por cobrança: o dono dá prazo pelo card e B volta; suspensa de novo, desligar a chave em /admin/sistema a libera e a porta some | idem | CI (PARTE_6) |
+| Sem a chave: formulário de novo tenant, painel do tenant, /admin/sistema, Billing e menu como antes; nenhuma faixa; Recursos opcionais sem cobrança | `tests/e2e/cobranca-desligada.spec.ts` | CI (PARTE_6) |
+| As duas tabelas: forma, vocabulário, grants, colunas mortas fora | `tests/invariants/cobranca-tabelas.test.ts` | test:db |
+| Isolamento: admin de A lê só A; `agent` não lê; a sessão não escreve; `cobranca_planos` invisível | `tests/invariants/cobranca-isolamento.test.ts` | test:db |
+| O limite do plano: nulo com a chave desligada, isenta ou sem teto; recurso fora do vocabulário = 22023 | `tests/invariants/cobranca-limite-do-plano.test.ts` | test:db |
+| Assentos: teto 2 → 3º membro `PT402` com a mensagem que o app lê; entradas concorrentes → uma passa; provisório pela sessão → `42501` | `tests/invariants/cobranca-assentos.test.ts` | test:db |
+| Canais: idem com desarquivar, troca de organização, reconexão do número já ativo e `wacalls` fora da conta | `tests/invariants/cobranca-canais.test.ts` | test:db |
+| Teste grátis na criação: chave ligada + plano do cadastro → `trial`; criado por platform admin → nada; chave desligada → `settings.plan` como antes | `tests/invariants/cobranca-trial-na-criacao.test.ts` | test:db |
+| Suspensão por cobrança poupa a isenta; reativar zera o aviso; desligar libera só as de cobrança | `tests/invariants/cobranca-suspensao-e-liberacao.test.ts` | test:db |
+| Teto de IA do plano no Postgres real; o orçamento da org não retrata o aviso do plano | `tests/invariants/teto-do-plano.test.ts` | test:db |
+| Aviso do plano e aviso do orçamento convivem sem se retratar | `tests/invariants/cobranca-aviso-do-plano-e-do-orcamento.test.ts` | test:db |
+| Teto de IA do plano: chave própria nunca bloqueia; finalidade isenta segue; `AI_BUDGET_ENFORCEMENT=off` desliga | `lib/agent-engine/edge/llm/orcamento.test.ts` | unit |
+| O mapa vivo espelha os mapas vizinhos e nenhuma peça é ilha | `tests/unit/mapas-de-arquitetura.test.ts` | unit |
+
+**Evidência** (gerada pelo e2e da PARTE_6 no CI e versionada a partir do artefato
+`evidencia-parte-6`): `evidence/cobranca-planos-e-limites/admin-cobranca-planos.png`,
+`evidence/cobranca-planos-e-limites/tenant-card-cobranca.png`,
+`evidence/cobranca-planos-e-limites/convite-recusado-pelo-plano.png`,
+`evidence/cobranca-planos-e-limites/billing-teste-gratis.png`,
+`evidence/cobranca-planos-e-limites/sistema-desligar-libera.png`,
+`evidence/cobranca-planos-e-limites/desligada-novo-tenant.png`,
+`evidence/cobranca-planos-e-limites/desligada-billing.png`,
+`evidence/cobranca-planos-e-limites/desligada-recursos-opcionais.png`.
+
+**Não coberto pela tela:** ligar a chave pela tela (PR 3a, quando ela sair de
+`MODULOS_AINDA_NAO_LIGAVEIS`); pagamento, régua de avisos e suspensão
+automática por falta de pagamento (PR 3a); o aceite de convite recusado pelo
+limite (provado em `tests/invariants/cobranca-assentos.test.ts` e em
+`lib/auth/aplicar-convite.test.ts`, não pela tela); o teto de IA do plano
+bloqueando uma conversa com agente publicado (provado em unit e no Postgres
+real, não pela tela).
+
+## J43 — A primeira cobrança: o dono conecta a Stripe, o cliente assina, atrasa, é suspenso e volta sozinho ao pagar `[P0]` (2026-09-30)
+
+**Origem:** PR 3a da cobrança do revendedor
+(`docs/superpowers/specs/2026-09-29-cobranca-do-revendedor-design.md`, §3.2, §6.1, §7(a)–(f), §8, §9, §12).
+É P0 porque é a primeira impressão de quem instala para vender: se a primeira cobrança não fecha o ciclo, não há produto para revender. Cobre o que a J41 (PR 2) deixou para esta PR: ligar pela tela, pagamento, régua e suspensão automática.
+
+| Caso | Spec | Estado |
+|---|---|---|
+| O dono liga "Cobrança dos seus clientes" em /admin/sistema e acha a porta Cobrança | `tests/e2e/cobranca-revendedor.spec.ts` | CI |
+| Conecta a Stripe em teste: selo MODO DE TESTE, só os 4 últimos da chave na tela, chave cifrada e fora do audit; webhook sem `invoice.created`; portal sem troca de plano | idem | CI |
+| Ajusta a tolerância na aba Régua; cria dois planos e escolhe o do cadastro | idem | CI |
+| O cliente se cadastra e nasce em teste grátis; a faixa leva ao plano; Assinar abre o checkout hospedado; a volta mostra "1ª cobrança agendada" | idem | CI |
+| Os avisos chegam assinados e ficam só como ponteiro (`{id,type}`, org nula, sem cabeçalhos); assinatura errada → 401 | idem | CI |
+| A 1ª cobrança paga vira "Em dia" e marca o checklist; o passo do e-mail fica aberto, apontando /admin/email | idem | CI |
+| Trocar de plano depois do teste: "vale a partir de DD/MM", sem rateio, e o plano vira só na virada paga | idem | CI |
+| Atraso: aviso na Central e faixa com o link de pagamento; aviso final; suspensão só 48 h depois dele | idem | CI |
+| No hub, "Já paguei" sem pagar não reativa; pagar a fatura reativa sozinha, sem rajada, com um item de revisão | idem | CI |
+| O dublê e o adaptador falam a mesma língua (cabeçalhos, idempotência, formas basil, assinatura dos avisos) | `tests/unit/cobranca-duble-fala-a-lingua-do-adaptador.test.ts` | unit |
+| A base de teste só vale em loopback e com o app em loopback | `lib/cobranca/provedores/base-de-teste.test.ts` | unit |
+| O mapa vivo tem o caminho do dinheiro de ponta a ponta | `tests/unit/mapas-de-arquitetura.test.ts` | unit |
+
+**Não coberto pela tela:** a publicação (troca da chave de teste pela de produção, D-7); "Tornar isenta" com assinatura viva no provedor; o aviso de 80% do teto de IA; o e-mail dos avisos (o fresco não tem envio configurado, e o checklist mostra isso); o cancelamento de org redigida. Onde são provados: nos testes unitários das rotas e da régua (`lib/cobranca/regua.test.ts`, `lib/cobranca/estado.test.ts`) e nos invariantes da PR 3a. A suspensão usa datas recuadas no banco, não relógio falso: cron e régua rodam com o `now()` real.
+
+**Nota (2026-10-14):** o "Assinar" desta jornada e o "Gerar link de pagamento" do dono (J45) passam pelo mesmo núcleo (`lib/cobranca/checkout.ts`); o contrato do "Assinar" é provado pelo `route.test.ts` dele, mantido sem edição na extração.
+
+**Evidência** (PNG em `evidence/cobranca-revendedor/`):
+- `evidence/cobranca-revendedor/billing-cobranca-agendada.png`
+- `evidence/cobranca-revendedor/billing-em-dia.png`
+- `evidence/cobranca-revendedor/billing-troca-agendada.png`
+- `evidence/cobranca-revendedor/central-aviso-final.png`
+- `evidence/cobranca-revendedor/central-aviso-venceu.png`
+- `evidence/cobranca-revendedor/checkout-do-duble.png`
+- `evidence/cobranca-revendedor/conexao-modo-de-teste.png`
+- `evidence/cobranca-revendedor/faixa-em-atraso.png`
+- `evidence/cobranca-revendedor/hub-pagar-agora.png`
+- `evidence/cobranca-revendedor/reativada-sem-rajada.png`
+- `evidence/cobranca-revendedor/sistema-cobranca-ligada.png`
+- `evidence/cobranca-revendedor/visao-geral-checklist.png`
+
+## J44 — O revendedor cobra pelo Asaas: Pix e boleto recorrentes, com CPF/CNPJ no checkout `[P0]` (2026-10-06)
+
+**Origem:** PR 3b da cobrança do revendedor (`docs/superpowers/specs/2026-09-29-cobranca-do-revendedor-design.md`, §6.2, §7(a), §7(b), §7(f), §13, §15 riscos 5 e 11).
+
+É P0 porque é a primeira cobrança de quem vende para cliente brasileiro: sem Pix recorrente, que a Stripe no Brasil não faz, o revendedor não fecha a primeira venda. Cobre só o que muda com o Asaas. Régua, suspensão, hub e checklist são os da J43.
+
+| Caso | Spec | Estado |
+|---|---|---|
+| O dono escolhe Asaas na Conexão (a tela diz para que serve cada provedor) e conecta a chave do sandbox. A tela mostra o selo MODO DE TESTE e só os 4 últimos caracteres. Chave e token ficam cifrados, e o webhook é criado pela API, com o token nunca na tela | `tests/e2e/cobranca-asaas.spec.ts` | CI |
+| A tela pede o CPF/CNPJ de quem paga, preenchido com o CNPJ do cadastro. Com dígito errado, Assinar fica desligado e nada chega ao Asaas. O documento vai sem máscara e não fica na assinatura nem no audit | idem | CI |
+| A fatura do Asaas abre numa aba nova e o sistema fica na original, com o recado de voltar. "Já paguei" sem pagar mostra "1ª cobrança agendada", a assinatura segue em teste grátis, e a referência da assinatura do Asaas já está gravada | idem | CI |
+| Um aviso com o token CERTO e corpo que jura "pago" (token vazado) acorda uma releitura, e a assinatura segue em teste | idem | CI |
+| Pix pago: o aviso chega com o token e só acorda a leitura (corpo `{id,type}`, org nula, sem cabeçalhos, sem assinatura, token fora da linha). Nenhum aviso válido fica sem empresa (o `SUBSCRIPTION_CREATED` do Assinar acha o cliente). Token errado leva 401. A tela diz "Em dia" | idem | CI |
+| Cancelar mostra "Você mantém o acesso até DD/MM", o fim do período pago, lido com `includeDeleted` | idem | CI |
+| O dialeto /v3 do dublê e o adaptador falam a mesma língua: datas civis no fim do dia em SP, `existe` só com pagamento confirmado, pendentes futuras geradas depois de um pagamento no dublê (o sandbox gera 1 na criação, medido; a cadência de fundo não foi medida), `nextDueDate` ≠ fim do pago, guarda do `trocarPlano` e a pendente futura com o valor novo, `includeDeleted`, webhook automático e manual, chave só no cabeçalho, User-Agent próprio, chave de produção que nunca sai para o dublê | `tests/unit/cobranca-duble-fala-a-lingua-do-asaas.test.ts` | unit |
+| As armadilhas da §6.2, uma por caso: token vazado, cobrança gerada 40 dias antes, removida sem `includeDeleted`, troca com pendente futura, virada de dia em SP | `lib/cobranca/provedores/asaas.test.ts` | unit |
+| O mapa vivo tem o Asaas no mesmo encaixe | `tests/unit/mapas-de-arquitetura.test.ts` | unit |
+| O sandbox real: as duas bases, o User-Agent, o webhook por API (ou o manual) e a reconexão com a mesma URL, `includeDeleted`, as datas, o `nextDueDate` além de toda cobrança gerada, quantas nascem logo de saída, as notificações do Asaas e o CNPJ alfanumérico | `scripts/smoke-asaas.ts` | fora do CI (chave do dono); bloqueia o merge |
+
+**Não coberto pela tela:**
+- **O passo a passo manual do webhook** (quando a conta do Asaas não deixa criar pela API), com o token mostrado uma vez. Provado em `app/api/v1/admin/cobranca/conexao/route.test.ts` (caso "⭐ Asaas sem a API de avisos"), `tests/unit/admin-cobranca-abas.test.tsx` (caso "⭐ Asaas sem API de avisos") e no contrato acima.
+- **O boleto.** O dublê paga com Pix e cartão; o boleto compensado é o mesmo `RECEIVED` do Pix.
+- **Atraso, aviso final e suspensão pelo Asaas.** A régua é a mesma da J43; o `emAtraso`/`vencidaDesde` do Asaas está no unit.
+- **A troca de plano pelo Asaas.** Está no unit, com a guarda.
+- **A publicação com chave de produção do Asaas (D-7).**
+
+**Evidência** (PNG em `evidence/cobranca-asaas/`):
+- `evidence/cobranca-asaas/conexao-asaas-modo-de-teste.png`
+- `evidence/cobranca-asaas/checkout-asaas-documento.png`
+- `evidence/cobranca-asaas/fatura-do-asaas.png`
+- `evidence/cobranca-asaas/billing-asaas-aguardando.png`
+- `evidence/cobranca-asaas/billing-asaas-em-dia.png`
+- `evidence/cobranca-asaas/billing-asaas-cancelada.png`
+- `evidence/cobranca-asaas/smoke-asaas.txt`
+
+## J45 — O dono gera o link de pagamento pela empresa e manda pelo WhatsApp `[P0]` (2026-10-14)
+
+**Origem:** link de pagamento pelo dono (`docs/superpowers/specs/2026-09-29-cobranca-do-revendedor-design.md`, D-15, §7(b), §7(g), §9).
+
+É P0 porque é o primeiro pagamento de quem vende para cliente que não entra no sistema: o revendedor fecha a venda no WhatsApp e precisa do link na hora. Sem isso, o dono tinha de entrar como a empresa ou ir ao painel do provedor. Cobre só o que é do dono. A assinatura da empresa, a régua e a suspensão são as da J43 e da J44.
+
+| Caso | Spec | Estado |
+|---|---|---|
+| O dono conecta o Asaas, atribui o plano no card Cobrança do tenant e vê o campo "CPF ou CNPJ de quem paga" vazio (sem CNPJ no cadastro). Vazio ou com dígito errado, "Gerar link de pagamento" fica desligado e nada chega ao Asaas | `tests/e2e/cobranca-link-pelo-dono.spec.ts` | **PASS no CI** (run 38745261432, `d2007b561`) |
+| Com o CPF mascarado, o link aparece somente leitura, com "Copiar link de pagamento", e a tela cabe na largura. O Asaas recebe o CPF sem máscara e o e-mail do **admin da empresa**, nunca o do dono (D-15), com dois admins mais antigos que ele semeados na empresa: o dono, ativo e não provisório (o criador anterior à 0237), e um vínculo provisório que não é dono. Cada um só cai por um dos dois filtros. O CPF não fica na assinatura nem no audit, e o audit diz que foi o dono (`acting_as_platform_admin`, `bypassed_rls`) | idem | **PASS no CI só com o adminB** (run 38745261432, `d2007b561`); com os dois admins mais antigos, a medir no head seguinte |
+| Gerar de novo devolve o MESMO link: antes do aviso do provedor, pelo link vivo; depois, com o checkout limpo, pela fatura aberta (o 409 `pagamento_em_andamento` do núcleo vira 200 para o dono). Um cliente, uma assinatura, um audit | idem | **PASS no CI** (run 38745261432, `d2007b561`) |
+| A empresa entra e vê o mesmo link em "Pagar agora", sem "Assinar"; o "Assinar" dela, chamado direto, devolve 409 com o mesmo link e nenhuma 2ª assinatura. A org do dono não ganha cliente nem assinatura | idem | **PASS no CI** (run 38745261432, `d2007b561`) |
+| A org vem do path (todo filtro com o tenant; `organization_id` no corpo → 400); e-mail do admin, não do dono; audit do dono; fatura aberta → 200; isenta → 404 com a frase do dono; módulo desligado e id inválido → 404 `not_found` ("Not found", sem a frase); `empresa_sem_email` só quando o cliente vai ser criado | `app/api/v1/admin/tenants/[id]/assinatura/checkout/route.test.ts` | unit |
+| O "Assinar" da empresa não mudou de contrato com a extração do núcleo | `app/api/v1/cobranca/assinatura/checkout/route.test.ts` (sem edição) | unit |
+| O admin mais antigo da empresa é o escolhido; sem admin com e-mail → nulo; leitura que falha lança | `lib/cobranca/emails.test.ts` | unit |
+
+**Não coberto pela tela:**
+- **Stripe.** O link é a sessão do Checkout (vale 24 h) e quem paga volta ao login (D-15). Provado no unitário da rota.
+- **`empresa_sem_email` e `sem_link_de_pagamento`.** Exigem estado que a tela não produz de forma barata (empresa sem nenhum admin; assinatura pausada sem fatura). Provados no unitário da rota.
+- **O pagamento em si pelo link.** É o mesmo da J44 (Pix pago no dublê → "Em dia").
+
+**Evidência:** ainda não versionada. A spec grava as duas fotos (o card com o link gerado e o painel da empresa com o mesmo link) na pasta `evidence/cobranca-link-pelo-dono/` quando roda; elas entram aqui, citadas, depois da primeira rodada verde do `e2e`.
+
+## J47 — Ler a conversa selecionada no tema escuro `[P1]` (2026-10-12)
+
+Contexto: relatado por uma operação real, com a captura — no tema escuro, a linha
+selecionada da lista do Inbox ficava quase branca e o nome do contato sumia. A
+causa: `bg-accent-50`, um degrau da rampa da marca, que tem o MESMO hex nos dois
+temas; o nome é `text-text`, claro no escuro. Passa a `bg-accent-soft`, o token
+que o tema troca (`components/inbox/ConversationListItem.tsx`).
+
+Spec: `tests/e2e/inbox-selecionada-no-escuro.spec.ts`.
+
+| # | Caso | Expectativa | Resultado |
+|---|------|-------------|-----------|
+| J47.1 | Tema escuro, conversa aberta pela lista | o nome do contato na linha selecionada tem contraste ≥ 4,5 contra o fundo EFETIVO (cor computada, camadas translúcidas compostas) | **PASS pela tela** — Evidência: `evidence/inbox-selecionada-no-escuro/01-selecionada-no-escuro.png` |
+| J47.2 | A classe da selecionada | `bg-accent-soft`, nenhum degrau fixo `bg-accent-50…950`; a não selecionada não ganha o fundo | **PASS (unit)** — `tests/unit/selecionada-legivel-no-escuro.test.tsx` |
+| J47.3 | Tema escuro, conversa aberta E marcada no lote, com o mouse ou o foco de teclado | a linha fica num tom só (o botão não pinta por cima do fundo da linha), o foco aparece como anel, e o nome e a prévia seguem com contraste ≥ 4,5 contra o fundo efetivo | **PASS pela tela** — Evidência: `evidence/inbox-selecionada-no-escuro/02-aberta-e-marcada-com-foco.png` |
+
 ## Jornadas exercitadas (instalação final, virgem)
 
 | Jornada | Resultado |
