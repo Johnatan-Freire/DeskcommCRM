@@ -65,6 +65,17 @@ interface Props {
    */
   janelaFechada?: string | null;
   /**
+   * O que barra a NOTA INTERNA — e só ela. Ausente (`undefined`), a nota segue a
+   * mesma régua da resposta (`disabled`/`blockedReason`), o comportamento antigo.
+   *
+   * Separado porque conversa FECHADA e contato BLOQUEADO barram o que sai para o
+   * cliente, não o registro interno: medido em produção (16/10/2026), 216 das
+   * 224 conversas estavam fechadas e nenhuma aceitava nota — justamente onde o
+   * atendente registra por que o atendimento acabou. Anonimizado (LGPD) e
+   * suporte somente leitura continuam barrando: ali não se escreve nada.
+   */
+  notaBloqueada?: string | null;
+  /**
    * A mensagem que esta resposta CITA, quando o atendente escolheu responder
    * "em cima" de uma. `null` = envio solto, o caso comum.
    *
@@ -96,6 +107,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
     disabled,
     blockedReason,
     janelaFechada,
+    notaBloqueada,
     contactName,
     contactDisplayName,
     currentContactId,
@@ -159,6 +171,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   // nota interna nunca chega ao cliente, e é onde o atendente registra por que
   // a conversa esfriou — barrá-la tira exatamente o que ainda dá para fazer.
   const respostaBarrada = isDisabled || (mode === "reply" && !!janelaFechada);
+  const notaBarrada = notaBloqueada === undefined ? isDisabled : !!notaBloqueada;
 
   function autoresize() {
     const ta = taRef.current;
@@ -194,7 +207,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
 
   function handleSubmit() {
     const legivel = text.trim();
-    if (!legivel || (mode === "note" ? isDisabled : respostaBarrada)) return;
+    if (!legivel || (mode === "note" ? notaBarrada : respostaBarrada)) return;
 
     // A menção vira token AQUI, na saída do campo (#2372): o que fica no
     // rascunho, no `onDraftChange` e no `restoreOnError` é o nome legível, e
@@ -348,7 +361,9 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
     }
   }
 
-  if (blockedReason) {
+  // Sem nada para escrever (nem nota), só o aviso. Contato BLOQUEADO barra a
+  // resposta, não a nota: o composer aparece com o aviso em cima.
+  if (blockedReason && notaBarrada) {
     return (
       <div className="border-t border-border bg-muted/40 px-4 py-3 text-center text-xs text-muted-foreground">
         {blockedReason}
@@ -364,6 +379,11 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
           mode === "note" && "border-warning/40 bg-warning-bg",
         )}
       >
+        {blockedReason ? (
+          <p className="pb-2 text-center text-xs text-muted-foreground" data-testid="composer-motivo-do-bloqueio">
+            {blockedReason}
+          </p>
+        ) : null}
         {mode === "reply" && (
           <ReplyReviewPanel conversationId={conversationId} disabled={isDisabled} />
         )}
@@ -450,7 +470,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
             />
           )}
           <EmojiButton
-            disabled={isDisabled}
+            disabled={mode === "note" ? notaBarrada : isDisabled}
             onPick={(emoji) => {
               const ta = taRef.current;
               if (!ta) {
@@ -521,7 +541,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
               "max-h-40 min-h-9 flex-1 resize-none rounded-md border border-input bg-background px-3 py-2 text-sm",
               "placeholder:text-muted-foreground focus:ring-1 focus:ring-ring focus:outline-hidden",
             )}
-            disabled={mode === "note" ? isDisabled : respostaBarrada}
+            disabled={mode === "note" ? notaBarrada : respostaBarrada}
             aria-label={t("Mensagem")}
           />
           {text.trim() || mode === "note" ? (
@@ -530,7 +550,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
               size="icon"
               className="h-9 w-9 shrink-0"
               onClick={handleSubmit}
-              disabled={(mode === "note" ? isDisabled : respostaBarrada) || !text.trim()}
+              disabled={(mode === "note" ? notaBarrada : respostaBarrada) || !text.trim()}
               aria-label={t("Enviar")}
             >
               <PaperPlaneTilt size={16} weight="fill" aria-hidden />

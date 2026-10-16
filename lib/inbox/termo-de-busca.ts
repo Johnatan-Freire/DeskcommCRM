@@ -93,3 +93,29 @@ export function buscaValeConsulta(bruto: string): boolean {
   const semLixo = bruto.replace(/[()*]/g, " ");
   return normalizarTermoDeBusca(semLixo).length >= PISO_DA_BUSCA;
 }
+
+/**
+ * Os padrões (`ilike` do PostgREST, `*` = qualquer sequência) que o telefone
+ * digitado gera contra `contacts.phone_number`, que é E.164 (`+5561986531450`).
+ *
+ * Pedido do atendimento (16/10/2026): digitar o COMEÇO do número (`61986`)
+ * tem de filtrar quem começa assim. O `*61986*` antigo casava a sequência em
+ * qualquer posição — com 184 de 224 contatos começando por `+55619`, o resultado
+ * vinha misturado com números que só tinham esses dígitos no meio.
+ *
+ *   - sempre pelo começo, com e sem o DDI: `+55<dígitos>*` e `+<dígitos>*`
+ *     (`61986` → DDD+número; `5561986` → já com o 55);
+ *   - a partir de 8 dígitos também em qualquer posição: quem digita o número
+ *     sem DDD (`98653-1450`) precisa achar, e com 8+ dígitos a sequência já é
+ *     específica o bastante para não misturar.
+ *
+ * Zero à esquerda (`061…`, discagem de longa distância) não é parte do número.
+ * Menos de 4 dígitos não vira busca de telefone (casaria meia base).
+ */
+export function padroesDoTelefone(digitos: string): string[] {
+  const d = digitos.replace(/\D/g, "").replace(/^0+/, "");
+  if (d.length < 4) return [];
+  const padroes = new Set([`+55${d}*`, `+${d}*`]);
+  if (d.length >= 8) padroes.add(`*${d}*`);
+  return [...padroes];
+}

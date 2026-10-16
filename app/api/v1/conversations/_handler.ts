@@ -17,7 +17,7 @@ import type {
   PatchConversationInput,
 } from "@/lib/schemas";
 import type { Conversation } from "@/lib/types/messaging";
-import { normalizarTermoDeBusca } from "@/lib/inbox/termo-de-busca";
+import { normalizarTermoDeBusca, padroesDoTelefone } from "@/lib/inbox/termo-de-busca";
 import { ORDEM_DA_ESPERA, ehAFila } from "@/lib/inbox/comando-da-conversa";
 import { aplicarMarcadores } from "@/lib/inbox/marcador-da-conversa";
 
@@ -316,7 +316,7 @@ export async function listConversationsHandler(
     //
     // A ordem importa e a composição é segura: `termoSeguroParaOr` escapa `%` e
     // `_` e troca `,()` por `*`, mas NÃO escapa `*` — então o curinga posto pela
-    // primeira chega inteiro ao banco. O telefone também sobrevive: `somenteDigitos`
+    // primeira chega inteiro ao banco. O telefone também sobrevive: `padroesDoTelefone`
     // descarta tudo que não é dígito, inclusive o curinga.
     const s = termoSeguroParaOr(normalizarTermoDeBusca(q.search));
 
@@ -331,15 +331,13 @@ export async function listConversationsHandler(
     // em inner mudaria a semântica da LISTA inteira (conversa sem contato
     // sumiria da caixa). A consulta curta abaixo devolve ids e o predicado os
     // soma ao casamento por conteúdo, que continua valendo.
-    const somenteDigitos = s.replace(/\D/g, "");
-    // 4 dígitos é o piso: "12" casaria metade da base e devolveria a lista
-    // inteira embaralhada — pior que não achar, porque PARECE que funcionou.
-    const pareceTelefone = somenteDigitos.length >= 4;
-
+    // Telefone pelo COMEÇO do número (`61986` → quem começa assim), e em
+    // qualquer posição só a partir de 8 dígitos; menos de 4 dígitos não vira
+    // busca de telefone — "12" casaria metade da base (`padroesDoTelefone`).
     const camposDoContato = [
       `display_name.ilike.*${s}*`,
       `name.ilike.*${s}*`,
-      ...(pareceTelefone ? [`phone_number.ilike.*${somenteDigitos}*`] : []),
+      ...padroesDoTelefone(s).map((p) => `phone_number.ilike.${p}`),
     ].join(",");
 
     const { data: contatos } = await supabase

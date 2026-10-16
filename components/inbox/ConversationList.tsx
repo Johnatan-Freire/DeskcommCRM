@@ -31,6 +31,8 @@ interface Props {
   onSelect: (id: string) => void;
   /** Desliga os filtros auxiliares. Sem ele, o vazio por filtro nao oferece o botao. */
   onLimparFiltros?: () => void;
+  /** Busca ativa fora da aba "Todas": oferece repetir a busca lá. */
+  onBuscarEmTodas?: () => void;
   /** Notifies parent when the visible list changes (used by keyboard nav). */
   onVisibleChange?: (ids: string[]) => void;
 }
@@ -42,6 +44,7 @@ export function ConversationList({
   onSelect,
   onVisibleChange,
   onLimparFiltros,
+  onBuscarEmTodas,
 }: Props) {
   const t = useT();
   // Só mostra POR ONDE a conversa entrou quando há mais de um número. Com um
@@ -171,7 +174,7 @@ export function ConversationList({
         {/* Vazio por FILTRO: fica DENTRO do return, nunca como `return` precoce —
             e por isso o bloco do `hasNextPage` abaixo continua sendo alcancado. */}
         {items.length === 0 && filtrosAtivos.length > 0 && (
-          <EmptyPorFiltro filtros={filtrosAtivos} onLimpar={onLimparFiltros} />
+          <EmptyPorFiltro filtros={filtrosAtivos} onLimpar={onLimparFiltros} onBuscarEmTodas={onBuscarEmTodas} />
         )}
         {items.map((c, i) => (
           <ConversationListItem

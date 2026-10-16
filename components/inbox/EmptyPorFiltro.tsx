@@ -9,6 +9,12 @@ interface Props {
   filtros: string[];
   /** Desliga os auxiliares. Ausente quem renderiza não oferece o botão. */
   onLimpar?: () => void;
+  /**
+   * Leva a MESMA busca para a aba "Todas". A busca vale só dentro da aba atual,
+   * e a maioria das conversas mora em "Fechadas": quem buscava um número na Fila
+   * via "nenhuma conversa" de um contato que existe.
+   */
+  onBuscarEmTodas?: () => void;
 }
 
 /**
@@ -24,7 +30,7 @@ interface Props {
  * pior: o vazio retornava antes do bloco do "Carregar mais", então o operador
  * ficava sem como alcançar a página seguinte. Beco sem saída.
  */
-export function EmptyPorFiltro({ filtros, onLimpar }: Props) {
+export function EmptyPorFiltro({ filtros, onLimpar, onBuscarEmTodas }: Props) {
   const t = useT();
   return (
     <div className="flex flex-col items-center justify-center gap-3 p-6 text-center">
@@ -36,6 +42,11 @@ export function EmptyPorFiltro({ filtros, onLimpar }: Props) {
         <p className="text-xs text-text-muted">
           {t("Ativos:")} {filtros.map((f) => t(f)).join(" · ")}
         </p>
+      )}
+      {onBuscarEmTodas && (
+        <Button size="sm" onClick={onBuscarEmTodas} data-testid="buscar-em-todas">
+          {t("Buscar em todas as conversas")}
+        </Button>
       )}
       {onLimpar && (
         <Button size="sm" variant="outline" onClick={onLimpar}>
