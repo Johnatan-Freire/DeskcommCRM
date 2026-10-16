@@ -273,6 +273,23 @@ export interface RunModelCallDeps {
 }
 
 /**
+ * O subconjunto do `GenerateTextResult` que o motor deste seam CONSUME — e a
+ * régua que o ramo da assinatura tem de satisfazer campo a campo.
+ *
+ * Existe por causa do defeito da #2657: o ramo da assinatura monta à mão um
+ * objeto com cara de resultado de generateText (o SIWC exige streamText), e o
+ * cast duplo do SDK escondia do compilador o campo responseMessages que
+ * faltava — o motor lê esse campo em `inbound-turn.ts` e o turno quebrava com
+ * `TypeError: e is not iterable` logo depois de a resposta já ter saído. Com o
+ * `satisfies` aqui, tirar (ou jamais adicionar) qualquer campo que o motor lê
+ * vira erro de tipo NA HORA, não um turno mudo em produção.
+ */
+export type ResultadoDoModeloDoSeam = Pick<
+  Awaited<ReturnType<typeof generateText>>,
+  'text' | 'usage' | 'response' | 'responseMessages' | 'steps' | 'toolCalls' | 'finishReason'
+>;
+
+/**
  * Texto do aviso de limiar. É PONTEIRO, não retrato: manda ver os números na
  * tela em vez de congelar um "80%" que envelhece no mesmo minuto em que o gasto
  * sobe. O statement do gate insere este item de dentro do banco, junto com a
