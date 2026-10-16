@@ -613,6 +613,11 @@ export function InboxLayout({ initialSelectedId = null }: InboxLayoutProps = {})
             onSelect={handleSelect}
             onVisibleChange={handleVisibleChange}
             onLimparFiltros={limparFiltrosAuxiliares}
+            onBuscarEmTodas={
+              buscaValeConsulta(filterValue.search) && tab !== "all"
+                ? () => setFilterValue({ ...filterValue, tab: "all" })
+                : undefined
+            }
           />
         </div>
       </div>
@@ -750,6 +755,13 @@ export function InboxLayout({ initialSelectedId = null }: InboxLayoutProps = {})
               ref={composerRef}
               conversationId={selectedConversation.id}
               blockedReason={supportReadonly ? "Acompanhamento somente leitura" : blockedReason}
+              notaBloqueada={
+                supportReadonly
+                  ? "Acompanhamento somente leitura"
+                  : selectedConversation.contacts?.is_anonymized
+                    ? t("Contato anonimizado — não é possível enviar mensagens.")
+                    : null
+              }
               janelaFechada={motivoDaJanela}
               disabled={selectedConversation.status === "closed"}
               contactName={selectedConversation.contacts?.name ?? null}

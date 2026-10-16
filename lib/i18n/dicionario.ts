@@ -3849,6 +3849,7 @@ export const DICIONARIO: Traducoes = {
   "Crítico (<24h)": { es: "Crítico (<24h)" },
   "Alerta (>50%)": { es: "Alerta (>50%)" },
   "Limpar filtros": { es: "Limpiar filtros" },
+  "Buscar em todas as conversas": { es: "Buscar en todas las conversaciones" },
   "solicitação vencendo em menos de 24h ou já vencida": {
     es: "solicitud que vence en menos de 24h o ya venció",
   },
@@ -10064,11 +10065,11 @@ export const DICIONARIO: Traducoes = {
   "Esse motivo de perda não está na lista deste funil — escolha um dos motivos configurados.": {
     es: "Ese motivo de pérdida no está en la lista de este embudo. Elige uno de los motivos configurados.",
   },
-  "Pipeline não tem stage de fechamento como ganho.": {
-    es: "El embudo no tiene una etapa de cierre para negocios ganados.",
+  "Este funil não tem uma etapa de fechamento. Um administrador marca uma em Configurações › Etapas do funil: na etapa certa, em «O que acontece nesta coluna», escolha «Aqui o cliente fecha».": {
+    es: "Este embudo no tiene una etapa de cierre. Un administrador la marca en Configuración › Etapas del embudo: en la etapa correcta, en «Qué pasa en esta columna», elige «Aquí el cliente cierra».",
   },
-  "Pipeline não tem stage de fechamento como perda.": {
-    es: "El embudo no tiene una etapa de cierre para negocios perdidos.",
+  "Este funil não tem uma etapa de desistência. Um administrador marca uma em Configurações › Etapas do funil: na etapa certa, em «O que acontece nesta coluna», escolha «Aqui o cliente desiste».": {
+    es: "Este embudo no tiene una etapa de abandono. Un administrador la marca en Configuración › Etapas del embudo: en la etapa correcta, en «Qué pasa en esta columna», elige «Aquí el cliente desiste».",
   },
   "Perdido —": { es: "Perdido —" },
   "(negócio removido)": { es: "(negocio eliminado)" },

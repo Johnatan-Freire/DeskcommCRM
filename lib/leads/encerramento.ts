@@ -156,8 +156,8 @@ export async function encerraDemanda(
       ctx.requestId,
       traduzir(
         input.desfecho === "won"
-          ? "Pipeline não tem stage de fechamento como ganho."
-          : "Pipeline não tem stage de fechamento como perda.",
+          ? "Este funil não tem uma etapa de fechamento. Um administrador marca uma em Configurações › Etapas do funil: na etapa certa, em «O que acontece nesta coluna», escolha «Aqui o cliente fecha»."
+          : "Este funil não tem uma etapa de desistência. Um administrador marca uma em Configurações › Etapas do funil: na etapa certa, em «O que acontece nesta coluna», escolha «Aqui o cliente desiste».",
         ctx.idioma ?? "pt-BR",
       ),
     );
