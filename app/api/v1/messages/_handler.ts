@@ -56,6 +56,7 @@ import {
   envioDeConversaLigado,
   FRASE_ENVIO_DESLIGADO,
 } from "@/lib/channels/envio-de-saida";
+import { previaDaMensagem } from "@/lib/messaging/previa-da-mensagem";
 import { nomeDoContato } from "@/lib/contacts/rotulo-do-contato";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { Message } from "@/lib/types/messaging";
@@ -369,15 +370,14 @@ export async function listMessagesHandler(
 // send
 // ---------------------------------------------------------------------------
 
-function previewFrom(input: {
+export function previewFrom(input: {
   body?: string;
   media_url?: string;
   media_storage_path?: string;
   type?: string;
 }): string {
-  if (input.body) return input.body.slice(0, 280);
-  if (input.media_url || input.media_storage_path) return `[${input.type ?? "media"}]`;
-  return "";
+  if (!input.body && !input.media_url && !input.media_storage_path) return "";
+  return previaDaMensagem(input.body ?? null, input.type ?? "media");
 }
 
 /**
