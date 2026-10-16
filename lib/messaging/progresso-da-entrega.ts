@@ -6,7 +6,7 @@
  * CRM mostra o degrau mais alto que ouviu.
  *
  * O defeito medido em produção (15/10/2026): toda mensagem enviada PELO CRM
- * ficava para sempre com um ✓, embora tivesse chegado. O WAHA manda o eco
+ * ficava para sempre com um ✓, embora tivesse chegado. O canal manda o eco
  * (`message.any`) e o `message.ack` ~0,2 s depois do envio, enquanto o envio
  * ainda espera a resposta do canal (0,7–2,6 s medidos). Nessa janela:
  *
