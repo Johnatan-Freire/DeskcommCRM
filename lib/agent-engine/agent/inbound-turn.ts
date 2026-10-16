@@ -104,6 +104,7 @@ import {
 import { buildOpeningMessage, ritualBlocks } from "./abertura/ritual";
 import { applySaveLeadNote, buildNotesIndexBlock, getLeadNoteBody } from './lead-notes';
 import { buildCompromissosBlock } from './compromissos-do-contato';
+import { buildOrigemBlock } from './abertura/origem-do-contato';
 import { agendaNoFechamento } from './abertura/agenda-no-fechamento';
 import { applyScheduleFollowup, type FollowupWindowKnobs } from './schedule-followup';
 import { podeExporScheduleFollowup } from '@/lib/followup/callback-policy';
@@ -1499,6 +1500,8 @@ export interface AgentTurnInput {
      * o compilador.
      */
     compromissosBlock?: string;
+    /** O anúncio que o contato clicou (vazio = não veio de anúncio). */
+    origemBlock?: string;
     /** Texto exato da mensagem que acordou este turno inbound. */
     currentInboundText?: string;
     /**
@@ -2758,6 +2761,8 @@ async function executarTurnoDoAgente(
     preview?.kind === 'sandbox'
       ? ''
       : await buildCompromissosBlock(pool, tenantId, leadId, new Date());
+  // #2984 — o anúncio que o contato clicou (título e texto), no ritual de abertura.
+  const origemBlock = preview ? '' : await buildOrigemBlock(pool, tenantId, leadId, new Date());
   // Observabilidade da memória (Fase 2A): SÓ ids/contagens no log — headline/corpo
   // são PII e nunca saem do prompt. Prova auditável de que a memória durável do
   // lead entrou no contexto DESTE turno.
@@ -4664,6 +4669,7 @@ async function executarTurnoDoAgente(
       projeta: projetaContexto,
       entregues,
       compromissosBlock,
+      origemBlock,
       ...(currentInboundText !== null ? { currentInboundText } : {}),
     });
     // Sufixos por-lead (situacionais, voláteis — depois do prefixo cacheável F2-17): corpos de
@@ -5777,6 +5783,7 @@ export function createInboundTurnHandler(deps: InboundTurnDeps) {
         projeta,
         entregues,
         compromissosBlock,
+        origemBlock,
         currentInboundText,
       }) =>
         buildOpeningMessage(
@@ -5788,6 +5795,7 @@ export function createInboundTurnHandler(deps: InboundTurnDeps) {
           entregues,
           compromissosBlock,
           currentInboundText,
+          origemBlock,
         ),
     });
   };
