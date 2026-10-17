@@ -28,7 +28,7 @@ import { devolverAtendimentoAoAgente } from "@/lib/escalacao/retomada";
 import { getWahaClient } from "@/lib/waha/client";
 import { acelerarPipelineDeEventos } from "@/lib/dev/kick-local-pipeline";
 import { canonicalPhoneBR } from "@/lib/channels/phone-variants";
-import { estamparAtribuicaoDoContato } from "@/lib/leads/atribuicao-de-anuncio";
+import { estamparAtribuicaoDoContato, metadataDoAnuncio } from "@/lib/leads/atribuicao-de-anuncio";
 import { extrairEEstamparAtribuicaoGoogle } from "@/lib/plataformas-de-anuncio/google/atribuicao";
 import { extrairAtribuicaoWaha } from "@/lib/waha/atribuicao-de-anuncio";
 import { previaDaMensagem } from "@/lib/messaging/previa-da-mensagem";
@@ -619,6 +619,9 @@ async function handleInbound(
         // resolvida, a citada no banco é a fonte da verdade — uma edição
         // posterior mudaria o que a tela mostra, e a cópia ficaria velha.
         ...(citacao?.texto && !citadaId ? { reply_to_body: citacao.texto } : {}),
+        // O anúncio DESTA mensagem vai junto — o contato guarda só o primeiro, e
+        // quem volta por outro anúncio precisa deixar rastro. Ver `metadataDoAnuncio`.
+        ...metadataDoAnuncio(atribuicao),
         // Nome original do anexo (#2613). Só quando há nome: a chave nunca é
         // gravada vazia, e gravação é de linha NOVA (o INSERT é o único caminho
         // que escreve `metadata` aqui), então nada do que já está é sobrescrito.

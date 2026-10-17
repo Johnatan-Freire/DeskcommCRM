@@ -18,6 +18,8 @@ import { CitationButton } from "@/components/ai/CitationButton";
 import { MediaRenderer } from "@/components/inbox/media/MediaRenderer";
 import { ContactCard } from "@/components/inbox/media/ContactCard";
 import { resolveSharedContact } from "@/lib/messaging/contact-card";
+import { lerAnuncioDaMensagem } from "@/lib/leads/atribuicao-de-anuncio";
+import { AnuncioCard } from "@/components/inbox/AnuncioCard";
 import {
   extractCitations,
   isAiGeneratedMessage,
@@ -172,6 +174,10 @@ export function MessageBubble({
     }
     return null;
   })();
+  // O anúncio que gerou ESTA mensagem (a ingestão grava em `metadata.anuncio`
+  // a mensagem nascida de um clique). Só na recebida: é o cliente que chega
+  // pelo anúncio, como o WhatsApp mostra no celular.
+  const anuncio = !isOutbound ? lerAnuncioDaMensagem(message.metadata?.anuncio) : null;
 
   async function salvarEdicao() {
     const novoTexto = texto.trim();
@@ -359,6 +365,8 @@ export function MessageBubble({
           </p>
         ) : (
           <>
+            {anuncio && <AnuncioCard anuncio={anuncio} compacto className="mb-1.5" />}
+
             {hasMedia && (
               <div className={cn(message.body && "mb-1")}>
                 <MediaRenderer message={message} agora={agora} />
