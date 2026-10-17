@@ -1222,6 +1222,12 @@ export const DICIONARIO: Traducoes = {
 
   // ─── Painel do contato ───
   CONTATO: { es: "CONTACTO" },
+  // O recolher do painel inteiro (#3004) — mesmo verbo do recolher da barra
+  // lateral, com o alvo explícito: são dois controles na mesma tela.
+  "Recolher painel do contato": { es: "Contraer panel del contacto" },
+  "Expandir painel do contato": { es: "Expandir panel del contacto" },
+  // O atalho do negócio ativo para o quadro do funil (#3004).
+  "Abrir no funil": { es: "Abrir en el embudo" },
   "TAGS DA CONVERSA": { es: "ETIQUETAS DE LA CONVERSACIÓN" },
   "DEMANDAS ABERTAS": { es: "CASOS ABIERTOS" },
   "LEADS RECENTES": { es: "LEADS RECIENTES" },
