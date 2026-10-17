@@ -6069,6 +6069,10 @@ export const DICIONARIO: Traducoes = {
   // ─── Inbox: tags de contato/conversa ───
   "Sem tags no contato.": { es: "Sin etiquetas en el contacto." },
   "Adicionar tag ao contato": { es: "Agregar etiqueta al contacto" },
+  // ─── #2979: o MESMO editor no funil, onde a etiqueta é do NEGÓCIO ───
+  "Sem tags no negócio.": { es: "Sin etiquetas en el negocio." },
+  "Adicionar tag ao negócio": { es: "Agregar etiqueta al negocio" },
+  "Tags do negócio": { es: "Etiquetas del negocio" },
   "Remover tag": { es: "Quitar etiqueta" },
   "Tags da conversa": { es: "Etiquetas de la conversación" },
 

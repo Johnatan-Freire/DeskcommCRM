@@ -979,7 +979,10 @@ export function CRMSidePanel({ conversation, recolhido = false, onAlternarRecolh
               </Button>
             )}
           </div>
-          {tagEditorOpen && contactId && <ContactTagsEditor contactId={contactId} orgId={conversation.organization_id} tags={tags} />}
+          {tagEditorOpen && contactId && (
+            // Contexto de PESSOA: a etiqueta vai para `contacts.tags` (#2979).
+            <ContactTagsEditor entityId={contactId} orgId={conversation.organization_id} tags={tags} />
+          )}
         </Card>
       </section>
 
