@@ -5989,6 +5989,31 @@ export const DICIONARIO: Traducoes = {
     es: "Archivar cierra esta atención y guarda la conversación en el historial. Si el cliente vuelve a escribir, la conversación regresa. ¿Archivar?",
   },
   "Arquivando...": { es: "Archivando..." },
+
+  // ─── Guias curtas dos botões da barra de ações do cabeçalho (#3003) ───
+  //
+  // O rótulo diz o GESTO; a guia diz a CONSEQUÊNCIA — é a pergunta "o que
+  // acontece se eu clicar aqui?", que chega antes do clique. Mesmo vocabulário
+  // já usado acima nesta seção (`atención automática`, `atención se cierra`).
+  "Solta esta conversa: ela fica sem dono e o atendimento automático volta a responder.": {
+    es: "Suelta esta conversación: queda sin responsable y la atención automática vuelve a responder.",
+  },
+  "Solta esta conversa: ela fica sem dono e volta para a fila, esperando um atendente.": {
+    es: "Suelta esta conversación: queda sin responsable y vuelve a la cola, esperando a un asesor.",
+  },
+  "Passa esta conversa para outro atendente. Se houver outro número conectado, dá para continuar o atendimento por ele.": {
+    es: "Pasa esta conversación a otro asesor. Si hay otro número conectado, puedes continuar la atención por él.",
+  },
+  "Encerra o atendimento. Depois você pode reabrir a conversa.": {
+    es: "Cierra la atención. Después puedes reabrir la conversación.",
+  },
+  "Reabre o atendimento desta conversa, que estava encerrada.": {
+    es: "Reabre la atención de esta conversación, que estaba cerrada.",
+  },
+  "Guarda a conversa na aba Arquivadas. Se ainda estiver aberta, o atendimento é encerrado.": {
+    es: "Guarda la conversación en la pestaña Archivadas. Si todavía está abierta, la atención se cierra.",
+  },
+  "Abre a ficha completa deste contato.": { es: "Abre la ficha completa de este contacto." },
   Automático: { es: "Automático" },
   Alguém: { es: "Alguien" },
   "Nota interna · só o time vê": { es: "Nota interna · solo la ve el equipo" },
