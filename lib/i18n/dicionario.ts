@@ -12926,6 +12926,14 @@ export const DICIONARIO: Traducoes = {
   "A conversa abriu, mas a primeira mensagem não pôde ser enviada.": {
     es: "La conversación se abrió, pero el primer mensaje no se pudo enviar.",
   },
+  // #3006 — "usar como exemplo para a IA": a conversa marcada vira material do
+  // agente (opt-in de LGPD). O selo fica curto de propósito: ele divide a faixa
+  // com as etiquetas do contato, e o verbo inteiro mora no `title` do controle.
+  "Usar como exemplo para a IA": { es: "Usar como ejemplo para la IA" },
+  "Deixar de usar como exemplo": { es: "Dejar de usar como ejemplo" },
+  "Exemplo para a IA": { es: "Ejemplo para la IA" },
+  "Conversa marcada como exemplo para a IA.": { es: "Conversación marcada como ejemplo para la IA." },
+  "A conversa deixou de ser exemplo para a IA.": { es: "La conversación dejó de ser ejemplo para la IA." },
   "O contato pediu para não receber mensagens (opt-out): o envio pelo automático fica bloqueado. Nada a enviar.": { es: "El contacto pidió no recibir mensajes (opt-out): el envío por el automático queda bloqueado. Nada que enviar." },
   "Este contato foi anonimizado (LGPD) — é proibido enviar mensagens a ele.": { es: "Este contacto fue anonimizado (LGPD) — está prohibido enviarle mensajes." },
   "Não há base legal (LGPD) registrada para o primeiro contato com este lead. O time precisa regularizar o cadastro antes de abordar.": { es: "No hay base legal (LGPD) registrada para el primer contacto con este lead. El equipo debe regularizar el registro antes de abordarlo." },
