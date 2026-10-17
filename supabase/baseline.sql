@@ -30056,7 +30056,7 @@ create table if not exists public.passagens_de_atendimento (
   motivo_codigo    text not null check (motivo_codigo in (
                      'requested_human','suspected_optout','orcamento_de_ia','low_sentiment',
                      'low_confidence','critical_stage','legal_mention','refund_mention',
-                     'caso_escalado')),
+                     'caso_escalado','verificacao_manual')),
 
   -- ─── OS QUATRO NOMES QUE O GATE DE LGPD LÊ (ver o cabeçalho) ─────────────
   --   title   ← "o que o cliente quer", em uma linha (é o título do cartão)
@@ -30149,7 +30149,7 @@ alter table public.passagens_de_atendimento
   check (motivo_codigo in (
     'requested_human','suspected_optout','orcamento_de_ia','low_sentiment',
     'low_confidence','critical_stage','legal_mention','refund_mention',
-    'caso_escalado'));
+    'caso_escalado','verificacao_manual'));
 
 alter table public.passagens_de_atendimento
   drop constraint if exists passagens_de_atendimento_aviso_motivo_codigo_check;
@@ -49945,6 +49945,14 @@ comment on column public.webhook_lead_captures.outcome is
   'criado = virou lead novo; duplicado = envio repetido, nada mudou no card; atualizado = o card da mesma fonte recebeu o dado novo (issue #2316, só com a opção da fonte ligada); recusado = não entrou (reject_reason diz por quê).';
 
 notify pgrst, 'reload schema';
+
+
+-- ---- motivo `verificacao_manual` na passagem (migration 0693) ----
+-- O valor entrou no bloco ÚNICO de `passagens_de_atendimento_motivo_codigo_check`
+-- (logo depois do `create table public.passagens_de_atendimento`), e não aqui:
+-- reconstruir a constraint num segundo bloco é o que
+-- `tests/unit/baseline-constraint-reconstruida.test.ts` reprova. Par de
+-- `MOTIVOS_DA_PASSAGEM`/`FRASE_DO_MOTIVO` em `lib/escalacao/passagem.ts`.
 
 -- ---- proteção sob o `ensure_rls`, DEPOIS de toda policy do arquivo (migration 0521) ----
 --

@@ -11632,6 +11632,8 @@ export const DICIONARIO: Traducoes = {
     { es: "La conversación tocó el tema de reembolsos" },
   "Uma pessoa da equipe escalou um atendimento":
     { es: "Alguien del equipo escaló una atención" },
+  "Um fluxo automático coletou dados e passou a conversa para verificação humana":
+    { es: "Un flujo automático recopiló datos y pasó la conversación a verificación humana" },
   "A mensagem ficou na fila porque o canal está fora do ar":
     { es: "El mensaje quedó en la cola porque el canal está fuera de servicio" },
   "O canal recusou a mensagem de aviso":
