@@ -12907,6 +12907,25 @@ export const DICIONARIO: Traducoes = {
   "Escondido, o campo não aparece no formulário nem é validado como obrigatório, e o valor já gravado continua no registro.": {
     es: "Oculto, el campo no aparece en el formulario ni se valida como obligatorio, y el valor ya guardado sigue en el registro.",
   },
+
+  // ─── Campo de lista pesquisável #2521 (searchable_select) ───
+  "Digite para buscar…": { es: "Escriba para buscar…" },
+  "Este campo aceita um valor novo, fora da lista.": {
+    es: "Este campo acepta un valor nuevo, fuera de la lista.",
+  },
+  "Permitir valor novo": { es: "Permitir valor nuevo" },
+  "Permitir valor novo (fora da lista)": { es: "Permitir valor nuevo (fuera de la lista)" },
+  "Importar opções (CSV)": { es: "Importar opciones (CSV)" },
+  "value,label,apelidos — uma opção por linha": {
+    es: "value,label,alias — una opción por línea",
+  },
+  "Importar opções do campo": { es: "Importar opciones del campo" },
+  "opções importadas.": { es: "opciones importadas." },
+  "já existiam.": { es: "ya existían." },
+  "Nenhuma opção nova para importar.": { es: "Ninguna opción nueva para importar." },
+  "Esse valor não está na lista. Escolha uma das opções.": {
+    es: "Ese valor no está en la lista. Elija una de las opciones.",
+  },
   // #2813 — o painel "Iniciar conversa" do Inbox.
   "Nova conversa": { es: "Nueva conversación" },
   "Diga para quem e o que dizer. O canal de saída é você quem escolhe quando há mais de um número.": {
