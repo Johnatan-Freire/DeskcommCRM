@@ -21,7 +21,7 @@ import type { BoardData, Pipeline, Stage } from "@/lib/kanban/types";
 import { StageColumn } from "./StageColumn";
 import { LeadDossier } from "./LeadDossier";
 import { RetomarComoNovoNegocioDialog } from "./RetomarComoNovoNegocioDialog";
-import { camposDoFunil } from "@/lib/leads/campos-do-funil";
+import { camposDoFunil, camposPorEscopo } from "@/lib/leads/campos-do-funil";
 
 /**
  * As colunas de estágio rolam na horizontal (`overflow-x-auto`) sem nenhum
@@ -412,7 +412,7 @@ export function KanbanBoard({
           onOpenChange={(v: boolean) => !v && setDossieId(null)}
           lead={leadDoDossie}
           pipelineId={pipelineId}
-          fieldDefs={camposDoFunil(data.pipeline.settings ?? null)}
+          fieldDefs={camposPorEscopo(camposDoFunil(data.pipeline.settings ?? null), "negocio")}
           stageName={
             data.stages.find((s) => s.id === leadDoDossie.stage_id)?.name ?? "—"
           }

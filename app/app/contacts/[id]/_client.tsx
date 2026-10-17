@@ -28,7 +28,7 @@ import { useUnblockContact } from "@/hooks/contacts/useUnblockContact";
 import { useHierarquiaDoAnuncio } from "@/hooks/contacts/useHierarquiaDoAnuncio";
 import { useAuth } from "@/hooks/auth/AuthProvider";
 import { useDefaultPipeline } from "@/hooks/pipelines/useDefaultPipeline";
-import { camposDoFunil } from "@/lib/leads/campos-do-funil";
+import { camposDoFunil, camposPorEscopo } from "@/lib/leads/campos-do-funil";
 import { ROLE_RANK } from "@/lib/auth/types";
 import { TimelineView } from "@/components/contacts/TimelineView";
 import { EditContactDialog } from "@/components/contacts/EditContactDialog";
@@ -388,7 +388,10 @@ export function ContactDetailClient({ contactId }: Props) {
         contact={contact}
         open={editOpen}
         onOpenChange={setEditOpen}
-        customFieldDefs={camposDoFunil(pipelineQuery.data?.pipeline.settings ?? null)}
+        customFieldDefs={camposPorEscopo(
+          camposDoFunil(pipelineQuery.data?.pipeline.settings ?? null),
+          "contato",
+        )}
       />
       <AnonymizeDialog contactId={contactId} open={anonOpen} onOpenChange={setAnonOpen} />
     </div>
