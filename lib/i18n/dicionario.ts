@@ -4051,6 +4051,8 @@ export const DICIONARIO: Traducoes = {
   },
   "Uso por tenant": { es: "Uso por tenant" },
   "Exportar CSV": { es: "Exportar CSV" },
+  "Exportar": { es: "Exportar" },
+  "Exportar vCard": { es: "Exportar vCard" },
   "Invoc. AI": { es: "Invoc. IA" },
   "Custo AI": { es: "Costo IA" },
 

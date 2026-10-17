@@ -925,6 +925,10 @@ export const AUDIT_ACTIONS = [
   // auditável é a saída de dados — QUANTAS linhas saíram, não o que elas dizem
   // (o corpo da mensagem não vai para log nem para metadata, LGPD).
   "conversation.exported",
+  // A tela de Contatos devolvendo a base em CSV/vCard (#2759) — portabilidade,
+  // LGPD art. 18, V. Audita o GESTO com o total de linhas e os filtros que
+  // valiam, nunca o termo de busca.
+  "contacts.exported",
 ] as const;
 
 /** Um código de auditoria. Derivado de `AUDIT_ACTIONS` — não redigite a lista. */
