@@ -32,7 +32,7 @@ fonte só (`lib/onboarding/passos.ts`) — eram três listas que discordavam. Ga
 | J1.1 | Login com credenciais do bootstrap | entra e é redirecionado pro `/onboarding` (org sem `onboarded_at`) |
 | J1.2 | Login com senha errada | mensagem clara "Email ou senha incorretos", sem stack |
 | J1.3 | Welcome: termos não aceitos | botão avança desabilitado |
-| J1.4 | Welcome: nome da org + timezone salvos | grava `display_name`/`timezone`, avança pro WhatsApp |
+| J1.4 | Welcome: nome da org + timezone salvos | grava `display_name`/`timezone`, avança pro WhatsApp; o seletor continua funcionando se a tradução do navegador substituir o texto selecionado (`components/ui/select.test.tsx`, `tests/e2e/vps-fresh-onboarding.spec.ts`). Evidência local com tradução simulada e dados sintéticos: `evidence/select-traducao-do-navegador/localizacao-selecionada.png` |
 | J1.5 | Connect WhatsApp: WAHA ativo → QR aparece | sessão criada, QR renderiza via proxy, poll de status roda |
 | J1.6 | Connect WhatsApp: "Pular por enquanto" | avança pro step correto (setup-ai quando Nuvemshop off) |
 | J1.7 | Setup IA: criar agente default | `ai_agents` criado **e a versão publicada aponta para o provedor que a instalação escolheu**, com o modelo curado DAQUELE provedor; avança. **Sem chave de IA** (o `install.sh` deixa pular, e é o ambiente da VPS fresca no CI): o agente nasce rascunho, sem versão, o aviso nomeia o provedor e "Continuar sem publicar" avança para "Onde ele organiza" (`tests/e2e/vps-fresh-onboarding.spec.ts`) |
