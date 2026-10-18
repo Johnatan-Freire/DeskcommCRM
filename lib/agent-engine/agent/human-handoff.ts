@@ -498,6 +498,7 @@ async function corpoDaCentral(
  * tentou, nem o que o cliente pediu com as palavras dele.
  */
 export const requestHumanHandoffInputSchema = z.strictObject({
+  motivo_codigo: z.enum(['requested_human', 'critical_stage']).optional(),
   reason: z.string().min(1).max(500).optional(),
   por_que: z.string().min(1).max(500).optional(),
   o_que_tentei: z
@@ -513,7 +514,8 @@ export const requestHumanHandoffInputSchema = z.strictObject({
 });
 
 const PAYLOAD_TEACHING =
-  'Campos aceitos: por_que (por que você está passando, em uma frase), o_que_tentei (lista curta ' +
+  'Campos aceitos: motivo_codigo (requested_human para pedido de uma pessoa; critical_stage para ' +
+  'uma etapa do atendimento que exige finalização humana), por_que (por que você está passando, em uma frase), o_que_tentei (lista curta ' +
   'do que você já tentou, com o desfecho de cada um), cliente_quer (o que a pessoa está pedindo, ' +
   'nas palavras dela). `reason` ainda é aceito como sinônimo de por_que. Nada além disso. Lead, ' +
   'organização e conversa vêm do runtime, nunca do payload da tool.';
@@ -572,6 +574,9 @@ export async function applyRequestHumanHandoff(
   // os dois está declarando o mesmo campo duas vezes.
   const declarado = parsed.data;
   const porQue = declarado.por_que ?? declarado.reason ?? null;
+  // Ausente = comportamento legado. O código classifica a passagem, sem
+  // escolher destino nem alterar a autoridade da ferramenta.
+  const motivoCodigo = declarado.motivo_codigo ?? 'requested_human';
   const briefing = montarBriefingDaPassagem({
     checkpoint: opts.contextoDoTurno?.checkpoint ?? null,
     declaradoPeloModelo: {
@@ -584,7 +589,7 @@ export async function applyRequestHumanHandoff(
     ...(opts.contextoDoTurno?.declaracaoDoTurno !== undefined
       ? { declaracaoDoTurno: opts.contextoDoTurno.declaracaoDoTurno }
       : {}),
-    motivo: { codigo: 'requested_human', texto: porQue },
+    motivo: { codigo: motivoCodigo, texto: porQue },
   });
 
   // #2210: o handoff só carrega a marca quando a causa é a falta de texto —
@@ -598,9 +603,9 @@ export async function applyRequestHumanHandoff(
     : null;
 
   await performHumanHandoff(db, ids, {
-    reason: porQue ?? 'requested_human',
+    reason: porQue ?? motivoCodigo,
     conversationSummary: briefing.body,
-    passagem: { origem: 'ferramenta_do_modelo', motivoCodigo: 'requested_human', briefing },
+    passagem: { origem: 'ferramenta_do_modelo', motivoCodigo, briefing },
     ...(opts.avisoAoLead !== undefined ? { avisoAoLead: opts.avisoAoLead } : {}),
     ...(derivacaoPendente !== null ? { derivacaoPendente } : {}),
     log: opts.log,
