@@ -4023,6 +4023,8 @@ export type Database = {
           name: string | null
           organization_id: string
           phone_lookup_at: string | null
+          name_lookup_at: string | null
+          address_book_name: string | null
           phone_number: string | null
           social_identity: string | null
           source: string
@@ -4064,6 +4066,8 @@ export type Database = {
           name?: string | null
           organization_id: string
           phone_lookup_at?: string | null
+          name_lookup_at?: string | null
+          address_book_name?: string | null
           phone_number?: string | null
           social_identity?: string | null
           source?: string
@@ -4105,6 +4109,8 @@ export type Database = {
           name?: string | null
           organization_id?: string
           phone_lookup_at?: string | null
+          name_lookup_at?: string | null
+          address_book_name?: string | null
           phone_number?: string | null
           social_identity?: string | null
           source?: string

@@ -33,7 +33,7 @@ import { comandoDaConversa, ROTULO_DO_MOTIVO } from "@/lib/inbox/comando-da-conv
 import { ReassignDialog } from "@/components/inbox/ReassignDialog";
 import { SnoozeButton } from "@/components/inbox/SnoozeButton";
 import type { ConversationWithContact } from "@/hooks/inbox/useConversationsRealtime";
-import { rotuloDoContato } from "@/lib/contacts/rotulo-do-contato";
+import { rotuloParaAEquipe } from "@/lib/contacts/rotulo-do-contato";
 import { phoneForDisplay } from "@/lib/channels/phone-variants";
 import { rotuloDoCanalDaConversa } from "@/lib/channels/estado";
 
@@ -101,7 +101,7 @@ export function ConversationHeader({
   const [confirmArquivarOpen, setConfirmArquivarOpen] = useState(false);
 
   const c = conversation.contacts ?? null;
-  const displayName = rotuloDoContato(c, t);
+  const displayName = rotuloParaAEquipe(c, t);
   /**
    * POR ONDE ESTA CONVERSA ENTROU — o mesmo rótulo da lista e da tela de
    * canais (#2383). `null` quando não há canal, e aí o badge não existe.

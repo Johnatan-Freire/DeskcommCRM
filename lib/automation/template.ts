@@ -31,8 +31,19 @@ function campoPersonalizadoDoLead(context: Record<string, unknown>, nome: string
   return Array.isArray(valor) ? valor.join(", ") : valor;
 }
 
+/**
+ * Campos do contato que SÓ A EQUIPE vê e que nenhuma mensagem renderiza, nem
+ * pedidos pelo caminho (`{{contact.address_book_name}}`). O contexto da
+ * automação carrega a linha inteira do contato (`select("*")`), então a guarda
+ * mora aqui, onde todo texto de automação e de modelo de mensagem passa. O nome
+ * da agenda é o rótulo que alguém da empresa escreveu no celular e pode ser um
+ * apelido interno (decisão do mantenedor no PR #2439).
+ */
+const SO_DA_EQUIPE = new Set(["contact.address_book_name"]);
+
 export function renderTemplate(template: string, context: Record<string, unknown>): string {
   return template.replace(/\{\{\s*([\w.]+)\s*\}\}/g, (_m, path: string) => {
+    if (SO_DA_EQUIPE.has(path)) return "";
     // `{{nome}}` fala com a pessoa: segue a régua única de nome de gente
     // (cadastrado, depois o perfil do WhatsApp). Contato que chega pelo
     // WhatsApp tem `name` nulo — só `contact.name` saía "Olá , ...".
