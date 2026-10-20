@@ -200,7 +200,7 @@ export function SignupForm({ convite }: { convite?: ConviteDoSignup }) {
         </div>
       )}
       <div className="space-y-1.5">
-        <Label htmlFor="email">Email</Label>
+        <Label htmlFor="email">{t("Email")}</Label>
         <Input
           id="email"
           type="email"

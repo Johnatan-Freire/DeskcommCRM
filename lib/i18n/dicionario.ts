@@ -12958,6 +12958,15 @@ export const DICIONARIO: Traducoes = {
   "A conversa abriu, mas a primeira mensagem não pôde ser enviada.": {
     es: "La conversación se abrió, pero el primer mensaje no se pudo enviar.",
   },
+  // Textos que as telas escreviam crus, fora de t(), e que por isso saíam iguais em todo idioma. Os rótulos do
+  // vocabulário do funil eram inglês em toda língua (Lead, Deal, Won, Lost): a chave é o próprio inglês, para o
+  // português seguir mostrando o mesmo; o atalho de exemplo das respostas rápidas era « oi »; o título de excluir um
+  // fluxo leva o nome entre as aspas do idioma.
+  Deal: { es: "Negocio" },
+  Won: { es: "Ganado" },
+  Lost: { es: "Perdido" },
+  oi: { es: "hola" },
+  "Excluir “{nome}”?": { es: "¿Eliminar “{nome}”?" },
   // #3006 — "usar como exemplo para a IA": a conversa marcada vira material do
   // agente (opt-in de LGPD). O selo fica curto de propósito: ele divide a faixa
   // com as etiquetas do contato, e o verbo inteiro mora no `title` do controle.
