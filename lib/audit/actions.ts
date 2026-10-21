@@ -947,6 +947,10 @@ export const AUDIT_ACTIONS = [
   // LGPD art. 18, V. Audita o GESTO com o total de linhas e os filtros que
   // valiam, nunca o termo de busca.
   "contacts.exported",
+  // "Sincronizar agenda do celular" (#2736): o gesto de IMPORTAR em bloco a
+  // agenda do aparelho pareado — mesmo porquê do `contacts.imported` de planilha
+  // ("quem trouxe esta base, e quando"), agora com o número de qual conexão veio.
+  "contacts.synced_from_phone",
 ] as const;
 
 /** Um código de auditoria. Derivado de `AUDIT_ACTIONS` — não redigite a lista. */

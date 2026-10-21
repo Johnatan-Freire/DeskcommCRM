@@ -36,7 +36,7 @@ import { AnonymizeDialog } from "@/components/contacts/AnonymizeDialog";
 import { PropostasDeDado } from "@/components/contacts/PropostasDeDado";
 import { ConversaNoDossie } from "@/components/kanban/ConversaNoDossie";
 import { rotuloParaAEquipe } from "@/lib/contacts/rotulo-do-contato";
-import { origemDoContato } from "@/lib/leads/origem-do-contato";
+import { ORIGEM_AGENDA_DO_CELULAR, origemDoContato } from "@/lib/leads/origem-do-contato";
 import { phoneForDisplay } from "@/lib/channels/phone-variants";
 import { DialButton } from "@/components/voice/DialButton";
 
@@ -298,7 +298,9 @@ export function ContactDetailClient({ contactId }: Props) {
               */}
               <div>
                 <dt className="text-xs uppercase text-muted-foreground">{t("Origem")}</dt>
-                <dd className="mt-1">{origem.origem}</dd>
+                <dd className="mt-1">
+                  {origem.origem === ORIGEM_AGENDA_DO_CELULAR ? t("Agenda do celular") : origem.origem}
+                </dd>
               </div>
               <NivelDaOrigem rotulo={t("Campanha")} valor={origem.campanha} />
               <NivelDaOrigem rotulo={t("Conjunto")} valor={origem.conjunto} />
