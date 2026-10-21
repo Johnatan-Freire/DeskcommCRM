@@ -23,8 +23,11 @@ import { DEFAULT_VISIBILITY_MODE, ROLE_RANK, type VisibilityMode } from "@/lib/a
 import { routingConfigSchema } from "@/lib/schemas";
 import { createClient } from "@/lib/supabase/server";
 import { loadChannelRoutingSettings } from "@/lib/routing/channel-policies";
+import { podeAdministrarEmpresa } from "@/lib/auth/pode-administrar-empresa";
+import { telefoneDeFichaVaziaLigado } from "@/lib/schemas/settings";
 import { ChannelRoutingForm } from "./_channels-form";
 import { AtendimentoForm } from "./_form";
+import { TelefoneDeFichaVazia } from "./_telefoneDeFichaVazia";
 import { traduzir } from "@/lib/i18n/dicionario";
 
 export const dynamic = "force-dynamic";
@@ -47,12 +50,15 @@ export default async function AtendimentoSettingsPage() {
   const settings = ((data?.settings as Record<string, unknown> | null) ?? {}) as {
     routing?: unknown;
     visibility_mode?: VisibilityMode;
+    crm?: unknown;
   };
   // `.catch(...)`: config antiga ou corrompida no jsonb não pode derrubar a
   // tela que serve justamente para consertá-la.
   const routing = routingConfigSchema.catch(routingConfigSchema.parse({})).parse(settings.routing ?? {});
   const idioma = user.idioma;
   const channels = await loadChannelRoutingSettings(supabase, activeOrg.orgId);
+  // #2593 — a opção lida pela MESMA régua que o servidor aplica.
+  const telefoneDeFichaVazia = telefoneDeFichaVaziaLigado({ crm: settings.crm });
 
   return (
     <div className="flex h-full flex-col gap-6 overflow-y-auto p-6">
@@ -72,6 +78,11 @@ export default async function AtendimentoSettingsPage() {
         initial={{ ...routing, visibility_mode: settings.visibility_mode ?? DEFAULT_VISIBILITY_MODE }}
       />
       <ChannelRoutingForm initial={channels} />
+      <TelefoneDeFichaVazia
+        ligada={telefoneDeFichaVazia}
+        idioma={idioma}
+        podeMudar={podeAdministrarEmpresa(user, activeOrg)}
+      />
     </div>
   );
 }

@@ -929,6 +929,20 @@ export const AUDIT_ACTIONS = [
   // auditável é a saída de dados — QUANTAS linhas saíram, não o que elas dizem
   // (o corpo da mensagem não vai para log nem para metadata, LGPD).
   "conversation.exported",
+  // #2593: o TELEFONE de uma ficha SEM número foi GRAVADO na hora, sem decisão
+  // humana, quando o agente ouviu o número na conversa — `proporDadoDoContato`
+  // só toma este caminho com `phone_number` vazio e valor em E.164, e a trava
+  // é o `phone_number is null` no UPDATE. Distinguir de `field_proposed` é o
+  // que permite responder "quantos números entraram sozinhos, e de quem".
+  "contact.field_auto_applied",
+
+  // #2593, item 1 do CR: um administrador ligou ou desligou a escrita
+  // automática do telefone de ficha vazia (`organizations.settings.crm
+  // .telefone_de_ficha_vazia`). Precisa de código próprio porque é a DECISÃO
+  // que passa a permitir escrita sem decisão humana: quem auditar a ficha de um
+  // cliente precisa encontrar o ato administrativo que abriu a porta, e não só
+  // as gravações que ela deixou passar.
+  "crm.telefone_de_ficha_vazia_alterado",
   // A tela de Contatos devolvendo a base em CSV/vCard (#2759) — portabilidade,
   // LGPD art. 18, V. Audita o GESTO com o total de linhas e os filtros que
   // valiam, nunca o termo de busca.
