@@ -53,7 +53,6 @@ const CONTATO = {
   cpf_hash: null,
   birthdate: null,
   is_blocked: false,
-  is_personal: false,
   blocked_reason: null,
   is_anonymized: false,
   anonymized_at: null,
@@ -68,7 +67,6 @@ const CONTATO = {
   updated_at: "2026-09-14T10:00:00.000Z",
   last_activity_at: null,
   first_service_at: null,
-  ai_opt_out: false,
 } satisfies Contact;
 
 function envolver(ui: ReactNode) {
