@@ -951,6 +951,8 @@ export const AUDIT_ACTIONS = [
   // agenda do aparelho pareado — mesmo porquê do `contacts.imported` de planilha
   // ("quem trouxe esta base, e quando"), agora com o número de qual conexão veio.
   "contacts.synced_from_phone",
+  // Reenvio de mensagem que falhou, na mesma linha (POST /api/v1/messages/{id}/retry).
+  "message.retried",
 ] as const;
 
 /** Um código de auditoria. Derivado de `AUDIT_ACTIONS` — não redigite a lista. */

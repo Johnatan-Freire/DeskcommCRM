@@ -1106,6 +1106,7 @@ jobs:
         celular-cabe-na-tela.spec.ts
         skills-versao-nova-do-catalogo.spec.ts
         atender-pelo-celular.spec.ts
+        reenvio-pelo-celular.spec.ts
 
       # ─── FORA_DO_CI — as duas que ficaram, e o motivo continua onde sempre ───
       #

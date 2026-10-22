@@ -3441,3 +3441,137 @@ respondeu; se a mensagem do fluxo saiu da janela do histórico (`historyLimit`),
 vale o horário, no segundo. Uma inbound sem texto acorda o nó, não é
 classificada, e a carência recomeça desse despertar (comportamento anterior do
 motor, não mexido aqui).
+
+## J39 — O fluxo de silêncio espera antes de recomeçar para quem já passou por ele `[P1]` (2026-09-27)
+
+Contexto do código: num fluxo de silêncio com `cancel_on_reply`, cada resposta do
+cliente cancelava a inscrição e a varredura seguinte o inscrevia de novo, do
+primeiro passo, depois do limiar (medido numa instalação real: uma oferta nova a
+cada "obrigado"; dois contatos em laço de ~95 reinscrições). O cooldown da
+varredura não segura esse caso: ele conta o limiar desde o fim da tentativa, e a
+resposta que encerra a inscrição é a mesma que começa o silêncio. A pausa
+(`trigger_config.params.reentry_pause_minutes`, regra em
+`lib/followup/pausa-de-reentrada.ts`) só vale se a TELA a grava e a preserva — o
+formulário do gatilho remonta os `params` a partir dos campos.
+
+Spec: `tests/e2e/pausa-de-reentrada.spec.ts`.
+
+| # | Caso | Expectativa | Resultado |
+|---|------|-------------|-----------|
+| J39.1 | Pôr 48 h no campo «Pausa antes de recomeçar (horas)» e salvar | o banco guarda `reentry_pause_minutes: 2880`; o botão diz «pausa de 48 h» | **PASS pela tela** — Evidência: `evidence/triagem-16set-l12/pausa-01-campo-preenchido.png`, `evidence/triagem-16set-l12/pausa-02-rotulo-com-pausa.png` |
+| J39.2 | Editar OUTRO campo do gatilho | a pausa sobrevive | **PASS pela tela** |
+| J39.3 | Zerar a pausa | a chave sai do gatilho (comportamento de antes) | **PASS pela tela** |
+| J39.4 | Quem encerrou uma inscrição há menos que a pausa / quem nunca passou / conversa com pessoa no comando / sem pausa (só o cooldown) | pula / entra / pula (salvo `handoff_policy='allow'`) / entra de novo no limiar | **PASS (invariante)** — `tests/invariants/followup-silence-sweep.test.ts` |
+| J39.5 | Teto do silêncio: 5 com mínimo 10 é recusado; 60 é gravado e o botão mostra «10–60 min»; na varredura, quem está calado há 20 min entra e há 3 h fica de fora | tela + invariante | **PASS pela tela** — Evidência: `evidence/triagem-16set-l12/silencio-01-teto-de-60.png`; invariante no mesmo arquivo de J39.4 |
+| J39.6 | Pausa de 24 h contada do último envio (a opção só aparece com pausa > 0) | o banco guarda `reentry_pause_basis: "ultimo_envio"`; o botão diz «no máximo 1× a cada 24 h»; desligar tira a chave; na varredura, quem encerrou há 25 h e escreveu há 20 min entra (pela base padrão, fica na pausa) | **PASS pela tela** — Evidência: `evidence/triagem-16set-l12/pausa-03-base-do-ultimo-envio.png`; invariante no mesmo arquivo de J39.4 |
+
+## J40 — O pino de localização chega com a rua e a cidade aproximadas `[P1]` (2026-09-28)
+
+Contexto: medido numa loja, 10 de 10 pinos do mês chegaram só com coordenadas —
+o agente lia um link e perguntava a cidade de novo. Com a chave da Geocoding API
+(Agente de IA › Provedores, cartão «Mapas (Google)»; tabela
+`map_provider_credentials`, migration 0504; regra em `lib/mapas/`), o pino ganha
+o endereço aproximado no corpo (o que o agente lê) e no cartão do pino da
+conversa. Os nomes vêm no idioma da organização (`organizations.locale`, pelo
+registro de idiomas).
+
+Spec: `tests/e2e/mapas-em-provedores.spec.ts`.
+
+| # | Caso | Expectativa | Resultado |
+|---|------|-------------|-----------|
+| J40.1 | Admin cola a chave e grava | o banco guarda a chave CIFRADA e os 4 últimos; a tela mostra «Chave gravada ···XXXX», limpa o campo, e a chave não aparece no HTML | **PASS pela tela** — Evidência: `evidence/triagem-16set-l12/mapas-01-chave-colada.png` |
+| J40.2 | «Testar» com chave recusada pelo Google | a tela explica a recusa (API não habilitada × chave recusada são mensagens diferentes), nunca «Funcionou» | **PASS pela tela** — Evidência: `evidence/triagem-16set-l12/mapas-02-teste-explica-a-recusa.png` |
+| J40.3 | Remover a chave | a linha sai do banco e o cartão volta a «Sem chave» | **PASS pela tela** |
+| J40.4 | Pino recebido com chave / sem chave / Google fora | corpo com «… (aprox.)» / corpo idêntico ao de antes e nenhuma chamada ao Google / corpo de antes | **PASS (unit)** — `tests/unit/mapas-pino-com-endereco.test.ts` |
+| J40.5 | A tabela não é servida pelo PostgREST | `anon`/`authenticated` sem privilégio, `permission denied`, RLS ligada sem policy | **PASS (invariante)** — `tests/invariants/credencial-de-mapas-e-server-side.test.ts` |
+| J40.6 | O que o Google diz × o endereço anotado em 8 pedidos confirmados (28/09/2026, numa instalação real) | município 8/8, região 8/8, localidade 7/8 (na zona rural virou o povoado), rua 3/5, bairro 1/8, número interpolado → a cidade é o MUNICÍPIO; bairro e número não saem | **MEDIDO em produção** (fora deste repositório); regra em `tests/unit/mapas-pino-com-endereco.test.ts` |
+| J40.7 | O pino com endereço aproximado, aberto na conversa pela equipe | o cartão do pino mostra «Rua, Cidade, Estado (aprox.)», com o texto inteiro no `title` (o cartão corta com …) e o toque abre as COORDENADAS no mapa | **PASS pela tela** — Evidência: `evidence/triagem-16set-l12/mapas-03-pino-na-conversa.png` |
+| J40.8 | A API do canal intermediado não responde a tempo na ingestão do pino (medido 29/09/2026: timeout duas vezes seguidas) | a mensagem entra com o marcador e pede nova busca (`message.location_retry_requested`); 1 min depois, e a cada 2 min até 15, busca de novo e grava tipo `location` + link (+ endereço aproximado com chave); nunca rebaixa um pino que já tem coordenadas; desiste sem virar incidente | **PASS (unit)** — `tests/unit/pino-reintento.test.ts`, `tests/unit/channel-ingest-zernio.test.ts` |
+
+### Dados externos — o que o assistente pode ver
+
+| Prioridade | Caso | Prova |
+|---|---|---|
+| [P0] | Conexão nova nasce sem nada liberado e o painel leva a pessoa a escolher | `tests/e2e/integracao-dados-fontes-liberadas.spec.ts` passos 2 e 3 (catálogo simulado na rede; o catálogo real contra um PostgreSQL fica para a prova na VPS) |
+| [P0] | Marcar, descrever e salvar; a lista persiste | mesmo spec, passos 3 e 4 |
+| [P1] | Coluna do cliente travada; modo "tudo" com aviso forte | mesmo spec, passos 3 e 5 |
+| [P1] | Quem só lê vê a lista e não edita | mesmo spec, passo 6 |
+| [P2] | Fonte que sumiu do banco, catálogo fora do ar | só teste de componente (`PainelDeFontes.test.tsx` 6 e 9) |
+
+## J42 — Gestão de tenants pelo admin da plataforma `[P1]` (2026-09-29, recortada em 2026-10-05)
+
+Corrigir o e-mail de acesso de um membro, editar o cadastro e excluir um tenant pela
+tela de `/admin/tenants/<id>` — PR #1967 (@Draven9), recortado: a suspensão é a da
+`main` (J37/`suspensao-administrativa.spec.ts`) e saiu desta jornada. Spec:
+`tests/e2e/admin-gestao-de-tenants.spec.ts` (job e2e, parte 5; cria o próprio tenant
+e o próprio login e se desfaz deles), em instalação sem envio de e-mail configurado.
+
+**Estado da medição: os casos abaixo ainda NÃO rodaram na forma recortada.** A spec foi
+reescrita sem rodar localmente (pedido do dono: máquina sem memória para `next build` +
+`next start`); a primeira medição é a do job `e2e` deste PR. As fotos versionadas
+`evidence/admin-gestao-de-tenants/01-ativo.png`,
+`evidence/admin-gestao-de-tenants/02-email-corrigido.png`,
+`evidence/admin-gestao-de-tenants/04-dados-editados.png`,
+`evidence/admin-gestao-de-tenants/06-confirmacao-da-exclusao.png` e
+`evidence/admin-gestao-de-tenants/07-lista-depois.png` são da versão de 29/09 do PR
+(renomeadas para a numeração nova) e são regravadas na primeira rodada; as da Central
+e da recusa por cobrança só existem depois dela. A transação da exclusão tem prova
+própria em `tests/invariants/gestao-de-tenants.test.ts` e
+`tests/invariants/exclusao-recusa-cobranca.test.ts`.
+
+| # | Caso | Expectativa | Resultado |
+|---|------|-------------|-----------|
+| J42.1 | Tenant ativo | cabeçalho com o nome; o e-mail de login do membro na lista; sem "Excluir tenant", com a instrução "suspenda-o primeiro" | a medir (CI) |
+| J42.2 | Corrigir o e-mail de acesso | a lista mostra o novo; o login com o NOVO entra em `/app`; o ANTIGO é recusado; a troca segue sem envio de e-mail configurado | a medir (CI) |
+| J42.3 | A empresa fica sabendo | a Central (`/app/ai/inbox`) do tenant, vista pelo membro, mostra UM aviso com o nome da pessoa, sem nenhum `@`, e o botão "Abrir a equipe" | a medir (CI) |
+| J42.4 | Editar dados | o nome novo aparece no cabeçalho e está gravado no banco | a medir (CI) |
+| J42.5 | Suspensa por cobrança | sem "Excluir tenant", com a explicação; `POST …/delete` → `409 exclusao_com_cobranca_pendente`; a organização continua no banco | a medir (CI) |
+| J42.6 | Suspensa administrativa pela tela, e excluída | botão travado com identificador errado; com o certo, a organização some do banco, a lápide `organization.deleted` fica e o login que só pertencia a ela é removido | a medir (CI) |
+
+Não provado pela tela: o desligamento externo da exclusão (WhatsApp, voz, loja), que
+agora só acontece depois do commit — o tenant de teste não tem canal conectado; a ordem
+é medida por unidade em `lib/tenants/exclusao.test.ts`. O e-mail ao endereço antigo,
+que sem envio configurado não sai: medido por unidade na rota. O aviso em CADA empresa em
+que o login tem acesso ativo (não só na do path) e o 404 para vínculo revogado — com o
+botão "Alterar e-mail" travado para quem tem o selo "Acesso revogado": medidos por
+unidade na rota (`…/members/[userId]/email/route.test.ts`). A exclusão interrompida depois
+do commit (resposta perdida, processo reiniciado) e retomada pela segunda tentativa a
+partir da lápide, com o 500 que não diz "nada foi apagado": medida por unidade em
+`lib/tenants/exclusao.test.ts` e `…/delete/route.test.ts`, e o inventário da lápide em
+`tests/invariants/gestao-de-tenants.test.ts`.
+
+## J50 — Reenviar uma mensagem que falhou `[P0]` (2026-10-21)
+
+Contexto: ADR-0006, fase F2 ("Atende pelo celular"), PR C. Antes, a bolha que
+falhava mostrava só «Falhou», com o motivo num Tooltip que o dedo não abre, e não
+havia como enviar de novo sem redigitar (e arriscar mandar em dobro). Agora a bolha
+diz o motivo em frase de tela e, quando a regra permite, oferece «Tentar de novo».
+Por que P0: o atendente no celular, com uma mão, não tem outra saída; e mandar em
+dobro ao cliente é o pior erro que a tela pode induzir.
+
+Regra única em `lib/messaging/reenvio.ts` (lida pela rota e pela bolha): `seguro`
+quando nada saiu, `confirmar` quando pode ter saído (o desconhecido cai aqui),
+`nenhum` em voo, já saída, IA/automação, ou quando reenviar não resolve. A rota
+`POST /api/v1/messages/{id}/retry` reenvia na MESMA linha, travada pelo
+`updated_at` lido (dois toques = um envio), e audita `message.retried`.
+
+Spec: `tests/e2e/reenvio-pelo-celular.spec.ts` (parte 5), 390x844 com toque, login
+`agent`. Evidência: `evidence/reenvio-pelo-celular-20261021/` (gravada pelo CI).
+
+| # | Caso | Expectativa | Resultado |
+|---|------|-------------|-----------|
+| J50.1 `[P0]` | A bolha que falhou diz o motivo | falha produzida pelo envio do composer em canal desativado; «Este número está desativado. Reative em Conexões para enviar.» à vista, sem código do canal nem endereço; «Tentar de novo» ≥ 44×44 e dentro dos 390px; a setinha de opções pega o dedo 10px além do desenho | a medir (CI) + UNIT `MessageBubble.test` |
+| J50.2 `[P0]` | Tentar de novo muda a MESMA bolha | canal reativado em `STARTING`; o toque leva a bolha a «Não enviada — sem conexão» (nunca «Aguardando conexão»: ninguém reenvia sozinho a mensagem do atendente), sem «Falhou», com o botão ainda lá; a contagem de bolhas não muda; como nada saiu, a bolha fica antes da mensagem que o cliente mandou depois da falha (só o envio aceito vai para o fim do fio) | a medir (CI) + UNIT `mensagem-retry-rota` |
+| J50.3 | Pode ter chegado: pede confirmação | `sending` posto à mão com 10 min, `failed/send_timeout` gravado pelo cron `recover-stuck-messages`; o toque abre o aviso «Confira no WhatsApp do cliente…» dentro da tela; «Cancelar» mantém «Falhou»; «Enviar de novo» reenvia | a medir (CI) + UNIT |
+| J50.4 | Mensagem da IA que falhou | motivo à vista, sem botão (o motor da IA tem quem tente de novo) | a medir (CI) + UNIT `reenvio.test` |
+| J50.5 | Dois toques ao mesmo tempo | a trava pelo `updated_at` deixa passar um só (409 `reenvio_em_curso` no outro) | UNIT `mensagem-retry-rota` |
+| J50.6 | Recusa antes do envio (contato bloqueado, pessoal) | a linha volta ao estado lido e o erro chega à tela | UNIT `mensagem-retry-rota` |
+| J50.7 | O mesmo texto depois de erro de rede | o composer reaproveita a chave de idempotência por até 2 min depois do erro; o servidor devolve o recibo em vez de mandar de novo. Mais tarde, ou com o primeiro ainda em voo, o mesmo texto é mensagem nova | UNIT `use-send-message-idempotencia` |
+
+**Laço de retorno (sistema vivo):** falhar de novo devolve a bolha a «Falhou» com o
+motivo novo; cada tentativa fica no audit (`message.retried`, com o status, o
+código e a hora anteriores e se houve confirmação).
+
+**NÃO COBERTO, declarado:** que o canal de verdade entrega o reenvio (o CI não tem
+WhatsApp; o caminho termina em «Não enviada — sem conexão»); o toque num iPhone e num
+Android reais; o reenvio de mídia pela tela (coberto só pela regra e pela rota).
