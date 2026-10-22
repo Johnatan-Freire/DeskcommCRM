@@ -197,6 +197,9 @@ export const DICIONARIO: Traducoes = {
     es: "Desactivado, arrastrar un negocio perdido o ganado a una etapa abierta reabre el mismo negocio. Activado, el cerrado queda como está y el tablero ofrece crear un nuevo intento con el mismo contacto.",
   },
   "Motivo do ganho": { es: "Motivo del negocio ganado" },
+  "A etapa escolhida exige alguns dados. Preencha para continuar.": {
+    es: "La etapa elegida exige algunos datos. Complétalos para continuar.",
+  },
   "Preencha os campos obrigatórios antes de continuar: {campos}.": {
     es: "Completa los campos obligatorios antes de continuar: {campos}.",
   },
