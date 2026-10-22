@@ -213,3 +213,10 @@ export async function resolverDestinosDosAvisos<T extends ReferenciaDoAviso>(
     return { ...item, destination };
   });
 }
+
+/**
+ * O papel mínimo que alcança a Central de avisos: as três rotas de `/api/v1/ai/inbox`
+ * exigem este papel (`requireRole("agent", …)` no fork), e o catálogo de navegação usa o
+ * mesmo para mostrar o sino e a entrada "Alertas" (#3195 do upstream).
+ */
+export const PAPEL_MINIMO_DA_CENTRAL: Role = "agent";
