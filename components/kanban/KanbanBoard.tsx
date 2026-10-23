@@ -386,24 +386,35 @@ export function KanbanBoard({
           className="flex min-h-0 flex-1 items-start gap-3 overflow-auto px-4 pb-4"
           data-quadro-do-funil
         >
-          {data.stages.map((stage) => (
-            <StageColumn
-              key={stage.id}
-              stage={stage}
-              leads={grouped.get(stage.id) ?? []}
-              pipelineId={pipelineId}
-              ownerNames={ownerNames}
-              coolingIds={coolingIds}
-              reactivations={reactivations}
-              pulses={pulsesProp ?? queryResult.pulses}
-              canonicalTags={canonicalTags}
-              selectedLeadIds={selectedLeadIds}
-              onSelectMany={handleSelectMany}
-              onOpen={setDossieId}
-              podeRenomear={podeRenomearEtapa}
-              onRenomear={(nome) => renameStage.mutate({ stageId: stage.id, name: nome })}
-            />
-          ))}
+          {/* A FAIXA entre o rolo e as colunas (#3030). O contêiner de fora é o
+              único que rola; esta faixa é quem dá altura às colunas: `min-h-full`
+              (nunca menos que a tela) e `items-stretch` (a mais comprida manda),
+              então a coluna vazia acompanha a rolagem e a área de soltar card
+              com ela. `w-max` mantém a largura do quadro. Não é um rolável novo,
+              e o @hello-pangea/dnd segue com a rolagem automática do arraste. */}
+          <div
+            className="flex min-h-full w-max items-stretch gap-3"
+            data-faixa-das-etapas
+          >
+            {data.stages.map((stage) => (
+              <StageColumn
+                key={stage.id}
+                stage={stage}
+                leads={grouped.get(stage.id) ?? []}
+                pipelineId={pipelineId}
+                ownerNames={ownerNames}
+                coolingIds={coolingIds}
+                reactivations={reactivations}
+                pulses={pulsesProp ?? queryResult.pulses}
+                canonicalTags={canonicalTags}
+                selectedLeadIds={selectedLeadIds}
+                onSelectMany={handleSelectMany}
+                onOpen={setDossieId}
+                podeRenomear={podeRenomearEtapa}
+                onRenomear={(nome) => renameStage.mutate({ stageId: stage.id, name: nome })}
+              />
+            ))}
+          </div>
         </div>
       </div>
       {leadDoDossie && (
