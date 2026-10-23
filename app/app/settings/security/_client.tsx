@@ -33,6 +33,7 @@ export function SecurityClient({
   podeExigirDaEquipe,
   papelMinimo,
   diasDeCarencia,
+  semCodigos = false,
 }: {
   mfaEnrolled: boolean;
   /** A política obriga esta pessoa a ter a verificação? */
@@ -43,9 +44,12 @@ export function SecurityClient({
   papelMinimo: PapelMinimoDeMfa;
   /** `mfa_grace_days` atual, 0..30. */
   diasDeCarencia: number;
+  /** Verificação ligada e nenhum código de recuperação por usar. */
+  semCodigos?: boolean;
 }) {
   const t = useT();
   const [codes, setCodes] = useState<string[] | null>(null);
+  const [gerouAgora, setGerouAgora] = useState(false);
   const [isPending, startTransition] = useTransition();
   const [isSigningOut, startSignOut] = useTransition();
   const [ativando, setAtivando] = useState(false);
@@ -79,6 +83,7 @@ export function SecurityClient({
       const r = await regenerateRecoveryCodes();
       if (r.ok) {
         setCodes(r.recovery_codes);
+        setGerouAgora(true);
         toast.success(t("Novos códigos gerados."));
       } else {
         // O `error` é código (`mfa_not_enrolled`) ou a mensagem crua do banco, em inglês — a tela
@@ -223,6 +228,17 @@ export function SecurityClient({
         </p>
         {codes ? (
           <RecoveryCodesPanel codes={codes} onAcknowledge={() => setCodes(null)} />
+        ) : mfaEnrolled && semCodigos && !gerouAgora ? (
+          <div role="status" className="space-y-3 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
+            <p>
+              {t(
+                "Você está sem códigos de recuperação válidos: os gerados antes da última atualização deixaram de valer, e cada código só vale uma vez. Sem eles, perder o celular tira o seu acesso.",
+              )}
+            </p>
+            <Button size="sm" disabled={isPending} onClick={() => setConfirmRegenerar(true)}>
+              {isPending ? t("Gerando…") : t("Gere novos códigos de recuperação")}
+            </Button>
+          </div>
         ) : (
           <Button
             variant="outline"
