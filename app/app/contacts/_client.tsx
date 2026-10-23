@@ -151,7 +151,7 @@ export function ContactsListClient() {
   );
 
   return (
-    <div className="space-y-4 p-6">
+    <div className="space-y-4 md:p-6">
       <header className="flex flex-wrap items-center justify-between gap-3 sm:gap-4">
         <div className="min-w-0">
           <h1 className="text-2xl font-semibold tracking-tight">{t("Contatos")}</h1>
