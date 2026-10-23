@@ -3,7 +3,7 @@
 import { useLocaleDeData } from "@/hooks/i18n/useLocaleDeData";
 import { format } from "date-fns";
 import { useT } from "@/hooks/i18n/useT";
-import { ArrowBendUpLeft, CaretDown, Check, Checks, Clock, PencilSimple, Robot, Trash, WarningOctagon } from "@/lib/ui/icons";
+import { ArrowBendUpLeft, ArrowBendUpRight, CaretDown, Check, Checks, Clock, PencilSimple, Robot, Trash, WarningOctagon } from "@/lib/ui/icons";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -14,6 +14,7 @@ import {
 import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import type { Message } from "@/lib/types/messaging";
+import { motivoDaFalhaDaMensagem } from "@/lib/inbox/motivo-da-falha";
 import { CitationButton } from "@/components/ai/CitationButton";
 import { MediaRenderer } from "@/components/inbox/media/MediaRenderer";
 import { ContactCard } from "@/components/inbox/media/ContactCard";
@@ -35,6 +36,11 @@ interface Props {
   debugCitations?: boolean;
   /** Escolher esta mensagem para responder "em cima" dela. */
   onResponder?: (m: Message) => void;
+  /**
+   * Escolher esta mensagem para ENCAMINHAR a outra conversa (#2835). O gesto
+   * abre a escolha de destino; quem executa é o hook da tela.
+   */
+  onEncaminhar?: (m: Message) => void;
   /** A mensagem citada por ESTA, quando houver — desenha o fio. */
   citada?: Message | null;
   /**
@@ -102,6 +108,7 @@ export function MessageBubble({
   searchMatch = false,
   debugCitations,
   onResponder,
+  onEncaminhar,
   citada,
   viewerUserId,
   onEditar,
@@ -155,7 +162,10 @@ export function MessageBubble({
     && agora - new Date(message.sent_at).getTime() <= 15 * 60 * 1000;
   const podeApagar = enviadaPeloAtendente && Boolean(onApagar);
   const podeOcultar = !isOutbound && !apagada && Boolean(ocultaNoCrm ? onRestaurar : onOcultar);
-  const temMenu = Boolean(onResponder || (podeEditar && onEditar) || podeApagar || podeOcultar);
+  // Encaminhar vale para qualquer mensagem com conteúdo — recebida ou enviada.
+  // Só não se encaminha o que foi apagado: o conteúdo saiu do ar de propósito.
+  const podeEncaminhar = Boolean(onEncaminhar) && !apagada;
+  const temMenu = Boolean(onResponder || podeEncaminhar || (podeEditar && onEditar) || podeApagar || podeOcultar);
   const reenvio = onReenviar
     ? reenvioDaMensagem(message, { userId: viewerUserId, podeReenviarDeOutros, agora })
     : "nenhum";
@@ -317,6 +327,11 @@ export function MessageBubble({
               {onResponder && (
                 <DropdownMenuItem onSelect={() => onResponder(message)}>
                   <ArrowBendUpLeft size={16} aria-hidden />{t("Responder a esta mensagem")}
+                </DropdownMenuItem>
+              )}
+              {podeEncaminhar && (
+                <DropdownMenuItem onSelect={() => onEncaminhar?.(message)}>
+                  <ArrowBendUpRight size={16} aria-hidden />{t("Encaminhar")}
                 </DropdownMenuItem>
               )}
               {podeEditar && onEditar && (
@@ -493,7 +508,7 @@ export function MessageBubble({
                   </span>
                 </TooltipTrigger>
                 <TooltipContent>
-                  {message.error_message ? t(message.error_message) : (message.error_code ?? t("Erro desconhecido"))}
+                  {motivoDaFalhaDaMensagem(message, t)}
                 </TooltipContent>
               </Tooltip>
             </TooltipProvider>
