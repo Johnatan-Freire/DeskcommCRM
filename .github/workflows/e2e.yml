@@ -1806,6 +1806,21 @@ jobs:
       # workers, dois specs gerando o mesmo código no mesmo intervalo de 30s
       # fazem o segundo ser recusado como replay. Foi o que derrubava a
       # `reset-password-mfa` (issue #80): ela passa sozinha e falha em paralelo.
+      # O B-5 de `atender-pelo-celular` (no fork, parte 5) gera um ogg/opus com o
+      # ffmpeg, e o app — `next start` NESTE executor, não a imagem — converte com
+      # ele para AAC (`?formato=aac`, F2 da ADR-0006). O executor não traz ffmpeg
+      # garantido: instala, e a sonda reprova ALTO se faltar um dos dois encoders.
+      - name: Instalar o ffmpeg e sondar os encoders (áudio no celular, F2)
+        if: matrix.parte == 5
+        run: |
+          set -euo pipefail
+          if ! command -v ffmpeg >/dev/null; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq --no-install-recommends ffmpeg
+          fi
+          ffmpeg -hide_banner -encoders | grep -E ' (aac|libopus) '
+          test "$(ffmpeg -hide_banner -encoders | grep -cE ' (aac|libopus) ')" -ge 2
+
       - name: E2E — parte ${{ matrix.parte }} de 4
         run: |
           set -euo pipefail
