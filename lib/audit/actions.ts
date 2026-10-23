@@ -957,6 +957,15 @@ export const AUDIT_ACTIONS = [
   "contacts.synced_from_phone",
   // Reenvio de mensagem que falhou, na mesma linha (POST /api/v1/messages/{id}/retry).
   "message.retried",
+  // A REMOÇÃO do destinatário dos avisos de caso (issue #3338) —
+  // `DELETE /api/v1/ai/cases/alerta`. Código próprio, e não
+  // `ai.case_alert_settings_changed` com um campo no metadata: a pergunta que
+  // se faz depois é outra ("quem LIBEROU o número de avisos, e quando", que é o
+  // que explica um número voltar a virar atendimento), e o painel de auditoria
+  // filtra por `action`, nunca por metadata. O número entra MASCARADO, pela
+  // mesma razão do `ai.case_alert_settings_changed`: `api_audit_log` é
+  // append-only e a cascata de LGPD não o alcança.
+  "ai.case_alert_settings_removed",
 ] as const;
 
 /** Um código de auditoria. Derivado de `AUDIT_ACTIONS` — não redigite a lista. */
