@@ -1110,6 +1110,7 @@ jobs:
         reenvio-pelo-celular.spec.ts
         contatos-em-cartao-no-celular.spec.ts
         ia-no-celular.spec.ts
+        celular-toque-nos-controles.spec.ts
 
       # ─── FORA_DO_CI — as duas que ficaram, e o motivo continua onde sempre ───
       #
