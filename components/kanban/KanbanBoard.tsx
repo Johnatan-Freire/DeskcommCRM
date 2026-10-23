@@ -304,6 +304,33 @@ export function KanbanBoard({
     [data, grouped, moveCard, qc, pipelineId],
   );
 
+  /**
+   * Mudar a etapa pelo dossiê (#3272), sem arrastar. Fork: o upstream tem o
+   * "Mover para…" do card com `aoMoverPelaLista`; aqui fica só o que o dossiê
+   * usa. Mesma mutação e mesma posição fracionária do arrasto: o card vai para
+   * o FIM da etapa inteira (lida do cache do quadro, não da lista filtrada).
+   * Etapa de perda segue a régua do arrasto do fork (sem janela de motivo aqui).
+   */
+  const aoMoverPelaLista = useCallback(
+    (lead: BoardData["leads"][number], stageId: string) => {
+      const funil = qc.getQueryData<BoardData>(chaveDoQuadro(pipelineId))?.leads ?? data?.leads ?? [];
+      const posicoes = funil
+        .filter((l) => l.stage_id === stageId && l.id !== lead.id)
+        .map((l) => l.position_in_stage)
+        .filter((p): p is number => typeof p === "number" && Number.isFinite(p));
+      const ultima = posicoes.length === 0 ? null : Math.max(...posicoes);
+      const posicao = midpoint(ultima, null);
+      if (Number.isNaN(posicao)) return;
+      moveCard.mutate({
+        leadId: lead.id,
+        stageId,
+        positionInStage: posicao,
+        expectedUpdatedAt: lead.updated_at,
+      });
+    },
+    [qc, pipelineId, data, moveCard],
+  );
+
   if (isLoading) {
     return <BoardSkeleton />;
   }
@@ -428,6 +455,8 @@ export function KanbanBoard({
             data.stages.find((s) => s.id === leadDoDossie.stage_id)?.name ?? "—"
           }
           ownerNames={ownerNames}
+          etapas={data.stages}
+          onMudarEtapa={(stageId) => aoMoverPelaLista(leadDoDossie, stageId)}
         />
       )}
 
