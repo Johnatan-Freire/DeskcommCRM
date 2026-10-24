@@ -1111,6 +1111,7 @@ jobs:
         contatos-em-cartao-no-celular.spec.ts
         ia-no-celular.spec.ts
         celular-toque-nos-controles.spec.ts
+        minhas-tarefas-no-celular.spec.ts
 
       # ─── FORA_DO_CI — as duas que ficaram, e o motivo continua onde sempre ───
       #
