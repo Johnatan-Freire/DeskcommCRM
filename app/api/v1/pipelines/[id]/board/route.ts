@@ -25,6 +25,7 @@ import {
 } from "@/lib/leads/next-action";
 import type { LeadCandidate } from "@/lib/leads/active-lead";
 import { anexarDadosDoContato, type LinhaDoContatoNoQuadro } from "@/lib/kanban/dados-do-contato";
+import { diasDeRecorte, recortaEncerradosAntigos } from "@/lib/kanban/recorte-de-encerrados";
 import { anexarTarefasAosNegocios, type LinhaDaTarefaNoQuadro } from "@/lib/kanban/tarefas-no-quadro";
 import { buscaEmLotes } from "@/lib/supabase/em-lotes";
 import { createClient } from "@/lib/supabase/server";
@@ -474,7 +475,7 @@ async function withTarefas(
   };
 }
 
-export async function GET(_req: NextRequest, ctx: RouteCtx): Promise<Response> {
+export async function GET(req: NextRequest, ctx: RouteCtx): Promise<Response> {
   const requestId = randomUUID();
   const { id: pipelineId } = await ctx.params;
 
@@ -514,10 +515,31 @@ export async function GET(_req: NextRequest, ctx: RouteCtx): Promise<Response> {
   if (leadsErr) return fail("internal_error", leadsErr.message, 500, { requestId });
   if (!pipeline) return fail("resource_not_found", t("Pipeline não encontrado."), 404, { requestId });
 
+  // ─── O RECORTE DE ENCERRADOS ANTIGOS (#2995) ────────────────────────────
+  // A opção é POR FUNIL (`crm_pipelines.settings.ocultar_encerrados_dias`,
+  // lida do pipeline que a consulta acima já trouxe) e vem desligada: chave
+  // ausente devolve `null` e o quadro segue trazendo tudo, como sempre trouxe.
+  //
+  // Em MEMÓRIA, sobre a lista já lida: o quadro não pagina (ordena
+  // tudo por `position_in_stage` numa leitura só), então filtrar depois de ler
+  // não perde nada e evita uma segunda ida ao banco só para saber a opção antes
+  // de buscar. É pergunta de EXIBIÇÃO: a linha continua no banco com o
+  // histórico intacto, e desligar a opção a traz de volta inteira. Nada aqui
+  // apaga, arquiva ou mexe em `status`.
+  //
+  // O `?lead=` é o negócio que o link pediu (o dossiê abre por ele): fica mesmo
+  // antigo.
+  const leadsDoQuadro = recortaEncerradosAntigos(
+    (leads ?? []) as Lead[],
+    diasDeRecorte((pipeline as Pipeline).settings),
+    new Date(),
+    req.nextUrl.searchParams.get("lead"),
+  );
+
   const leadsWithOwner = await withOwnerAgents(
     supabase,
     (pipeline as Pipeline).organization_id,
-    (leads ?? []) as Lead[],
+    leadsDoQuadro,
   );
   if (leadsWithOwner.error) {
     return fail("internal_error", leadsWithOwner.error, 500, { requestId });
