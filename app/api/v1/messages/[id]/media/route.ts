@@ -20,6 +20,8 @@ import { fail } from "@/lib/api/wrappers";
 import { loadAuthUser, resolveActiveOrg } from "@/lib/auth/server";
 import { traduzir } from "@/lib/i18n/dicionario";
 import { logger } from "@/lib/logger";
+import { VALIDADE_DO_LINK_DE_MIDIA_S } from "@/lib/messaging/media/link-temporario";
+import { isMediaPathInOrganization } from "@/lib/messaging/media/upload-validation";
 import { ConversorOcupado, TETO_REPRODUCAO_BYTES, paraReproducaoAac } from "@/lib/messaging/media/voice-transcode";
 import {
   CHANNEL_SESSION_REF_COLUMNS,
@@ -34,7 +36,7 @@ import { createClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 
-const SIGNED_URL_TTL_S = 3600;
+const SIGNED_URL_TTL_S = VALIDADE_DO_LINK_DE_MIDIA_S;
 
 const Consulta = z.object({ formato: z.enum(["aac"]).optional() });
 
@@ -154,6 +156,13 @@ export async function GET(req: NextRequest, ctx: RouteCtx): Promise<Response> {
     return fail("internal_error", t("Erro ao buscar mensagem."), 500, { requestId });
   }
   if (!msg || (!msg.media_storage_path && !msg.media_url)) {
+    return fail("not_found", t("Mensagem sem mídia."), 404, { requestId });
+  }
+
+  // A RLS autoriza a linha, não o objeto apontado por ela. O cliente admin
+  // ignora a RLS do Storage: valide ANTES de assinar ou baixar para conversão.
+  // Caminho inválido não pode cair no fallback do canal.
+  if (msg.media_storage_path != null && !isMediaPathInOrganization(msg.media_storage_path, activeOrg.orgId)) {
     return fail("not_found", t("Mensagem sem mídia."), 404, { requestId });
   }
 
