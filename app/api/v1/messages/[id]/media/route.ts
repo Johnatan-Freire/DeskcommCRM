@@ -20,7 +20,9 @@ import { fail } from "@/lib/api/wrappers";
 import { loadAuthUser, resolveActiveOrg } from "@/lib/auth/server";
 import { traduzir } from "@/lib/i18n/dicionario";
 import { logger } from "@/lib/logger";
+import { cabecalhoDeDownload, urlAssinadaParaDownload } from "@/lib/messaging/media/download-com-nome";
 import { VALIDADE_DO_LINK_DE_MIDIA_S } from "@/lib/messaging/media/link-temporario";
+import { nomeOriginalDaMensagem } from "@/lib/messaging/media/nome-de-arquivo";
 import { isMediaPathInOrganization } from "@/lib/messaging/media/upload-validation";
 import { ConversorOcupado, TETO_REPRODUCAO_BYTES, paraReproducaoAac } from "@/lib/messaging/media/voice-transcode";
 import {
@@ -36,9 +38,16 @@ import { createClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 
-const SIGNED_URL_TTL_S = VALIDADE_DO_LINK_DE_MIDIA_S;
-
-const Consulta = z.object({ formato: z.enum(["aac"]).optional() });
+const Consulta = z.object({
+  formato: z.enum(["aac"]).optional(),
+  /**
+   * `?baixar=1` — pedido de DOWNLOAD com o nome original (#2613).
+   *
+   * `string` e não `coerce.boolean()`: query é texto, e `coerce` transformaria
+   * `?baixar=0` em `true`. Quem decide é a comparação com `"1"`, no handler.
+   */
+  baixar: z.string().optional(),
+});
 
 /**
  * Teto da conversão para tocar: cada pedido é ffmpeg na CPU da VPS. O da
@@ -112,13 +121,19 @@ export async function GET(req: NextRequest, ctx: RouteCtx): Promise<Response> {
   }
 
   // Validação DEPOIS da autorização: quem não está logado recebe 401, não 422.
+  const params = new URL(req.url).searchParams;
   const consulta = Consulta.safeParse({
-    formato: new URL(req.url).searchParams.get("formato") ?? undefined,
+    formato: params.get("formato") ?? undefined,
+    baixar: params.get("baixar") ?? undefined,
   });
   if (!consulta.success) {
     return fail("validation_failed", t("Formato não suportado: use ?formato=aac."), 422, { requestId });
   }
   const paraTocar = consulta.data.formato === "aac";
+  // `?baixar=1` e só ele (#2613): query é texto, e qualquer outro valor — `0`
+  // inclusive — não deve virar download. Também não vale para a reprodução
+  // convertida, que devolve bytes na hora e nunca foi download.
+  const baixar = consulta.data.baixar === "1" && !paraTocar;
   if (paraTocar) {
     const porUsuario = await checkRateLimit(
       `midia-aac:${user.id}`,
@@ -159,6 +174,10 @@ export async function GET(req: NextRequest, ctx: RouteCtx): Promise<Response> {
     return fail("not_found", t("Mensagem sem mídia."), 404, { requestId });
   }
 
+  // O nome original guardado pela ingestão (#2613), lido SÓ quando o pedido é
+  // download — o preview abre como sempre. `null` = não há nome a preservar.
+  const nomeDoArquivo = baixar ? nomeOriginalDaMensagem(msg.metadata) : null;
+
   // A RLS autoriza a linha, não o objeto apontado por ela. O cliente admin
   // ignora a RLS do Storage: valide ANTES de assinar ou baixar para conversão.
   // Caminho inválido não pode cair no fallback do canal.
@@ -170,11 +189,21 @@ export async function GET(req: NextRequest, ctx: RouteCtx): Promise<Response> {
 
   if (msg.media_storage_path) {
     const admin = createAdminClient();
+    // `download` é o que faz o Storage responder `Content-Disposition:
+    // attachment; filename=<nome>` em vez do basename canônico — é a última
+    // milha do #2613, onde o nome já aparecia na tela e morria no arquivo salvo.
     const { data: signed, error: signErr } = await admin.storage
       .from("whatsapp-media")
-      .createSignedUrl(msg.media_storage_path, SIGNED_URL_TTL_S);
+      .createSignedUrl(
+        msg.media_storage_path,
+        VALIDADE_DO_LINK_DE_MIDIA_S,
+        nomeDoArquivo ? { download: nomeDoArquivo } : undefined,
+      );
     if (!signErr && signed?.signedUrl) {
-      const response = NextResponse.redirect(signed.signedUrl, 302);
+      const response = NextResponse.redirect(
+        nomeDoArquivo ? urlAssinadaParaDownload(signed.signedUrl, nomeDoArquivo) : signed.signedUrl,
+        302,
+      );
       response.headers.set("X-Request-Id", requestId);
       return response;
     }
@@ -209,6 +238,11 @@ export async function GET(req: NextRequest, ctx: RouteCtx): Promise<Response> {
         headers: {
           "Content-Type": media.mime,
           "Cache-Control": "private, max-age=60",
+          // Mesmo nome do caminho persistido, pelo cabeçalho: aqui os bytes
+          // saem da NOSSA resposta (o worker ainda não subiu pro Storage), e
+          // sem isto o download desta janela perderia o nome mesmo tendo sido
+          // pedido com `?baixar=1`.
+          ...(nomeDoArquivo ? { "Content-Disposition": cabecalhoDeDownload(nomeDoArquivo) } : {}),
           "X-Request-Id": requestId,
         },
       });
