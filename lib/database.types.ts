@@ -6043,6 +6043,7 @@ export type Database = {
       }
       job_queue: {
         Row: {
+          catalog_presentation_snapshot: Json | null
           attempts: number
           contact_id: string | null
           created_at: string
@@ -6060,6 +6061,7 @@ export type Database = {
           status: string
         }
         Insert: {
+          catalog_presentation_snapshot?: Json | null
           attempts?: number
           contact_id?: string | null
           created_at?: string
@@ -6077,6 +6079,7 @@ export type Database = {
           status?: string
         }
         Update: {
+          catalog_presentation_snapshot?: Json | null
           attempts?: number
           contact_id?: string | null
           created_at?: string
