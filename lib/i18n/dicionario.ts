@@ -3858,6 +3858,7 @@ export const DICIONARIO: Traducoes = {
   },
   "ação imediata requerida.": { es: "se requiere acción inmediata." },
   "Ver detalhes": { es: "Ver detalles" },
+  "Ocultar detalhes": { es: "Ocultar detalles" },
   "em atraso": { es: "de atraso" },
   restantes: { es: "restantes" },
   Risco: { es: "Riesgo" },
