@@ -7377,6 +7377,7 @@ export const DICIONARIO: Traducoes = {
     es: "No hay contactos con ese nombre o teléfono.",
   },
   "Contato criado": { es: "Contacto creado" },
+  "Salvar e iniciar conversa": { es: "Guardar e iniciar conversación" },
   "Não foi possível carregar as sugestões agora.": { es: "No se pudieron cargar las sugerencias en este momento." },
   "Não foi possível registrar a decisão.": { es: "No se pudo registrar la decisión." },
   "O assistente ouviu isto na conversa": { es: "El asistente escuchó esto en la conversación" },
