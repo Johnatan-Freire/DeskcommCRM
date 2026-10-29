@@ -4699,6 +4699,9 @@ export type Database = {
       }
       crm_leads: {
         Row: {
+          recurring_months: number | null
+          recurring_period: "monthly" | null
+          recurring_value_cents: number | null
           assigned_at: string | null
           closed_at: string | null
           contact_id: string | null
@@ -4733,6 +4736,9 @@ export type Database = {
           webhook_source_id: string | null
         }
         Insert: {
+          recurring_months?: number | null
+          recurring_period?: "monthly" | null
+          recurring_value_cents?: number | null
           assigned_at?: string | null
           closed_at?: string | null
           contact_id?: string | null
@@ -4767,6 +4773,9 @@ export type Database = {
           webhook_source_id?: string | null
         }
         Update: {
+          recurring_months?: number | null
+          recurring_period?: "monthly" | null
+          recurring_value_cents?: number | null
           assigned_at?: string | null
           closed_at?: string | null
           contact_id?: string | null
