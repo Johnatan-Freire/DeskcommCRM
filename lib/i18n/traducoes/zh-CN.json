@@ -5572,5 +5572,21 @@
   "Com isto ligado, qualquer atendente vê, cancela e remarca o compromisso de qualquer colega, e vê e mexe nas tarefas da equipe — é o comportamento de sempre. Desligado, cada atendente mexe só no compromisso de que é o responsável; gerentes e administradores seguem mexendo em tudo.": "开启时，任何客服都可以查看、取消和改约任何同事的预约，并查看和修改团队的任务——这一直是默认行为。关闭后，每位客服只能修改自己负责的预约；经理和管理员仍可修改全部内容。",
   "Ligado: qualquer atendente mexe na agenda e nas tarefas de qualquer colega.": "已开启：任何客服都可以修改任何同事的日程和任务。",
   "Desligado: cada atendente mexe só na própria agenda, e a agenda e as tarefas seguem o que ele enxerga. Gerentes e administradores continuam mexendo em tudo.": "已关闭：每位客服只能修改自己的日程，日程和任务遵循其可见范围。经理和管理员仍可修改全部内容。",
-  "Desligado, a agenda e as tarefas também seguem “O que cada atendente enxerga”: em “Só os seus” ou “Os seus, mais os que ainda não têm dono”, o atendente vê e mexe só nos próprios compromissos e nas próprias tarefas, mais as que ele criou (e, no segundo modo, o que ainda não tem dono). Em “Todos veem tudo”, ele continua vendo tudo.": "关闭后，日程和任务也会遵循“每位客服能看到什么”：在“仅自己的”或“自己的，以及尚未有归属的”模式下，客服只能查看和修改自己的预约和任务，以及自己创建的任务（在第二种模式下，还包括尚未有归属的内容）。在“所有人可见全部”模式下，仍然可以看到全部。"
+  "Desligado, a agenda e as tarefas também seguem “O que cada atendente enxerga”: em “Só os seus” ou “Os seus, mais os que ainda não têm dono”, o atendente vê e mexe só nos próprios compromissos e nas próprias tarefas, mais as que ele criou (e, no segundo modo, o que ainda não tem dono). Em “Todos veem tudo”, ele continua vendo tudo.": "关闭后，日程和任务也会遵循“每位客服能看到什么”：在“仅自己的”或“自己的，以及尚未有归属的”模式下，客服只能查看和修改自己的预约和任务，以及自己创建的任务（在第二种模式下，还包括尚未有归属的内容）。在“所有人可见全部”模式下，仍然可以看到全部。",
+  "Uma versão anterior desta sugestão foi barrada: {causa}. Confira antes de enviar.": "此建议的一个早期版本已被拦截：{causa}。发送前请确认。",
+  "o contato pediu para não receber mensagens (opt-out)": "该联系人要求不接收消息（opt-out）",
+  "a conversa estava com a equipe, com o atendimento automático pausado": "对话已交由团队处理，自动接待已暂停",
+  "o contato foi anonimizado (LGPD)": "该联系人已被匿名化（LGPD）",
+  "não havia base legal (LGPD) registrada para o primeiro contato com este lead": "没有为与该线索的首次联系登记法律依据（LGPD）",
+  "prometia um preço ou condição fora da tabela aprovada": "它承诺了超出已批准价目表的价格或条件",
+  "continha uma promessa que o sistema não registrou": "它包含一项系统未记录的承诺",
+  "prometia voltar a falar com o cliente sem deixar o retorno marcado no CRM": "它承诺会再联系客户，但没有在 CRM 中安排回访",
+  "usava um termo interno que não pode chegar ao cliente": "它使用了不能让客户看到的内部术语",
+  "fazia uma afirmação clínica, e a camada de afirmações clínicas está ligada": "它包含临床断言，而临床断言检查层已开启",
+  "dependia de horário, e o agente não tem ferramenta de agenda ligada": "它依赖具体时间，而智能体没有启用日程工具",
+  "não se apresentava como assistente virtual na primeira mensagem a um contato novo": "在发给新联系人的第一条消息中没有表明自己是虚拟助理",
+  "a janela de 24 horas com este contato estava fechada": "与该联系人的 24 小时窗口已关闭",
+  "afirmava um fato que o material de referência CONTRADIZ": "它陈述了一个与参考资料相矛盾的事实",
+  "afirmava um fato sem apoio no material de referência": "它陈述了一个在参考资料中没有依据的事实",
+  "ia mostrar um produto que não foi encontrado no cadastro": "它要展示的产品在登记中未找到"
 }
