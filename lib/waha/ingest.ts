@@ -643,7 +643,10 @@ async function handleInbound(
   // dispara o pedido de rodízio pelo banco. Cortar depois já teria criado
   // contato, conversa e uma "conversa do suporte" na fila de um atendente — e o
   // "cancelar" que alguém da equipe digitasse bloquearia esse contato.
-  if (await ehNumeroInternoDeAviso(admin, session.organization_id, parsed)) {
+  // Com o telefone alternativo do `@lid` (#3716), como no eco abaixo.
+  const identidadeDoRemetente =
+    parsed.kind === "lid" ? { ...parsed, phone: telefoneAlternativoDe(p) } : parsed;
+  if (await ehNumeroInternoDeAviso(admin, session.organization_id, identidadeDoRemetente)) {
     await registrarMensagemIgnorada(admin, session.organization_id, {
       direction: "inbound",
       sessionId: session.id,
@@ -925,7 +928,15 @@ async function handleOutboundFromUserPhone(
   // de eco não o reconhece como nosso — sem este corte, o próprio aviso que
   // acabou de sair voltaria pelo webhook, viraria conversa com o número do
   // plantão e ainda chamaria `pausarIaPorAtendimentoManual` no fim.
-  if (await ehNumeroInternoDeAviso(admin, session.organization_id, parsed)) {
+  // ⚠️ A identidade com o telefone alternativo, e NÃO `parsed` cru (#3716): em
+  // modo privacidade o chat chega como `@lid` e `parseChatId` devolve
+  // `phone: null` — o número cadastrado em `config_aviso_de_caso` só aparece em
+  // `_data.key.remoteJidAlt`. Com `parsed` cru o primeiro aviso de uma
+  // instalação em modo privacidade voltava como contato e conversa com o
+  // número do plantão. (Grupo já saiu acima.)
+  const identidadeDoAviso =
+    parsed.kind === "lid" ? { ...parsed, phone: telefoneAlternativoDe(p) } : parsed;
+  if (await ehNumeroInternoDeAviso(admin, session.organization_id, identidadeDoAviso)) {
     await registrarMensagemIgnorada(admin, session.organization_id, {
       direction: "outbound",
       sessionId: session.id,
