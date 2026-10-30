@@ -65,10 +65,30 @@ export function PipelinePageClient({
     pipelineId,
     searchParams.get("lead"),
   );
-  const filters = useMemo(() => filtersFromParams(searchParams), [searchParams]);
+  /**
+   * ⚠️ O FILTRO PEDIDO VALE ANTES DE A URL CHEGAR NELE (upstream #3767).
+   *
+   * `router.replace` só muda o `useSearchParams` depois da ida ao servidor (o
+   * payload RSC). Lendo o filtro só da URL, o segundo clique feito nessa janela
+   * partia do filtro VELHO: desmarcar a etiqueta A e marcar a B virava "A e B",
+   * e o quadro ficava vazio. O filtro pedido vale até a URL mudar; quando ela
+   * muda (último pedido, ou navegação de fora), a URL manda.
+   */
+  const [pedido, setPedido] = useState<LeadFilters | null>(null);
+  const urlAtual = searchParams.toString();
+  const [urlAnterior, setUrlAnterior] = useState(urlAtual);
+  if (urlAtual !== urlAnterior) {
+    setUrlAnterior(urlAtual);
+    setPedido(null);
+  }
+  const filters = useMemo(
+    () => pedido ?? filtersFromParams(searchParams),
+    [pedido, searchParams],
+  );
   const setFilters = useCallback(
     (next: LeadFilters) => {
       const qs = filtersToParams(next);
+      setPedido(next);
       router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
     },
     [router, pathname],
