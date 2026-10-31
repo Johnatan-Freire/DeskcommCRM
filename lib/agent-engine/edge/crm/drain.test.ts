@@ -605,3 +605,55 @@ describe('corte de ATIVAÇÃO do agente (migration 0403) — a reação do drain
     expect(calls.some((s) => s.includes('last_error'))).toBe(true);
   });
 });
+
+/**
+ * #3688 — quem ENFILEIRA é quem acorda o laço da fila.
+ *
+ * O laço dorme até o teto de 60 s com a fila vazia (recuo exponencial). Sem
+ * este aviso, o job que o drain acabou de criar espera o fim da soneca: 49,25 s
+ * de atraso no claim, medidos pelo @melgarafael numa chegada 125 s depois de a
+ * fila esvaziar. O teste dirige o `drainTick` inteiro e olha o EFEITO na fiação
+ * (`knobs.acordarFila`) — reverter a chamada deixa os testes da soneca verdes,
+ * porque eles exercitam o laço, não o produtor.
+ *
+ * O par de baixo é o guarda contra o conserto exagerado: acordar a cada tick,
+ * sem job novo, manteria a fila no ritmo curto e devolveria o egress da #3688.
+ */
+it('#3688: turno enfileirado ACORDA o laço da fila', async () => {
+  process.env.__ESPERA__ = '0';
+  const calls: string[] = [];
+  const acordarFila = vi.fn();
+  // O insert DEVOLVE linha: sem ela o `enqueueJob` lança, o `drainTick` engole
+  // no catch e o teste veria "nenhum job" onde houve erro de dublê.
+  const query = vi.fn().mockImplementation((sql: string) => {
+    calls.push(sql);
+    if (sql.includes('returning e.id')) return { rows: [event] };
+    if (sql.includes('ai_dispatch_mode')) return { rows: [{ mode: null, status: 'active' }] };
+    if (sql.includes('is_group')) return { rows: [{ is_group: false }] };
+    if (sql.includes('tem_agente')) return { rows: [{ tem_agente: true, tem_roteador: false }] };
+    // Fork: o corte de ativação/conexão (0403) responde antes de enfileirar.
+    if (sql.includes('fn_ia_pode_responder_mensagem')) return { rows: [{ motivo: 'autorizado' }] };
+    if (sql.includes('insert into job_queue')) return { rows: [{ id: 'job-novo' }] };
+    return { rows: [] };
+  });
+  await drainTick({ query } as unknown as pg.Pool, { ...knobs, acordarFila }, log);
+
+  expect(calls.some((s) => s.includes('insert into job_queue')), 'nada foi enfileirado').toBe(true);
+  expect(acordarFila).toHaveBeenCalledTimes(1);
+});
+
+it('#3688: evento consumido SEM job não acorda a fila', async () => {
+  process.env.__ESPERA__ = '0';
+  const calls: string[] = [];
+  const acordarFila = vi.fn();
+  // Agente não publicado: o evento vira done e nenhum turno nasce.
+  await drainTick(
+    poolFalso(textoSimples, calls, { tem_agente: false, tem_roteador: false }),
+    { ...knobs, acordarFila },
+    log,
+  );
+
+  expect(calls.some((s) => s.includes('insert into job_queue'))).toBe(false);
+  expect(acordarFila, 'acordar sem job novo devolveria a fila ao ritmo curto').not.toHaveBeenCalled();
+});
+
