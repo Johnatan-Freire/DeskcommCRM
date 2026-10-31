@@ -178,6 +178,12 @@ const SITES: { arquivo: string; fronteira: string; papel?: "gerador" | "validado
   { arquivo: "app/api/v1/conversations/[id]/media/route.ts", fronteira: "storage.chave-de-objeto" },
   { arquivo: "app/api/v1/ai/knowledge/sources/upload/route.ts", fronteira: "storage.chave-de-objeto" },
   { arquivo: "app/api/v1/ai/knowledge/sources/route.ts", fronteira: "storage.chave-de-objeto" },
+  // A foto do produto por URL na planilha (#3587, fatia 1): a chave é
+  // `<org>/<produto>/<uuid>.<ext>` — os mesmos pedaços que a tela grava. O uuid
+  // nasce aqui (`randomUUID`), a extensão vem do tipo farejado nos BYTES (não
+  // do nome nem da URL) e o `org`/`produto` são uuids já resolvidos. Nenhum
+  // texto da planilha entra na chave — a URL do cliente só escolhe o conteúdo.
+  { arquivo: "lib/catalogo/fotos-por-url.ts", fronteira: "storage.chave-de-objeto" },
   // Chave de idempotência: os geradores (manda UUID) e os validadores (exige UUID).
   { arquivo: "app/onboarding/connect-whatsapp/_client.tsx", fronteira: "api.idempotency-key", papel: "gerador" },
   { arquivo: "components/extensions/ExtensionsManager.tsx", fronteira: "api.idempotency-key", papel: "gerador" },
