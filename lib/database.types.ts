@@ -7496,18 +7496,21 @@ export type Database = {
       }
       pacing_ledger: {
         Row: {
+          resposta: boolean
           channel_session_id: string
           id: string
           organization_id: string
           sent_at: string
         }
         Insert: {
+          resposta?: boolean
           channel_session_id: string
           id?: string
           organization_id: string
           sent_at?: string
         }
         Update: {
+          resposta?: boolean
           channel_session_id?: string
           id?: string
           organization_id?: string
