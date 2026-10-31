@@ -54301,6 +54301,336 @@ returns integer
 language plpgsql
 set search_path = public, pg_temp
 as $$
+
+-- ---- respostas rápidas: mostrar na barra do Inbox (migration 0742) ----
+-- manifest: Respostas rápidas — coluna `mostrar_na_barra` (boolean not null default true) em `message_templates` (#3282): cada resposta rápida escolhe se aparece na barra do Inbox, sem sair do atalho `/`. O default TRUE não muda quem já usa (ausência = aparece); `add column if not exists`, idempotente; apêndice idempotente no `baseline.sql`.
+
+-- ─── O que isto resolve ─────────────────────────────────────────────────────
+-- A barra de recursos do Inbox (#2833) monta um botão por linha de
+-- `message_templates` da organização. Numa agência com dezenas de respostas a
+-- barra vira uma nuvem de várias linhas acima do compositor, e aparecem ali
+-- textos que ninguém escolhe à mão (modelos de um follow-up, mensagens usadas
+-- só pelo atalho `/`). Até aqui a única saída era apagar a resposta — e isso a
+-- tirava também do `/`.
+--
+-- Esta coluna é a MARCAÇÃO por resposta rápida: `false` esconde o botão da
+-- barra do Inbox; `true` (default) mantém o comportamento de hoje. A barra lê o
+-- campo; o atalho `/` ignora-o de propósito e continua listando TODAS.
+--
+-- ─── A decisão de escopo desta fatia ────────────────────────────────────────
+-- A coluna NÃO entra na ordenação por arrastar nem em grupos (#3244 e #3245
+-- conversam com a issue e têm PR na região): a barra só ganha a marcação e o
+-- recolhimento. O limite de botões definido pelo administrador (item 3 da
+-- issue) fica FORA, é opcional.
+--
+-- ─── Compatibilidade ────────────────────────────────────────────────────────
+-- `add column if not exists` + `default true`: linhas que já existem ficam
+-- marcadas para aparecer — byte a byte o comportamento atual. Linha anterior a
+-- esta migration (e fixture que não traz a chave) é "aparece", nunca "some".
+
+alter table public.message_templates
+  add column if not exists mostrar_na_barra boolean not null default true;
+
+comment on column public.message_templates.mostrar_na_barra is
+  'Se a resposta rápida aparece na barra do Inbox (#3282). Default true: a ausência da marcação e a marcação ligada mantêm o comportamento de sempre. O atalho / lista TODAS, independente deste campo.';
+
+-- ---- campanha de texto em vários balões (migration 0765) ----
+alter table public.campaigns
+  add column if not exists split_messages boolean not null default false;
+
+comment on column public.campaigns.split_messages is
+  'Campanha de texto sai em balões, um por parágrafo, até 3 por destinatário (PR #3329). Default false. Modelo aprovado nunca se divide.';
+
+-- ---- lista do funil: índice da página (migration 0739) ----
+-- manifest: Lista do funil (#3172) — índice `idx_crm_leads_org_pipeline_position_id` em `crm_leads`, na ORDEM EXATA da página: `(organization_id, pipeline_id, position_in_stage, id)`. O `range` da rota corta o que VOLTA, não o que o banco AVALIA: sem índice na ordem pedida o Postgres passa a regra de visibilidade (`fn_can_view_lead`, 3 a 7 ms por linha na instalação que abriu a issue) em todo o funil antes de ordenar — medido pelo mantenedor num banco de teste com um funil de 3.901 negócios: 3.901 chamadas e ~3,8 s na página 1. Com o índice, o plano vira `Index Scan` com parada antecipada (51 a 76 chamadas, ~55 a 78 ms). `id` entra como DESEMPATE, para a mesma URL devolver sempre as mesmas linhas quando dois negócios compartilham a `position_in_stage`.
+--
+-- ─── Por que estas quatro colunas, nesta ordem ──────────────────────────────
+-- A consulta da página filtra por igualdade as duas primeiras
+-- (`organization_id`, `pipeline_id`), exclui o arquivado e ordena por
+-- `position_in_stage` — a mesma ordem do quadro — com `id` no fim. Num btree, o
+-- prefixo de igualdade seguido das colunas de ORDEM é o que permite ao plano
+-- caminhar o índice já ordenado e PARAR depois de `per_page + 1` linhas, em vez
+-- de ler o funil, ordenar e cortar no fim.
+--
+-- Sem predicado parcial, de propósito: este é o índice que o mantenedor mediu
+-- contra o banco real (o `where status <> 'archived'` mudaria o tamanho, não a
+-- ordem — e um predicado que o planejador não reconheça tornaria o índice
+-- inútil em silêncio, que é o defeito que esta migration existe para fechar).
+--
+-- ─── Compatibilidade ────────────────────────────────────────────────────────
+-- `create index if not exists`: idempotente. Toma lock SHARE em `crm_leads`
+-- enquanto constrói (bloqueia escrita, não leitura); sem `concurrently` porque
+-- roda dentro da transação do `db push`/`baseline` — numa tabela de milhares de
+-- linhas é breve. Índice a mais só custa escrita; o ganho é a leitura da aba
+-- Lista, que é o que a issue #3172 mede.
+
+create index if not exists idx_crm_leads_org_pipeline_position_id
+  on public.crm_leads (organization_id, pipeline_id, position_in_stage, id);
+
+comment on index public.idx_crm_leads_org_pipeline_position_id is
+  'Página da aba Lista do funil (#3172): (organization_id, pipeline_id) por igualdade e (position_in_stage, id) na ordem da consulta. `id` é o desempate que torna a paginação determinística quando dois negócios têm a mesma position_in_stage.';
+
+-- ---- setores de atendimento (migration 0801) ----
+create table if not exists public.attendant_sectors (
+  id              uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  name            text not null check (char_length(btrim(name)) between 1 and 60),
+  description     text check (description is null or char_length(description) <= 280),
+  created_at      timestamptz not null default now(),
+  updated_at      timestamptz not null default now(),
+  unique (organization_id, id)
+);
+
+create unique index if not exists attendant_sectors_org_name_unique
+  on public.attendant_sectors (organization_id, lower(btrim(name)));
+
+-- Sem FK direta para `organizations`: a PK (organization_id, user_id) já cobre a
+-- FK para `user_organizations`, e cobrir também uma para `organizations` faz o
+-- PostgREST ver esta tabela como junção user_organizations <-> organizations e
+-- responder 300 PGRST201 em todo embed sem nome de FK (#3219, o defeito que a
+-- 0717 desfez em calendar_service_professionals). A organização continua
+-- garantida e em cascata: pela FK para `user_organizations`, que referencia
+-- `organizations`, e pela FK para `attendant_sectors`.
+create table if not exists public.attendant_sector_members (
+  organization_id uuid not null,
+  sector_id       uuid not null,
+  user_id         uuid not null,
+  created_at      timestamptz not null default now(),
+  updated_at      timestamptz not null default now(),
+  primary key (organization_id, user_id),
+  foreign key (organization_id, sector_id)
+    references public.attendant_sectors (organization_id, id) on delete cascade,
+  foreign key (organization_id, user_id)
+    references public.user_organizations (organization_id, user_id) on delete cascade
+);
+
+-- Quem aplicou uma versão anterior desta migration, com a FK direta, perde-a aqui.
+alter table public.attendant_sector_members
+  drop constraint if exists attendant_sector_members_organization_id_fkey;
+
+create index if not exists attendant_sector_members_sector
+  on public.attendant_sector_members (organization_id, sector_id);
+
+alter table public.attendant_sectors enable row level security;
+alter table public.attendant_sector_members enable row level security;
+
+revoke all on public.attendant_sectors, public.attendant_sector_members
+  from public, anon, authenticated, service_role;
+grant select on public.attendant_sectors, public.attendant_sector_members to authenticated;
+grant select, insert, update, delete
+  on public.attendant_sectors, public.attendant_sector_members to service_role;
+
+drop policy if exists tenant_isolation_attendant_sectors_select on public.attendant_sectors;
+create policy tenant_isolation_attendant_sectors_select on public.attendant_sectors
+  for select to authenticated
+  using (organization_id in (select public.fn_user_org_ids()) or public.fn_is_platform_admin());
+
+drop policy if exists tenant_isolation_attendant_sector_members_select on public.attendant_sector_members;
+create policy tenant_isolation_attendant_sector_members_select on public.attendant_sector_members
+  for select to authenticated
+  using (organization_id in (select public.fn_user_org_ids()) or public.fn_is_platform_admin());
+
+comment on table public.attendant_sectors is
+  'Setores de atendimento da organização (migration 0801). Nome único por organização (lower/btrim). Escrita só pelas rotas /api/v1/attendants/sectors (manager+).';
+comment on table public.attendant_sector_members is
+  'Vínculo atendente → setor (migration 0801). Um setor por atendente: PK (organization_id, user_id). Apagar o setor solta os atendentes.';
+
+notify pgrst, 'reload schema';
+
+-- ---- vínculo e motivo legado das propostas de campos (migration 0807) ----
+-- manifest: lead_field_proposals: WITH CHECK exige negócio visível da mesma organização; motivos legados de contatos já anonimizados saem pelos vínculos direto e crm_lead_links, sem repetir a anonimização
+--
+-- 0807 — duas correções forward para clones que aplicaram a 0772 (#3476).
+-- A 0772 e a 0797 permanecem intactas: podem ter sido aplicadas no fork.
+--
+-- Provado no Postgres 17: INSERT sem RETURNING passava com orgA + leadB,
+-- porque a FK simples só conhece o id e o WITH CHECK omitia o vínculo que o
+-- USING já cobra. A MESMA régua passa a valer para a linha nova também.
+drop policy if exists tenant_isolation_lead_field_proposals_write on public.lead_field_proposals;
+create policy tenant_isolation_lead_field_proposals_write on public.lead_field_proposals
+  for all to authenticated
+  using (
+    organization_id in (select public.fn_user_org_ids())
+      and public.fn_role_at_least(organization_id, 'agent')
+      and exists (
+        select 1 from public.crm_leads l
+         where l.id = lead_field_proposals.lead_id
+           and l.organization_id = lead_field_proposals.organization_id
+      )
+  )
+  with check (
+    organization_id in (select public.fn_user_org_ids())
+      and public.fn_role_at_least(organization_id, 'agent')
+      and exists (
+        select 1 from public.crm_leads l
+         where l.id = lead_field_proposals.lead_id
+           and l.organization_id = lead_field_proposals.organization_id
+      )
+  );
+
+-- Trocar a função na 0797 protege as próximas anonimizações, mas não visita
+-- quem a 0772 já marcou como anonimizado: o retry retorna antes da cascata.
+-- Cura só o motivo que ficou, com todos os vínculos escopados por organização.
+-- Não reescreve a decisão, o rótulo nem a data original do direito; contato
+-- vivo e proposta já limpa ficam intactos, inclusive na reaplicação.
+update public.lead_field_proposals p
+   set motivo_recusa = null,
+       updated_at = now()
+  from public.crm_leads l
+ where p.organization_id = l.organization_id
+   and p.lead_id = l.id
+   and p.motivo_recusa is not null
+   and (
+     exists (
+       select 1 from public.contacts c
+        where c.organization_id = p.organization_id
+          and c.id = l.contact_id
+          and c.is_anonymized
+     )
+     or exists (
+       select 1 from public.crm_lead_links vinculo
+       join public.contacts c
+         on c.id = vinculo.target_id
+        and c.organization_id = vinculo.organization_id
+        and c.is_anonymized
+        where vinculo.organization_id = p.organization_id
+          and vinculo.lead_id = p.lead_id
+          and vinculo.target_kind = 'contact'
+     )
+   );
+
+-- ---- catálogo: GPT-6.1 Terra (migration 9031) ----
+-- O dump --schema-only não traz seed pós-snapshot. Sem este apêndice, clones
+-- novos (install.sh) e clones atualizando (update.sh reaplica baseline.sql)
+-- ficam sem o gpt-6.1-terra em Provedores de IA e no seletor do agente.
+-- As DUAS tabelas com os MESMOS números (invariante catálogo×preço). Não mexe
+-- no padrão (segue gpt-5.6-terra). Fonte do preço no cabeçalho da migration.
+insert into public.ai_models
+  (provider, model_id, display_name, description, context_window,
+   input_price_per_million_cents, output_price_per_million_cents, supports_tools)
+values
+  ('openai', 'gpt-6.1-terra', 'GPT-6.1 Terra',
+   'Intermediário da linha 6: mais capaz que o Luna, metade do preço do Sol.',
+   1050000, 100, 500, true)
+on conflict (provider, model_id) do update set
+  display_name = excluded.display_name,
+  description = excluded.description,
+  context_window = excluded.context_window,
+  input_price_per_million_cents = excluded.input_price_per_million_cents,
+  output_price_per_million_cents = excluded.output_price_per_million_cents,
+  supports_tools = excluded.supports_tools,
+  deprecated_at = null;
+
+insert into public.ai_pricing
+  (model, prompt_cents_per_million_tokens, completion_cents_per_million_tokens, notes)
+values
+  ('gpt-6.1-terra', 100, 500, 'catálogo 9031 — acima de 272k tokens de entrada, 200/750')
+on conflict (model) do update set
+  prompt_cents_per_million_tokens = excluded.prompt_cents_per_million_tokens,
+  completion_cents_per_million_tokens = excluded.completion_cents_per_million_tokens,
+  notes = excluded.notes,
+  superseded_at = null;
+
+-- ---- lembrete de tarefa rearma na ocasião nova (migration 9038) ----
+-- manifest: **O lembrete de tarefa rearma na OCASIÃO, não na tarefa (#3639).** `agent_inbox_items.task_reminder_due_at timestamptz null` guarda o PRAZO que originou o aviso `task_due`/`task_overdue`; com `para_user_id` (0689) fecha a identidade — categoria + tarefa + responsável + prazo —, então responsável novo ou prazo novo rearma, e a rodada repetida sem mudança continua silenciosa (#2529). `inbox_task_reminder_ocasiao_unique` fecha a corrida de duas rodadas sobre a mesma ocasião.
+-- 9038 — O LEMBRETE DE TAREFA REARMA NA OCASIÃO (#3639)
+--
+-- A trava de "já avisado" é o próprio item da Central (#2529): `kind + ref_id`
+-- dizia "esta tarefa já pediu gente" — e uma tarefa pede gente mais de uma
+-- vez, quando outro responsável assume ou o prazo é adiado. A coluna guarda o
+-- prazo que motivou o aviso; com `para_user_id` (0689) a ocasião fica completa.
+-- O porquê inteiro, e por que NÃO uma revisão incrementada na tarefa, estão no
+-- cabeçalho da migration.
+--
+-- Não cria função, então pode ficar depois da VARREDURA anon.
+alter table public.agent_inbox_items
+  add column if not exists task_reminder_due_at timestamptz null;
+comment on column public.agent_inbox_items.task_reminder_due_at is
+  'Prazo que originou o aviso de lembrete de tarefa. Com categoria, ref_id e para_user_id forma a OCASIÃO do aviso: prazo novo ou responsável novo rearma; mesma ocasião não repete (#3639, #2529).';
+-- Backfill best-effort dos avisos legados: o prazo ATUAL da tarefa.
+update public.agent_inbox_items as aviso
+   set task_reminder_due_at = tarefa.due_date
+  from public.crm_tasks as tarefa
+ where aviso.ref_kind = 'task'
+   and aviso.kind in ('task_due', 'task_overdue')
+   and aviso.ref_id = tarefa.id
+   and aviso.task_reminder_due_at is null
+   and tarefa.due_date is not null;
+-- Dedupe ANTES do índice único (o update.sh reaplica em banco que já duplicou).
+-- O índice deixa o `resolved` de fora: sem isso a repetida resolvida seguia
+-- dentro dele e a criação do índice falhava.
+with repetidas as (
+  select id,
+         row_number() over (
+           partition by organization_id, ref_id, kind, para_user_id, task_reminder_due_at
+           order by created_at, id
+         ) as posicao
+    from public.agent_inbox_items
+   where ref_kind = 'task'
+     and task_reminder_due_at is not null
+)
+update public.agent_inbox_items as aviso
+   set status = 'resolved',
+       resolved_at = coalesce(aviso.resolved_at, now())
+  from repetidas
+ where aviso.id = repetidas.id
+   and repetidas.posicao > 1
+   and aviso.status <> 'resolved';
+create unique index if not exists inbox_task_reminder_ocasiao_unique
+  on public.agent_inbox_items (organization_id, ref_id, kind, para_user_id, task_reminder_due_at)
+  where ref_kind = 'task' and task_reminder_due_at is not null and status <> 'resolved';
+
+-- ---- aprendizado com prazo, ignorado depois da data (migration 0790) ----
+--
+-- 0790 — programação semanal e cardápio do dia (#2369).
+--
+-- O conteúdo que o restaurante atualiza toda semana JÁ mora em
+-- `org_memory_entries` (0067) — é o "Aprendizado" da Memória da IA, que entra
+-- no prefixo de todo turno. O que faltava era PRAZO: o único jeito de uma
+-- entrada parar de valer era `status = 'archived'`, manual e um por um, depois
+-- que alguém percebia. Na prática, a atração de sexta continuava sendo
+-- anunciada na terça seguinte.
+--
+-- Anulável de propósito: `NULL` = vale para sempre, que é o estado de TODA
+-- entrada existente. Nenhum comportamento atual muda; quem quiser prazo,
+-- marca.
+--
+-- A data é de CALENDÁRIO (date), não instante: a entrada vale até o fim desse
+-- dia no fuso da organização (`organizations.timezone`) — a mesma régua do
+-- `valid_until` de proposta (D8). Sem CHECK de futuro: registrar a programação
+-- da semana passada é histórico legítimo, e ela nasce vencida de propósito.
+--
+-- Sem índice novo: a leitura é por (organization_id, status), já indexada em
+-- 0067, e a memória de uma organização são punhados de linhas — o filtro de
+-- data é resíduo, não a busca.
+alter table public.org_memory_entries
+  add column if not exists valid_until date;
+
+do $$
+begin
+  -- `comment on column` numa tabela ausente derruba o `db reset` de quem está
+  -- num clone anterior a 0067; a guarda mantém a migration reaplicável.
+  if to_regclass('public.org_memory_entries') is not null then
+    execute $c$comment on column public.org_memory_entries.valid_until is
+      'Último dia em que a entrada vale, no fuso da organização (NULL = sem prazo). A leitura do turno ignora a entrada depois desta data — programação semanal, promoção do mês, cardápio do dia.'$c$;
+  end if;
+end $$;
+
+notify pgrst, 'reload schema';
+
+
+-- ---- recibos antigos sem frase livre (migration 9018) ----
+-- manifest: Redige somente frases livres nos campos de erro dos recibos históricos de automação (#3267), preservando status, ações, ordem, IDs e metadados de entrega. Vocabulário técnico fechado da serialização atual; não promete remover PII de campos arbitrários. A reaplicação é idempotente e só audita quando há efeito.
+-- 9018 — recibos antigos seguem a mesma fronteira dos novos.
+-- Reserva root: 9018 @ 20261026221300; nome/carimbo conferidos antes de criar.
+-- Não altera a função LGPD nem as decisões de retenção: preserva as linhas.
+-- Snapshot dos códigos constantes em resultado-para-recibo.ts, ApiErrorCodes e
+-- FRASES_DE_FALHA. As únicas famílias reconhecidas por padrão são HTTP/PGRST,
+-- como no serializador; nome, telefone ou token com formato parecido não entram.
+-- Os detalhes fora dos campos error/erro/reason/error_code/code/error_type ficam
+-- intactos. Isto é uma fronteira de campos, não um sanitizador genérico de PII.
+
+do $recibos_9018$
 declare
   v_soltos integer;
 begin

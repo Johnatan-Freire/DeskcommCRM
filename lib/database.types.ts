@@ -7185,6 +7185,7 @@ export type Database = {
       }
       org_memory_entries: {
         Row: {
+          valid_until: string | null
           body: string
           created_at: string
           created_by: string | null
@@ -7197,6 +7198,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          valid_until?: string | null
           body: string
           created_at?: string
           created_by?: string | null
@@ -7209,6 +7211,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          valid_until?: string | null
           body?: string
           created_at?: string
           created_by?: string | null
