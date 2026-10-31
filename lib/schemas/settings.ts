@@ -575,8 +575,22 @@ export const crmSettingsSchema = z
      * o bloco que as regras de contato já usam.
      */
     telefone_de_ficha_vazia: z.boolean().catch(false),
+    nome_informado_no_atendimento: z.boolean().catch(false),
+    /**
+     * `avisar_transferencia_no_whatsapp` (#3784): a transferência para atendimento
+     * humano também manda o aviso ao número do Aviso no WhatsApp.
+     *
+     * ⚠️ NASCE LIGADA: só o booleano `false` desliga — a mesma régua do SQL do
+     * handoff (`is distinct from 'false'::jsonb`), que decide se o evento nem nasce.
+     */
+    avisar_transferencia_no_whatsapp: z.boolean().catch(true),
   })
-  .catch({ cliente_pela_agenda: false, telefone_de_ficha_vazia: false });
+  .catch({
+    cliente_pela_agenda: false,
+    telefone_de_ficha_vazia: false,
+    nome_informado_no_atendimento: false,
+    avisar_transferencia_no_whatsapp: true,
+  });
 
 /** A regra "cliente pela agenda" está ligada nesta organização? Nunca lança. */
 export function clientePelaAgendaLigado(settings: unknown): boolean {
@@ -636,4 +650,17 @@ export function colegasPodemMexerNaAgendaLigado(settings: unknown): boolean {
       ? (settings as Record<string, unknown>)
       : undefined;
   return raiz?.colegas_podem_mexer_na_agenda !== false;
+}
+/** Só true booleano autoriza preencher o nome vazio a partir do texto real do atendimento. */
+export function nomeInformadoLigado(settings: unknown): boolean {
+  const crm = settings && typeof settings === 'object' && !Array.isArray(settings)
+    ? (settings as Record<string, unknown>).crm : undefined;
+  return crmSettingsSchema.parse(crm ?? {}).nome_informado_no_atendimento === true;
+}
+
+/** Ausente liga; só o booleano `false` tira as transferências do Aviso no WhatsApp. */
+export function avisoDeTransferenciaLigado(settings: unknown): boolean {
+  const crm = settings && typeof settings === 'object' && !Array.isArray(settings)
+    ? (settings as Record<string, unknown>).crm : undefined;
+  return crmSettingsSchema.parse(crm ?? {}).avisar_transferencia_no_whatsapp;
 }

@@ -24,10 +24,11 @@ import { routingConfigSchema } from "@/lib/schemas";
 import { createClient } from "@/lib/supabase/server";
 import { loadChannelRoutingSettings } from "@/lib/routing/channel-policies";
 import { podeAdministrarEmpresa } from "@/lib/auth/pode-administrar-empresa";
-import { telefoneDeFichaVaziaLigado } from "@/lib/schemas/settings";
+import { telefoneDeFichaVaziaLigado, nomeInformadoLigado } from "@/lib/schemas/settings";
 import { ChannelRoutingForm } from "./_channels-form";
 import { AtendimentoForm } from "./_form";
 import { TelefoneDeFichaVazia } from "./_telefoneDeFichaVazia";
+import { NomeInformado } from "./_nomeInformado";
 import { traduzir } from "@/lib/i18n/dicionario";
 
 export const dynamic = "force-dynamic";
@@ -78,6 +79,7 @@ export default async function AtendimentoSettingsPage() {
         initial={{ ...routing, visibility_mode: settings.visibility_mode ?? DEFAULT_VISIBILITY_MODE }}
       />
       <ChannelRoutingForm initial={channels} />
+      <NomeInformado ligada={nomeInformadoLigado({ crm: settings.crm })} idioma={idioma} podeMudar={podeAdministrarEmpresa(user, activeOrg)} />
       <TelefoneDeFichaVazia
         ligada={telefoneDeFichaVazia}
         idioma={idioma}
