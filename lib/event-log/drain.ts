@@ -137,9 +137,20 @@ export async function avisarEventoMorto(
 
 export async function drainEventLog(
   admin: SupabaseClient,
-  opts: { limit?: number } = {},
+  opts: {
+    limit?: number;
+    /**
+     * Se `false`, este tick NÃO procura evento preso em `processing` (#3693):
+     * o laço do worker varre a cada 2 s quando há trabalho, e a varredura procura
+     * linhas de MINUTOS atrás (`PROCESSING_STALE_MS`). Default `true` — cron e
+     * qualquer chamador que não pense no assunto seguem recuperando presos, e é
+     * o laço quem não deixa passar mais de um minuto.
+     */
+    varrerPresos?: boolean;
+  } = {},
 ): Promise<DrainSummary> {
   const limit = opts.limit ?? 50;
+  const varrerPresos = opts.varrerPresos ?? true;
   const summary: DrainSummary = {
     scanned: 0,
     done: 0,
@@ -176,11 +187,13 @@ export async function drainEventLog(
   // `trg_event_log_touch` (BEFORE UPDATE) o reescreve em toda atualização, então
   // a linha carrega o instante do CLAIM enquanto o handler não volta.
   const limiteDePresos = new Date(Date.now() - PROCESSING_STALE_MS).toISOString();
-  const { data: presos } = await admin
-    .from("event_log")
-    .select("id, organization_id, event_type, attempts")
-    .eq("status", "processing")
-    .lt("updated_at", limiteDePresos);
+  const { data: presos } = !varrerPresos
+    ? { data: [] }
+    : await admin
+        .from("event_log")
+        .select("id, organization_id, event_type, attempts")
+        .eq("status", "processing")
+        .lt("updated_at", limiteDePresos);
 
   // ─── E A VOLTA CONTA COMO TENTATIVA ────────────────────────────────────────
   //
