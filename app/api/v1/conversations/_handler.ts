@@ -17,7 +17,7 @@ import type {
   PatchConversationInput,
 } from "@/lib/schemas";
 import type { Conversation } from "@/lib/types/messaging";
-import { normalizarTermoDeBusca, padroesDoTelefone } from "@/lib/inbox/termo-de-busca";
+import { normalizarTermoDeBusca, padroesDoTelefone, termoSemAcento } from "@/lib/inbox/termo-de-busca";
 import { ORDEM_DA_ESPERA, ehAFila } from "@/lib/inbox/comando-da-conversa";
 import { aplicarMarcadores } from "@/lib/inbox/marcador-da-conversa";
 
@@ -336,10 +336,14 @@ export async function listConversationsHandler(
     // qualquer posição só a partir de 8 dígitos; menos de 4 dígitos não vira
     // busca de telefone — "12" casaria metade da base (`padroesDoTelefone`).
     const camposDoContato = [
-      `display_name.ilike.*${s}*`,
-      `name.ilike.*${s}*`,
-      // O nome da agenda do celular (#2439): a lista o mostra, a busca o acha.
-      `address_book_name.ilike.*${s}*`,
+      // O NOME DO CONTATO CASA SEM ACENTO (#3918): a coluna gerada
+      // `contacts.busca_sem_acento` = `lower(f_unaccent(display_name, name,
+      // address_book_name))` (migration 9098), comparada com o termo pela MESMA
+      // régua em TypeScript (`termoSemAcento`). `like` porque a coluna já é
+      // minúscula. O nome da agenda do celular (#2439) é a terceira parte dela.
+      `busca_sem_acento.like.*${termoSemAcento(s)}*`,
+      // Fork Capital Code (#21): o telefone casa pelo COMEÇO do número
+      // (`padroesDoTelefone`), com e sem DDI; 8+ dígitos também em qualquer posição.
       ...padroesDoTelefone(s).map((p) => `phone_number.ilike.${p}`),
     ].join(",");
 
