@@ -374,6 +374,7 @@ export const AUDIT_ACTIONS = [
   "followup_enrollment.resumed",
   "followup_enrollment.snoozed",
   "followup_enrollment.step_skipped",
+  "followup_enrollment.negocio_escolhido",
   "template.created",
   "template.updated",
   "template.deleted",
