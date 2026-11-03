@@ -117,6 +117,12 @@ export const DICIONARIO: Traducoes = {
   "Todos os follow-ups estão pausados desde {quando}. Nenhum passo anda, ninguém é inscrito e nenhuma mensagem automática de follow-up sai.": { es: "Todos los seguimientos están pausados desde {quando}. Ningún paso avanza, nadie es inscrito y no sale ningún mensaje automático de seguimiento." },
   "Promoções, início de turma e mudanças com prazo que os agentes usam só enquanto valem.": { es: "Promociones, inicio de clases y cambios con plazo que los agentes usan solo mientras están vigentes." },
   "Quem pediu para se matricular pelo WhatsApp e espera um consultor.": { es: "Quien pidió matricularse por WhatsApp y espera a un asesor." },
+  // Ordenação da tabela de campanhas (#3911). "Ordenar por" é igual nos dois
+  // idiomas de propósito: é a mesma expressão em espanhol.
+  "Ordenar por": { es: "Ordenar por" },
+  "Mais recentes": { es: "Más recientes" },
+  "Mais antigas": { es: "Más antiguas" },
+  "Ativas primeiro": { es: "Activas primero" },
   "Avisar também nas transferências para atendimento humano": { es: "Avisar también en las transferencias a atención humana" },
   "Cada transferência manda uma mensagem ao mesmo número e conta no limite diário dele. Desligue para receber só os avisos de casos.": { es: "Cada transferencia envía un mensaje al mismo número y cuenta en su límite diario. Desactívalo para recibir solo los avisos de casos." },
   "Também param de sair, até você cadastrar um número de novo: os avisos de transferência para atendimento humano, os avisos da Agenda que usam o mesmo número dos casos e as automações com a ação \"Mensagem para a equipe\".": { es: "También dejan de salir, hasta que registres otro número: los avisos de transferencia a atención humana, los avisos de la Agenda que usan el mismo número que los casos y las automatizaciones con la acción \"Mensaje para el equipo\"." },
