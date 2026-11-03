@@ -2026,6 +2026,66 @@ fresca ponta a ponta com a marca de um revendedor — `install.sh` numa VPS, res
 quem compra funciona inteira. Os defeitos de marca que mais custam caro moram exatamente aí,
 porque são vistos primeiro por um terceiro. **A receita para fechá-la está em J10, abaixo.**
 
+## J63 — A espera do follow-up só termina em horário comercial `[P1]` (2026-11-03)
+
+Medido numa instalação real: o fluxo "boas-vindas → 24 h → lembrete → 48 h → último toque"
+mandava o lembrete à mesma hora do formulário (2h da manhã para quem se cadastrou às 2h). A
+janela do número seguraria também a boas-vindas, que precisa sair na hora, e a faixa do agente
+vale para a inscrição inteira. A caixa Aguardar (tempo fixo) ganhou "Só terminar a espera em
+horário comercial" (`wait.ate_o_horario`, regra em `lib/followup/espera-no-horario.ts`, sobre as
+mesmas funções de calendário do horário de atendimento do agente). Spec:
+`tests/e2e/followup-builder.spec.ts` (bloco "espera só termina em horário comercial").
+
+| # | Caso | Expectativa | Resultado |
+|---|------|-------------|-----------|
+| J63.1 | Ligar o horário no painel da espera | início, fim e dias aparecem (padrão seg–sex 09–18); o card diz "só em horário comercial" | spec acima — a medir (CI) |
+| J63.2 | Salvar e recarregar | o painel volta com o horário gravado, não com o padrão | spec acima — a medir (CI) |
+| J63.3 | Mudar a duração com o horário ligado | o rascunho guarda a duração nova E o horário inteiro (prova pela API) | spec acima — a medir (CI); o conserto do formulário também em `WaitForm.test.tsx` |
+| J63.4 | A espera vence de noite ou no fim de semana | o motor grava a próxima abertura, no fuso da organização; na saída fora do horário, espera de novo | **PASS (unit)** — `lib/followup/espera-no-horario.test.ts` |
+| J63.5 | O cliente responde no meio da noite | a resposta corta a espera na hora (o horário segura o toque proativo, não a resposta) | **PASS (unit)** |
+| J63.6 | Horário torto (fim antes do início, nenhum dia) | o rascunho aceita; o publish recusa com `horario_da_espera_invalido` | **PASS (unit)** |
+
+Evidência de tela: nenhuma captura versionada neste PR — a prova pela tela é a spec e2e do
+editor de follow-up, que roda no CI.
+
+Não provado: um envio real atravessando a madrugada num worker (o relógio do motor é medido em
+unit e no teste do motor com banco dublê).
+
+## J57 — Vendas e dinheiro no celular `[P1]` (2026-10-23)
+
+ADR-0006, fase F4. Telas do gestor que, a 390px, deixavam ação fora da tela ou
+alvo pequeno para o dedo: Conexões, Webhooks, Radar, Propostas, Faturamento e
+Meta Ads. Conserto só de classes `max-md:`/`sm:` (o DOM é o mesmo do
+computador). Spec: `tests/e2e/comercial-no-celular.spec.ts` (parte 7), 390×844
+com toque emulado, login `admin` (Conexões é só admin). Sem WAHA: Conexões mede
+só o que aparece sem canal conectado de verdade.
+
+| # | Caso | Expectativa | Resultado |
+|---|------|-------------|-----------|
+| J57.1 | Conexões a 390px | o `<main>` não rola para o lado; «Conectar novo WhatsApp» e «Agendar pausa» entre 15 e 375px; «Configurar responsáveis por número» ≥ 44px | a medir (CI) |
+| J57.2 | Webhooks a 390px | as 4 abas entre 15 e 375px, a fila não rola por dentro, e a borda de cima de cada aba (3px) recebe o toque, com controle: 1px acima da aba não a acerta | a medir (CI) |
+| J57.3 | Radar a 390px | «Assumir» dentro da tela; o título do item com ≥ 150px; o link da lista «sem próximo passo» ≥ 44px | a medir (CI) |
+| J57.4 | Lista de propostas a 390px | cabeçalho `display:none`; a caixa da tabela não rola para o lado; a primeira caixa do link do título ≥ 44px (o retângulo inteiro somaria as linhas do título quebrado e passaria sem o conserto) | a medir (CI) |
+| J57.5 | Proposta enviada a 390px | «Marcar como aceita», «Marcar como recusada» e «Revisar esta proposta» entre 15 e 375px | a medir (CI) |
+| J57.6 | Meta Ads sem conta a 390px | o `<main>` não rola para o lado (o `-m-6` acompanha o `p-4` do `<main>`) | a medir (CI) |
+| J57.7 | Faturamento a 390px e a 1280px | a linha do lançamento vira cartão; «Pagar» e «×» com ≥ 44×44px, dentro da tela, sem um cobrir o outro; a 1280px a linha volta a `table-row` e «Pagar» volta a texto | classe conferida (unit) `tests/unit/pagar-e-remover-sao-alvos-separados.test.tsx`; geometria a medir (CI) |
+| J57.8 | Nome da campanha no Meta Ads | a 1ª coluna e o nome dentro dela param em 9rem abaixo de `md` e voltam a 22rem acima | classe conferida (unit) `tests/unit/meta-ads-connect-rate-na-tela.test.tsx`; geometria a medir (CI) — a spec de hoje não chega à tabela: sem conta Meta no CI ela não aparece |
+
+## J62 — Escolher o modelo que escreve o follow-up `[P2]` (2026-11-03)
+
+Em Agente de IA › Provedores, grupo "Atender o cliente", o ponto **"Escrever o follow-up"**
+(`followup_turn`) mostra o modelo da versão publicada do agente enquanto ninguém escolheu outro, e
+aceita um modelo próprio (com ferramentas). Escolhido, só os follow-ups (passos de IA dos fluxos de
+silêncio e retornos combinados pelo agente) passam a usá-lo; a resposta ao cliente continua no
+modelo do agente. Quem escolhe o ponto no motor é o `kind` do job, em `executarTurnoDoAgente`; a
+prova de que o follow-up sai como `followup_turn` e a resposta como `agent_turn`, lida em
+`llm_calls`, é `tests/invariants/follow-up-usa-o-proprio-ponto.test.ts`.
+
+| # | Caso | Esperado | Estado |
+|---|---|---|---|
+| J62.1 | Abrir Provedores e o grupo "Atender o cliente" | o ponto aparece com o nome, a exigência de ferramentas e o sintoma de falha | spec `prova-painel-provedores.spec.ts` ("o follow-up tem modelo próprio…"); evidência em `evidence/modelo-do-follow-up/` quando roda |
+| J62.2 | Escolher outro modelo no ponto, gravar e recarregar | a escolha volta do banco com origem "Escolhido por você"; `agent_turn` não muda de origem | mesma spec |
+
 ## J10 — Instalação fresca com a marca do revendedor `[P0]` (receita manual)
 
 **Por que isto é receita escrita e não spec.** O lugar natural desses casos seria
