@@ -252,6 +252,7 @@ import {
 } from '../guardrails/jailbreak/classifier';
 import { camadaLigada, lerCamadasDaOrg } from '../guardrails/camadas-da-org';
 import { fusoDaOrganizacao } from './fuso-da-org';
+import { blocoDoFeriado, lerFeriadoDoTurno } from './feriado-nacional';
 import { renderAgora } from '@/lib/tempo/agora';
 import { decidirElegibilidadeDaConversa } from '@/lib/ai/elegibilidade/consulta-pg';
 import { AUTORIZADO, iaPodeResponderMensagem } from '@/lib/ai/ativacao/corte-de-ativacao';
@@ -5056,8 +5057,23 @@ async function executarTurnoDoAgente(
     // ponto só cobre os três — e alcança de carona a chamada de fechamento, que
     // reusa `openingTextOnly` e é onde nasce o `prazo` ISO da declaração.
     const agoraBlock = renderAgora(clock(), fusoDaOrg);
+    // ── O FERIADO NACIONAL DO TURNO (#3877) ───────────────────────────────────
+    //
+    // Em 02/11/2026 (Finados) o agente disse "atendemos hoje até as 18h" e
+    // convidou a pessoa à loja, com a empresa fechada: sabia o dia da semana
+    // (`## Agora`) e o horário semanal, e não sabia que aquele dia é feriado.
+    //
+    // Entra logo DEPOIS do relógio porque é a mesma família de fato — "que dia
+    // é hoje" — e porque é dele que o modelo precisa ao decidir se promete
+    // atendimento. No sufixo por-lead, junto do relógio, pelo mesmo motivo: o
+    // país não muda entre leads, mas o dia sim (virada de meia-noite), e o
+    // prefixo estável (`stable-prefix.ts`) não pode carregar fato do dia.
+    const feriadoBlock = blocoDoFeriado(
+      await lerFeriadoDoTurno(pool, tenantId, clock(), fusoDaOrg, runLog),
+    );
     const openingSuffixes = [
       agoraBlock,
+      feriadoBlock,
       matchedSkillsBlock,
       stageHintBlock,
       splitHint,
