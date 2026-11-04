@@ -1,6 +1,6 @@
 "use client";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ehEcoLocal } from "@/lib/kanban/local-echo";
 import { useRealtimeChannel } from "@/hooks/realtime/useRealtimeChannel";
 import { useRefetchDeSeguranca } from "@/hooks/realtime/useRefetchDeSeguranca";
@@ -65,7 +65,7 @@ export function chaveDoQuadro(pipelineId: string | null) {
 
 export function useBoard(pipelineId: string | null, leadPedido: string | null = null) {
   const qc = useQueryClient();
-  const queryKey = chaveDoQuadro(pipelineId);
+  const queryKey = useMemo(() => chaveDoQuadro(pipelineId), [pipelineId]);
 
   /**
    * Cards que acabaram de mudar POR EVENTO REMOTO — o pulso da Wave 3.
