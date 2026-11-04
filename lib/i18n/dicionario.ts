@@ -117,6 +117,7 @@ export const DICIONARIO: Traducoes = {
   "Todos os follow-ups estão pausados desde {quando}. Nenhum passo anda, ninguém é inscrito e nenhuma mensagem automática de follow-up sai.": { es: "Todos los seguimientos están pausados desde {quando}. Ningún paso avanza, nadie es inscrito y no sale ningún mensaje automático de seguimiento." },
   "Promoções, início de turma e mudanças com prazo que os agentes usam só enquanto valem.": { es: "Promociones, inicio de clases y cambios con plazo que los agentes usan solo mientras están vigentes." },
   "Quem pediu para se matricular pelo WhatsApp e espera um consultor.": { es: "Quien pidió matricularse por WhatsApp y espera a un asesor." },
+  "Os dados de autorização devolvidos são de outro endereço, não do servidor informado — o cadastro foi recusado.": { es: "Los datos de autorización devueltos son de otra dirección, no del servidor indicado: el registro fue rechazado." },
   // Ordenação da tabela de campanhas (#3911). "Ordenar por" é igual nos dois
   // idiomas de propósito: é a mesma expressão em espanhol.
   "Ordenar por": { es: "Ordenar por" },
