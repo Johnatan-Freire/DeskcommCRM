@@ -108,7 +108,9 @@ export async function reconcileSessions(
   pool: pg.Pool,
   cfg: WatchdogConfig,
   log: Logger,
+  signal?: AbortSignal,
 ): Promise<number> {
+  if (signal?.aborted) return 0;
   const sessions = await fetchWahaSessions(cfg);
   if (sessions === null) {
     log.warn('watchdog: WAHA indisponível — tick de reconciliação pulado', {});
@@ -116,6 +118,7 @@ export async function reconcileSessions(
   }
   let fixed = 0;
   for (const s of sessions) {
+    if (signal?.aborted) break;
     const wahaStatus = (s.status ?? '').toUpperCase();
     // Arquivada não é nossa: a exclusão desloga o aparelho. Uma sessão STOPPED
     // órfã no transporte não pode voltar a receber mensagem num canal que a UI
@@ -130,6 +133,7 @@ export async function reconcileSessions(
        where cs.waha_session_name = $1 and to_jsonb(cs) ->> 'archived_at' is null`,
       [s.name],
     );
+    if (signal?.aborted) break;
     if (nossas.length === 0) continue;
 
     let nextStatus = wahaStatus;
@@ -156,6 +160,9 @@ export async function reconcileSessions(
 
     if (nossas.every((nossa) => nossa.status === nextStatus)) continue;
 
+    // Sem guarda de parada aqui: o start acima pode já ter religado a sessão, e
+    // parar agora deixaria o transporte STARTING com o espelho ainda STOPPED.
+    // O desligamento espera este laço antes de fechar o pool.
     const { rows } = await pool.query<{ id: string; status: string }>(
       `update channel_sessions
           set status = $2, updated_at = now()
@@ -582,7 +589,7 @@ export async function runSessionWatchdogLoop(
 ): Promise<void> {
   while (!signal.aborted) {
     try {
-      const fixed = await reconcileSessions(pool, cfg, log);
+      const fixed = await reconcileSessions(pool, cfg, log, signal);
       // (a) o abort pode ter chegado DURANTE o tick: sem esta linha o redrive
       // abaixo abriria um lote NOVO com o processo já de saída.
       if (signal.aborted) break;
