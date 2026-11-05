@@ -256,6 +256,7 @@ export function KanbanCardActions({ lead, pipelineId }: KanbanCardActionsProps) 
         open={loseOpen}
         onOpenChange={setLoseOpen}
         leadId={lead.id}
+        leadLabel={lead.title}
         pipelineId={pipelineId}
       />
       <MoveToOtherPipelineDialog
