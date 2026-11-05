@@ -1,6 +1,7 @@
 "use client";
 import { useT } from "@/hooks/i18n/useT";
 import type { MessageTemplate } from "@/hooks/inbox/useMessageTemplates";
+import { termoSemAcento } from "@/lib/inbox/termo-de-busca";
 
 /** Estado do slash-menu a partir do texto do composer. Puro (testável). */
 export function resolveSlash(text: string): { open: boolean; query: string } {
@@ -21,9 +22,11 @@ interface Props {
 export function TemplateMenu({ open, query, templates, onPick, onClose: _onClose }: Props) {
   const t = useT();
   if (!open) return null;
-  const q = query.toLowerCase();
+  // Sem acento nos DOIS lados (#4070): quem digita `orcamento` acha "Orçamento",
+  // e vice-versa. A régua é a mesma da busca do Inbox (`termoSemAcento`).
+  const q = termoSemAcento(query.trim());
   const filtered = templates.filter(
-    (tpl) => tpl.title.toLowerCase().includes(q) || (tpl.shortcut ?? "").toLowerCase().includes(q),
+    (tpl) => termoSemAcento(tpl.title).includes(q) || termoSemAcento(tpl.shortcut ?? "").includes(q),
   );
   return (
     <div
