@@ -52249,6 +52249,1079 @@ create index if not exists idx_contacts_busca_sem_acento_trgm
 
 notify pgrst, 'reload schema';
 
+
+
+-- ---- o molde de IA das empresas novas: as funções e o gatilho (migration 9096) ----
+--
+-- A PRIMEIRA metade da 9096, aqui porque cria FUNÇÃO e a VARREDURA anon (logo
+-- abaixo) proíbe `create function` depois dela. A coluna
+-- `platform_settings.molde_de_ia_org_id` nasce na SEGUNDA metade, no fim do
+-- arquivo: numa instalação NOVA `platform_settings` só é criada mais adiante
+-- (0253). Quem ATUALIZA já tem a tabela, e o `do` abaixo cria a coluna AQUI,
+-- antes do gatilho que a lê — sem ele, uma empresa criada durante o
+-- `update.sh`, entre as duas metades, falharia por coluna inexistente. As
+-- funções são plpgsql: o corpo não é conferido contra o catálogo ao criar, só
+-- ao rodar. Cabeçalho da 9096 para o racional inteiro.
+do $$
+begin
+  if to_regclass('public.platform_settings') is not null then
+    alter table public.platform_settings
+      add column if not exists molde_de_ia_org_id uuid
+        references public.organizations(id) on delete set null;
+  end if;
+end $$;
+
+-- O padrão do molde, quando há um molde e o padrão dele serve à empresa nova.
+-- Definer porque lê `platform_settings` (sem policy, só service_role) e a linha
+-- de OUTRA organização; quem chama são os dois gatilhos abaixo, também definer.
+create or replace function public.fn_llm_do_molde_de_ia()
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+declare
+  v_llm jsonb;
+begin
+  select jsonb_build_object(
+           'provider', o.settings->'llm'->>'provider',
+           'default_model', o.settings->'llm'->>'default_model')
+    into v_llm
+    from public.platform_settings ps
+    join public.organizations o on o.id = ps.molde_de_ia_org_id
+   where ps.id = 1
+     and o.settings->'llm'->>'provider' in ('anthropic', 'openai', 'openrouter')
+     and coalesce(btrim(o.settings->'llm'->>'default_model'), '') <> '';
+  return v_llm;
+end;
+$$;
+
+revoke execute on function public.fn_llm_do_molde_de_ia() from public, anon, authenticated;
+
+-- O padrão de quem nasce: o que veio de quem cria, senão o do molde, senão o do
+-- produto. Corpo da 0096 com o degrau do molde no meio. Passa a ser definer
+-- (com `search_path` vazio) para a leitura do molde não depender do papel de
+-- quem insere a organização.
+create or replace function public.fn_seed_org_llm_defaults()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_llm jsonb;
+begin
+  if coalesce(new.settings->'llm'->>'default_model', '') = '' then
+    v_llm := public.fn_llm_do_molde_de_ia();
+    if v_llm is null then
+      v_llm := jsonb_build_object(
+        'provider', 'anthropic',
+        'default_model', coalesce(
+          (select m.model_id from public.ai_models m
+            where m.provider = 'anthropic' and m.is_default_for_provider
+              and m.deprecated_at is null limit 1),
+          'claude-sonnet-4-6'));
+    end if;
+    new.settings := jsonb_set(
+      coalesce(new.settings, '{}'::jsonb),
+      '{llm}',
+      coalesce(new.settings->'llm', '{}'::jsonb) || v_llm,
+      true);
+  end if;
+  return new;
+end;
+$$;
+
+revoke execute on function public.fn_seed_org_llm_defaults() from public, anon, authenticated;
+
+-- As funções do molde vão para a empresa nova, e o efeito fica na auditoria
+-- DELA — é onde Painel › Empresas › [empresa] o lê.
+create or replace function public.fn_molde_de_ia_na_org_nova()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_molde          uuid;
+  v_copiadas       integer := 0;
+  v_deixadas       integer := 0;
+  v_llm            jsonb;
+  v_padrao_copiado boolean;
+begin
+  select ps.molde_de_ia_org_id into v_molde
+    from public.platform_settings ps
+   where ps.id = 1;
+  if v_molde is null then
+    return null;
+  end if;
+
+  with copiadas as (
+    insert into public.ai_purpose_bindings
+      (organization_id, purpose, provider, credential_id, model_id, base_url, is_enabled)
+    select new.id, b.purpose, b.provider, null::uuid, b.model_id, null::text, b.is_enabled
+      from public.ai_purpose_bindings b
+     where b.organization_id = v_molde
+       and nullif(btrim(b.base_url), '') is null
+       and b.provider in ('anthropic', 'openai', 'openrouter')
+    on conflict (organization_id, purpose) do nothing
+    returning 1
+  )
+  select count(*) into v_copiadas from copiadas;
+
+  select count(*) into v_deixadas
+    from public.ai_purpose_bindings b
+   where b.organization_id = v_molde
+     and not (nullif(btrim(b.base_url), '') is null
+              and b.provider in ('anthropic', 'openai', 'openrouter'));
+
+  -- O padrão foi decidido pelo BEFORE (`fn_seed_org_llm_defaults`); aqui só se
+  -- confere se ele é o do molde, para a auditoria dizer a verdade.
+  v_llm := public.fn_llm_do_molde_de_ia();
+  v_padrao_copiado := v_llm is not null
+    and ((new.settings->'llm')->>'provider') is not distinct from (v_llm->>'provider')
+    and ((new.settings->'llm')->>'default_model') is not distinct from (v_llm->>'default_model');
+
+  if v_copiadas = 0 and not v_padrao_copiado then
+    return null;
+  end if;
+
+  insert into public.api_audit_log
+    (organization_id, action, resource_type, resource_id, bypassed_rls, metadata)
+  values (
+    new.id, 'ai.molde_de_ia_aplicado', 'organization', new.id, true,
+    jsonb_build_object(
+      'molde_org_id', v_molde,
+      'funcoes_copiadas', v_copiadas,
+      'funcoes_deixadas', v_deixadas,
+      'padrao_copiado', v_padrao_copiado,
+      'padrao', case when v_padrao_copiado then v_llm end));
+  return null;
+end;
+$$;
+
+revoke execute on function public.fn_molde_de_ia_na_org_nova() from public, anon, authenticated;
+
+drop trigger if exists trg_molde_de_ia_na_org_nova on public.organizations;
+create trigger trg_molde_de_ia_na_org_nova
+  after insert on public.organizations
+  for each row execute function public.fn_molde_de_ia_na_org_nova();
+
+-- ---- a ligação do canal com o provedor é do servidor (migration 9093) ----
+-- Espelho do gatilho da 9093. Fica ACIMA da VARREDURA anon porque cria função;
+-- as colunas que ele olha nascem no bloco da 9093, mais abaixo. Antes delas
+-- existirem, só o servidor (postgres) escreve na tabela durante o próprio
+-- baseline, e o gatilho sai na primeira linha sem tocar nelas.
+-- ═══ Só o servidor grava a ligação do canal com o provedor ═══
+--
+-- Estas colunas decidem com que chave e por qual conta a instalação fala com o
+-- provedor — e a da instalação alcança todos os números da conta dela. A
+-- tabela tem GRANT ALL para `authenticated`, e as policies deixam o admin da
+-- organização inserir e alterar a própria linha direto pela API do banco: sem
+-- esta trava, a linha diria "use a chave da instalação com a conta X" sem que
+-- o servidor tivesse conectado X. Quem as grava é sempre a rota do servidor,
+-- pelo service role; `anon` e `authenticated` não as escrevem (42501).
+-- Nas linhas da instalação também ficam com o servidor `phone_number` (os
+-- eventos de número do provedor são roteados por ele), `archived_at`,
+-- `provider`, `organization_id` e o DELETE: arquivar, apagar ou trocar o
+-- provedor por fora da rota pularia o passo que desconecta o número da conta
+-- da instalação, e desarquivar devolveria ao roteamento um número que pode já
+-- ser de outra organização. A rota de exclusão grava essas linhas pelo
+-- service role, depois de desfazer no provedor.
+--
+-- Gatilho e não privilégio por coluna: o GRANT ALL de tabela prevalece sobre
+-- um revoke de coluna, e trocá-lo por uma lista de colunas teria de ser
+-- lembrado a cada coluna nova. A função não precisa de EXECUTE para disparar.
+create or replace function public.fn_channel_sessions_ligacao_ao_provedor_e_do_servidor()
+returns trigger language plpgsql set search_path = public, pg_temp as $$
+begin
+  if current_user not in ('authenticated', 'anon') then
+    -- `new` é nulo no DELETE: devolvê-lo cancelaria a exclusão do servidor.
+    return coalesce(new, old);
+  end if;
+  if tg_op = 'DELETE' then
+    if old.zernio_credencial_da_instalacao then
+      raise exception 'canal_ligacao_ao_provedor_e_do_servidor' using errcode = '42501';
+    end if;
+    return old;
+  end if;
+  if tg_op = 'INSERT' then
+    if new.zernio_credencial_da_instalacao
+       or new.zernio_account_id is not null
+       or new.zernio_profile_id is not null
+       or new.zernio_webhook_id is not null then
+      raise exception 'canal_ligacao_ao_provedor_e_do_servidor' using errcode = '42501';
+    end if;
+    return new;
+  end if;
+  if (new.zernio_credencial_da_instalacao, new.zernio_account_id, new.zernio_profile_id, new.zernio_webhook_id)
+       is distinct from
+     (old.zernio_credencial_da_instalacao, old.zernio_account_id, old.zernio_profile_id, old.zernio_webhook_id)
+     or (old.zernio_credencial_da_instalacao and
+         (new.archived_at, new.provider, new.organization_id, new.phone_number)
+           is distinct from
+         (old.archived_at, old.provider, old.organization_id, old.phone_number)) then
+    raise exception 'canal_ligacao_ao_provedor_e_do_servidor' using errcode = '42501';
+  end if;
+  return new;
+end;
+$$;
+
+revoke execute on function public.fn_channel_sessions_ligacao_ao_provedor_e_do_servidor() from public, anon, authenticated;
+
+drop trigger if exists trg_channel_sessions_ligacao_ao_provedor_e_do_servidor on public.channel_sessions;
+create trigger trg_channel_sessions_ligacao_ao_provedor_e_do_servidor
+  before insert or update or delete on public.channel_sessions
+  for each row execute function public.fn_channel_sessions_ligacao_ao_provedor_e_do_servidor();
+
+-- ---- a credencial do número oficial é do servidor (migration 9104) ----
+-- Espelho da 9104: o corpo da 9093 inteiro, mais as colunas meta_* (o porquê
+-- está no cabeçalho da migration). Fica DEPOIS do bloco da 9093, para ser a
+-- última definição da função, e ACIMA da VARREDURA anon porque cria função.
+-- As colunas meta_* nascem no bloco da 0087, muito acima; as zernio_* nascem
+-- mais abaixo, como explica o bloco da 9093. O gatilho é o da 9093.
+create or replace function public.fn_channel_sessions_ligacao_ao_provedor_e_do_servidor()
+returns trigger language plpgsql set search_path = public, pg_temp as $$
+begin
+  if current_user not in ('authenticated', 'anon') then
+    -- `new` é nulo no DELETE: devolvê-lo cancelaria a exclusão do servidor.
+    return coalesce(new, old);
+  end if;
+  if tg_op = 'DELETE' then
+    if old.zernio_credencial_da_instalacao then
+      raise exception 'canal_ligacao_ao_provedor_e_do_servidor' using errcode = '42501';
+    end if;
+    return old;
+  end if;
+  if tg_op = 'INSERT' then
+    if new.zernio_credencial_da_instalacao
+       or new.zernio_account_id is not null
+       or new.zernio_profile_id is not null
+       or new.zernio_webhook_id is not null
+       -- 9104: a credencial do número oficial também é do servidor.
+       or new.meta_token_encrypted is not null
+       or new.meta_phone_number_id is not null
+       or new.meta_waba_id is not null then
+      raise exception 'canal_ligacao_ao_provedor_e_do_servidor' using errcode = '42501';
+    end if;
+    return new;
+  end if;
+  if (new.zernio_credencial_da_instalacao, new.zernio_account_id, new.zernio_profile_id, new.zernio_webhook_id)
+       is distinct from
+     (old.zernio_credencial_da_instalacao, old.zernio_account_id, old.zernio_profile_id, old.zernio_webhook_id)
+     -- 9104: a credencial do número oficial também é do servidor.
+     or (new.meta_token_encrypted, new.meta_phone_number_id, new.meta_waba_id)
+       is distinct from
+     (old.meta_token_encrypted, old.meta_phone_number_id, old.meta_waba_id)
+     or (old.zernio_credencial_da_instalacao and
+         (new.archived_at, new.provider, new.organization_id, new.phone_number)
+           is distinct from
+         (old.archived_at, old.provider, old.organization_id, old.phone_number)) then
+    raise exception 'canal_ligacao_ao_provedor_e_do_servidor' using errcode = '42501';
+  end if;
+  return new;
+end;
+$$;
+
+revoke execute on function public.fn_channel_sessions_ligacao_ao_provedor_e_do_servidor() from public, anon, authenticated;
+
+-- ---- servidores MCP por agente e OAuth por contato (migration 9095) ----
+-- Espelho idempotente da migration 9095 (o porquê está no cabeçalho dela).
+create table if not exists public.ai_agent_mcp_servers (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  agent_id uuid not null references public.ai_agents(id) on delete cascade,
+  nome text not null,
+  -- Prefixo do nome que o MODELO vê (`<slug>__<ferramenta>`): curto, estável e
+  -- dentro de `^[A-Za-z0-9_-]{1,64}$` depois de concatenado.
+  slug text not null,
+  endpoint text not null,
+  modo_autenticacao text not null default 'chave_estatica',
+  chave_encrypted bytea,
+  chave_iv bytea,
+  chave_tag bytea,
+  chave_last4 text,
+  oauth_client_id text,
+  oauth_client_secret_encrypted bytea,
+  oauth_client_secret_iv bytea,
+  oauth_client_secret_tag bytea,
+  -- Cache da descoberta (RFC 9728 + 8414) e do registro dinâmico (RFC 7591).
+  -- Metadado público do authorization server — nada de segredo aqui.
+  oauth_metadados jsonb not null default '{}'::jsonb,
+  escopos_pedidos text[] not null default '{}'::text[],
+  escrita_delegada boolean not null default false,
+  retencao_apos_encerramento_horas integer not null default 0,
+  ativo boolean not null default true,
+  created_by uuid,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint ai_agent_mcp_servers_modo_check
+    check (modo_autenticacao in ('nenhuma', 'chave_estatica', 'oauth_por_contato')),
+  constraint ai_agent_mcp_servers_nome_check
+    check (char_length(btrim(nome)) between 1 and 80),
+  constraint ai_agent_mcp_servers_slug_check
+    check (slug ~ '^[a-z0-9]{1,16}$'),
+  constraint ai_agent_mcp_servers_endpoint_check
+    check (endpoint ~ '^https?://' and position('?' in endpoint) = 0 and position('#' in endpoint) = 0),
+  constraint ai_agent_mcp_servers_retencao_check
+    check (retencao_apos_encerramento_horas between 0 and 720),
+  constraint ai_agent_mcp_servers_oauth_metadados_check
+    check (jsonb_typeof(oauth_metadados) = 'object'),
+  -- Escrita delegada só faz sentido com a credencial do PRÓPRIO contato.
+  constraint ai_agent_mcp_servers_escrita_delegada_check
+    check (not escrita_delegada or modo_autenticacao = 'oauth_por_contato')
+);
+
+create unique index if not exists ai_agent_mcp_servers_agente_slug_uk
+  on public.ai_agent_mcp_servers (agent_id, slug);
+create index if not exists ai_agent_mcp_servers_org_agente_idx
+  on public.ai_agent_mcp_servers (organization_id, agent_id);
+
+comment on table public.ai_agent_mcp_servers is
+  'Servidores MCP externos de UM agente (até 5). Server-side only: RLS ligada sem policy e nenhum privilégio para anon/authenticated. Chave e client_secret cifrados com AES-256-GCM (AI_CRED_AES_KEY); a tela vê só chave_last4.';
+comment on column public.ai_agent_mcp_servers.modo_autenticacao is
+  'nenhuma | chave_estatica (Bearer fixo, com X-Deskcomm-* opcionais) | oauth_por_contato (cada contato autoriza com o login dele; um token por servidor × contato em contato_mcp_credenciais).';
+comment on column public.ai_agent_mcp_servers.escrita_delegada is
+  'Desligada por padrão. Ligada, uma ferramenta marcada como escrita pelo admin pode ser chamada durante a conversa COM A CREDENCIAL DO CONTATO do turno — dentro do que ele mesmo autorizou.';
+
+create table if not exists public.mcp_oauth_pedidos (
+  -- O `state` do OAuth: 256 bits aleatórios em base64url, gerados no servidor.
+  id text primary key,
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  servidor_id uuid not null references public.ai_agent_mcp_servers(id) on delete cascade,
+  contact_id uuid not null references public.contacts(id) on delete cascade,
+  conversation_id uuid references public.conversations(id) on delete cascade,
+  code_verifier_encrypted bytea not null,
+  code_verifier_iv bytea not null,
+  code_verifier_tag bytea not null,
+  escopos text[] not null default '{}'::text[],
+  expira_em timestamptz not null,
+  usado_em timestamptz,
+  created_at timestamptz not null default now(),
+  constraint mcp_oauth_pedidos_id_check check (id ~ '^[A-Za-z0-9_-]{43}$')
+);
+
+create index if not exists mcp_oauth_pedidos_expira_idx
+  on public.mcp_oauth_pedidos (expira_em);
+create index if not exists mcp_oauth_pedidos_servidor_contato_idx
+  on public.mcp_oauth_pedidos (servidor_id, contact_id);
+
+comment on table public.mcp_oauth_pedidos is
+  'Pedido de autorização OAuth de USO ÚNICO (o id é o state). Amarrado ao contato e à conversa do turno que o gerou; expira em 10 min; marcado usado_em ANTES da troca do code. Server-side only.';
+
+create table if not exists public.contato_mcp_credenciais (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  servidor_id uuid not null references public.ai_agent_mcp_servers(id) on delete cascade,
+  contact_id uuid not null references public.contacts(id) on delete cascade,
+  -- NULL depois da revogação: o token deixa de existir, a linha fica como
+  -- registro de que houve acesso (sem conteúdo nenhum do terceiro).
+  access_token_encrypted bytea,
+  access_token_iv bytea,
+  access_token_tag bytea,
+  refresh_token_encrypted bytea,
+  refresh_token_iv bytea,
+  refresh_token_tag bytea,
+  expira_em timestamptz,
+  escopos text[] not null default '{}'::text[],
+  -- Trava otimista da renovação: quem renova grava `versao = versao + 1 where
+  -- versao = <a que leu>`; o perdedor da corrida relê a credencial vencedora.
+  versao integer not null default 1,
+  revogar_apos timestamptz,
+  revogado_em timestamptz,
+  ultimo_uso_em timestamptz,
+  criado_em timestamptz not null default now(),
+  atualizado_em timestamptz not null default now(),
+  constraint contato_mcp_credenciais_token_check
+    check (revogado_em is not null or access_token_encrypted is not null)
+);
+
+create unique index if not exists contato_mcp_credenciais_servidor_contato_uk
+  on public.contato_mcp_credenciais (servidor_id, contact_id);
+create index if not exists contato_mcp_credenciais_org_contato_idx
+  on public.contato_mcp_credenciais (organization_id, contact_id);
+create index if not exists contato_mcp_credenciais_revogar_idx
+  on public.contato_mcp_credenciais (revogar_apos)
+  where revogado_em is null and revogar_apos is not null;
+
+comment on table public.contato_mcp_credenciais is
+  'Token OAuth de UM contato para UM servidor MCP externo, cifrado (AES-256-GCM). Nunca sai para o modelo, log, auditoria ou event_log. Server-side only.';
+
+alter table public.ai_agent_mcp_servers enable row level security;
+alter table public.mcp_oauth_pedidos enable row level security;
+alter table public.contato_mcp_credenciais enable row level security;
+
+revoke all on public.ai_agent_mcp_servers from anon, authenticated;
+revoke all on public.mcp_oauth_pedidos from anon, authenticated;
+revoke all on public.contato_mcp_credenciais from anon, authenticated;
+grant select, insert, update, delete on public.ai_agent_mcp_servers to service_role;
+grant select, insert, update, delete on public.mcp_oauth_pedidos to service_role;
+grant select, insert, update, delete on public.contato_mcp_credenciais to service_role;
+
+drop trigger if exists trg_ai_agent_mcp_servers_updated_at on public.ai_agent_mcp_servers;
+create trigger trg_ai_agent_mcp_servers_updated_at
+  before update on public.ai_agent_mcp_servers
+  for each row execute function public.fn_set_updated_at();
+
+-- ── O encerramento da conversa AGENDA a revogação; nunca a executa ──────────
+--
+-- Trigger não faz HTTP (doutrina). Ele só grava `revogar_apos` = agora + a
+-- retenção do servidor (padrão 0 = revogar no encerramento). Quem chama o
+-- `revocation_endpoint` do terceiro e apaga o token é o cron
+-- `app/api/v1/cron/mcp-oauth-revogacao`. Vale para todo caminho que encerra
+-- conversa (tela, lote, automação), porque mora na linha e não na rota.
+create or replace function public.fn_mcp_agenda_revogacao_no_encerramento()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if new.status in ('closed', 'resolved', 'archived')
+     and old.status is distinct from new.status
+     and new.contact_id is not null then
+    update public.contato_mcp_credenciais c
+       set revogar_apos = now() + make_interval(hours => s.retencao_apos_encerramento_horas),
+           atualizado_em = now()
+      from public.ai_agent_mcp_servers s
+     where s.id = c.servidor_id
+       and c.organization_id = new.organization_id
+       and c.contact_id = new.contact_id
+       and c.revogado_em is null
+       and c.revogar_apos is null;
+  end if;
+  return new;
+end;
+$$;
+
+revoke execute on function public.fn_mcp_agenda_revogacao_no_encerramento() from public, anon, authenticated;
+
+drop trigger if exists trg_conversations_mcp_revogacao on public.conversations;
+create trigger trg_conversations_mcp_revogacao
+  after update of status on public.conversations
+  for each row execute function public.fn_mcp_agenda_revogacao_no_encerramento();
+
+-- ── LGPD: anonimizar o contato revoga e APAGA os acessos dele ──────────────
+--
+-- Excluir o contato: a rota de exclusão revoga no terceiro ANTES (o token
+-- some na cascata, e sem ele não há RFC 7009) e a FK em cascata apaga o resto.
+-- Anonimizar mantém a linha do contato, então aqui: os pedidos de autorização
+-- pendentes somem na hora; a credencial JÁ revogada (sem token, só o registro
+-- de que houve acesso) também, porque o cron só escolhe as vivas; e as vivas
+-- ficam com revogação IMEDIATA agendada — o cron revoga no terceiro (precisa
+-- do token para isso) e, por o contato estar anonimizado, apaga a linha
+-- inteira em vez de só esvaziá-la.
+create or replace function public.fn_mcp_contato_anonimizado_revoga_acessos()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  delete from public.mcp_oauth_pedidos p
+   where p.organization_id = new.organization_id
+     and p.contact_id = new.id;
+  delete from public.contato_mcp_credenciais c
+   where c.organization_id = new.organization_id
+     and c.contact_id = new.id
+     and c.revogado_em is not null;
+  update public.contato_mcp_credenciais c
+     set revogar_apos = now(),
+         atualizado_em = now()
+   where c.organization_id = new.organization_id
+     and c.contact_id = new.id
+     and (c.revogar_apos is null or c.revogar_apos > now());
+  return new;
+end;
+$$;
+
+revoke execute on function public.fn_mcp_contato_anonimizado_revoga_acessos() from public, anon, authenticated;
+
+drop trigger if exists trg_contato_anonimizado_revoga_acessos_mcp on public.contacts;
+create trigger trg_contato_anonimizado_revoga_acessos_mcp
+  after update of is_anonymized on public.contacts
+  for each row
+  when (new.is_anonymized is true and old.is_anonymized is distinct from true)
+  execute function public.fn_mcp_contato_anonimizado_revoga_acessos();
+
+-- ---- intervalo mínimo entre respostas da IA (migration 9101) ----
+alter table public.ai_agent_versions
+  add column if not exists reply_min_interval_ms integer;
+
+comment on column public.ai_agent_versions.reply_min_interval_ms is
+  'Intervalo mínimo em ms entre uma resposta da IA e a próxima à mesma conversa. NULL ou 0 = sem intervalo; teto 600000 (10 min).';
+
+-- O `drop … if exists` antes do `add` torna a migration reaplicável: o `update.sh`
+-- re-aplica o apêndice do baseline, e `add constraint` sem guarda quebraria com
+-- 'already exists'. Mesmo par no apêndice do baseline.sql.
+alter table public.ai_agent_versions
+  drop constraint if exists ai_agent_versions_reply_min_interval_ms_check;
+
+alter table public.ai_agent_versions
+  add constraint ai_agent_versions_reply_min_interval_ms_check
+  check (reply_min_interval_ms is null or (reply_min_interval_ms >= 0 and reply_min_interval_ms <= 600000));
+
+-- A trava da versão publicada cobre a coluna nova (mesma lista da última
+-- definição, mais `reply_min_interval_ms`). Sem isto, o intervalo de um agente
+-- PUBLICADO mudaria por um caminho que esqueça o 409 da camada da app.
+create or replace function fn_ai_agent_version_content_immutable() returns trigger
+-- search_path fixo na PRÓPRIA definição: um create or replace sem a cláusula
+-- apaga o alter function ... set search_path da 0521 (invariante
+-- tests/invariants/avisos-do-security-advisor.test.ts).
+language plpgsql set search_path = '' as $fn$
+begin
+  if old.status <> 'draft' and (
+       new.system_prompt          is distinct from old.system_prompt
+    or new.provider               is distinct from old.provider
+    or new.model                  is distinct from old.model
+    or new.credential_id          is distinct from old.credential_id
+    or new.tool_ids               is distinct from old.tool_ids
+    or new.trigger_config         is distinct from old.trigger_config
+    or new.channel_session_id     is distinct from old.channel_session_id
+    or new.max_steps              is distinct from old.max_steps
+    or new.token_budget           is distinct from old.token_budget
+    or new.cost_budget_cents      is distinct from old.cost_budget_cents
+    or new.history_message_window is distinct from old.history_message_window
+    or new.history_token_window   is distinct from old.history_token_window
+    or new.handoff_keywords       is distinct from old.handoff_keywords
+    or new.handoff_tool_enabled   is distinct from old.handoff_tool_enabled
+    or new.handoff_legal_enabled  is distinct from old.handoff_legal_enabled
+    or new.followup               is distinct from old.followup
+    or new.multimodal_input       is distinct from old.multimodal_input
+    or new.video_frames_enabled   is distinct from old.video_frames_enabled
+    or new.split_messages         is distinct from old.split_messages
+    or new.split_max_chars        is distinct from old.split_max_chars
+    or new.cases_enabled          is distinct from old.cases_enabled
+    or new.operator_enabled       is distinct from old.operator_enabled
+    or new.operator_model         is distinct from old.operator_model
+    or new.operator_tool_ids      is distinct from old.operator_tool_ids
+    or new.pipeline_ids           is distinct from old.pipeline_ids
+    or new.knowledge_source_ids   is distinct from old.knowledge_source_ids
+    or new.proposal_ai_draft_enabled is distinct from old.proposal_ai_draft_enabled
+    or new.inbound_debounce_ms    is distinct from old.inbound_debounce_ms
+    or new.reply_min_interval_ms  is distinct from old.reply_min_interval_ms
+    or new.voz_enabled            is distinct from old.voz_enabled
+    or new.voz_quando             is distinct from old.voz_quando
+    or new.version_number         is distinct from old.version_number
+    or new.agent_id               is distinct from old.agent_id
+    or new.organization_id        is distinct from old.organization_id
+  ) then
+    raise exception 'ai_agent_versions % é imutável (status=%): mudança de conteúdo = versão draft nova; rollback = revert (clona + publica)',
+      old.id, old.status;
+  end if;
+  return new;
+end;
+$fn$;
+
+notify pgrst, 'reload schema';
+
+-- ---- a atribuição do próprio turno não revoga o turno (migration 9103) ----
+-- Espelho da 9103; o porquê inteiro está no cabeçalho da migration. O turno que
+-- pediu a atribuição é o ÚNICO poupado pelo gatilho de assumir; o Assumir de uma
+-- pessoa continua revogando o turno autônomo, e `p_source_job_id` só entra por
+-- chamador de runtime. Cria função: mora ACIMA da VARREDURA anon.
+-- manifest: A atribuição pedida pelo PRÓPRIO turno autônomo deixa de revogar esse turno; o Assumir de uma pessoa continua revogando (issue #3926).
+--
+-- 9103 — "eu atribuí" deixou de ser lido como "alguém assumiu".
+--
+-- ─── O defeito, medido (issue #3926) ────────────────────────────────────────
+--
+-- Agente nativo publicado com o prompt pedindo, na mesma resposta: mensagem ao
+-- cliente, mover o card de etapa, `request_human_handoff` e
+-- `crm_assign_conversation`. Em produção a mensagem saía, a conversa aparecia
+-- em "Minhas" do atendente — e NÃO nascia o cartão "Por que a IA passou para
+-- você" nem a etapa mudava.
+--
+-- A cadeia: `crm_assign_conversation` chama `fn_conversation_assign` com
+-- `reason` default 'transfer'; o INSERT em `conversation_assignment_events`
+-- dispara `trg_interromper_turnos_ao_assumir`, que trata `claim` E `transfer`
+-- como "uma pessoa assumiu" e marca como `failed`
+-- (`conversation_command_taken`) todo `inbound_turn`/`case_reply_turn` vivo
+-- daquela conversa — INCLUSIVE o turno que acabou de pedir a atribuição. A
+-- partir daí `requireCurrentAutonomousTurn` (`lib/atendimento/fronteira-server.ts`)
+-- recusa cada efeito seguinte com `StaleServiceBoundaryError`: a passagem
+-- (`performHumanHandoff`) e a mudança de etapa morrem sem rastro visível.
+--
+-- A ordem no prompt NÃO protege: as chamadas de ferramenta da mesma etapa do
+-- modelo rodam em paralelo no AI SDK, então a atribuição pode confirmar antes
+-- da passagem — e o efeito é o mesmo.
+--
+-- ─── A decisão: o fato ganha DE QUEM veio ───────────────────────────────────
+--
+-- O gatilho não é afrouxado: ele existe para quando uma PESSOA assume e o
+-- agente tem de parar. O que faltava era o fato carregar a origem. Agora:
+--
+-- · `fn_conversation_assign` aceita `p_source_job_id` (7º parâmetro, default
+--   nulo) e o grava em `conversation_assignment_events.source_job_id`;
+-- · `fn_interromper_turnos_ao_assumir` revoga todos os turnos da conversa
+--   EXCETO aquele job (`j.id is distinct from new.source_job_id`), que é o
+--   único que pediu a atribuição;
+-- · `p_source_job_id` só é aceito de chamador de RUNTIME (`auth.uid()` nulo).
+--   Sessão de pessoa que passe o parâmetro recebe
+--   `source_job_requires_runtime_caller` — assim ninguém desliga a proteção
+--   passando o id do job que está rodando. Na prática o valor vem de
+--   `McpContext.sourceJobId`, que o runtime injeta e o modelo NÃO escreve.
+--
+-- ─── O que NÃO muda ────────────────────────────────────────────────────────
+--
+-- · `claim` e `transfer` de uma pessoa continuam revogando o turno autônomo —
+--   é a proteção que o gatilho existe para dar, e o caminho humano não passa
+--   `p_source_job_id`;
+-- · `reason` 'routing' e 'handoff' continuam não interrompendo nada, como antes;
+-- · vocabulário de `reason` intacto (nenhum valor novo);
+-- · corpo da função de atribuição intacto FORA do que a issue pede: guarda de
+--   suporte, papel, elegibilidade do destino, visibilidade (0685/9017),
+--   número que segue o vendedor (9039) e a conversa que continua (9054)
+--   seguem byte a byte — a única diferença é o parâmetro novo, a origem
+--   gravada no evento e a recusa de sessão de pessoa;
+-- · grants: a função de 6 argumentos é derrubada porque assinatura nova com
+--   default cria SOBRECARGA (`function ... is not unique` em toda chamada de 6
+--   argumentos); a de 7 nasce com os mesmos grants de antes.
+
+alter table public.conversation_assignment_events
+  add column if not exists source_job_id uuid;
+
+comment on column public.conversation_assignment_events.source_job_id is
+  'Job do turno autônomo que PEDIU a atribuição (issue #3926), gravado por fn_conversation_assign a partir do p_source_job_id do runtime. Nulo em toda atribuição feita por pessoa ou por rota que não é turno (claim do Inbox, roteamento, automação). É o que faz fn_interromper_turnos_ao_assumir poupar o próprio turno que atribuiu, sem poupar mais ninguém: qualquer outro turno da conversa continua sendo revogado.';
+
+-- Assinatura nova = função NOVA: sem o drop, a de 6 argumentos sobrevive como
+-- sobrecarga e TODO chamador de 6 argumentos (Inbox, roteamento, automação,
+-- testes) passa a receber "function ... is not unique".
+drop function if exists public.fn_conversation_assign(uuid, uuid, uuid, text, uuid, boolean);
+
+create or replace function public.fn_conversation_assign(
+  p_organization_id uuid,
+  p_conversation_id uuid,
+  p_to_user_id uuid,
+  p_reason text,
+  p_expected_assignee uuid default null,
+  p_enforce_expected boolean default false,
+  p_source_job_id uuid default null
+)
+ RETURNS SETOF conversations
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+declare
+  v_from uuid;
+  v_conv public.conversations%rowtype;
+  v_numero uuid;
+  v_trocou_de_numero boolean := false;
+  v_continua uuid;
+begin
+  if not public.fn_support_write_allowed(p_organization_id) then raise exception 'support_readonly' using errcode='42501'; end if;
+  -- #3926 — `p_source_job_id` é do RUNTIME (o turno que está executando),
+  -- nunca de uma sessão de pessoa: recusar em vez de ignorar, porque ignorar
+  -- em silêncio deixaria a atribuição de uma pessoa passando com o turno
+  -- revogado sem ninguém saber por quê.
+  if p_source_job_id is not null and auth.uid() is not null then
+    raise exception 'source_job_requires_runtime_caller'
+      using hint = 'p_source_job_id is set by the agent runtime, never by a user session';
+  end if;
+  if auth.uid() is not null
+     and not public.fn_role_at_least(p_organization_id, 'agent') then
+    raise exception 'caller_not_authorized_for_org'
+      using hint = 'caller must be an active agent+ member of the organization';
+  end if;
+
+  if p_to_user_id is not null then
+    if coalesce(public.fn_member_role_in_org(p_to_user_id, p_organization_id), 'none')
+         not in ('agent','manager','admin') then
+      raise exception 'assignee_not_eligible_member'
+        using hint = 'target must be an active agent+ member of the organization';
+    end if;
+  end if;
+
+  -- Conversa fora da visibilidade de quem chama responde como conversa
+  -- inexistente (zero linhas). A regra fica no WHERE, com o dono da própria
+  -- linha (reavaliado na versão nova se houver espera), nunca um valor do
+  -- corpo. Service role (sem auth.uid) segue.
+  --
+  -- A EXCEÇÃO DA #3479: conversa SEM dono pode ser assumida por quem assume
+  -- para si. Sem ela o modo "Só os seus" se morde: a conversa que nasceu do
+  -- cadastro do contato tem dono nulo, o predicado do modo responde "não vejo"
+  -- para dono nulo, e o claim — a operação que daria dono a ela — era recusado,
+  -- com a tela dizendo "está com outro atendente" sobre uma conversa de
+  -- ninguém. O termo se limita sozinho: exige dono nulo E dono novo =
+  -- chamador, então conversa de colega (o caso que a 0685 protege), a
+  -- transferência para terceiro e o release continuam respondendo zero linhas
+  -- exatamente como antes.
+  select * into v_conv
+    from public.conversations
+   where id = p_conversation_id
+     and organization_id = p_organization_id
+     and (
+       auth.uid() is null
+       or public.fn_can_view_conversation(organization_id, assigned_to_user_id)
+       or (assigned_to_user_id is null and p_to_user_id = auth.uid()
+           and p_reason = 'claim' and p_enforce_expected)
+     )
+   for no key update;
+
+  if not found then
+    return;
+  end if;
+
+  v_from := v_conv.assigned_to_user_id;
+
+  if p_enforce_expected and v_from is distinct from p_expected_assignee then
+    return;
+  end if;
+
+  -- ─── #3642: o número segue o vendedor ──────────────────────────────────────
+  -- Numa empresa com um número por vendedor (`channel_routing_policies` +
+  -- `channel_routing_responsibles`), a troca de dono mudava só o dono: a
+  -- conversa continuava no `channel_session_id` do vendedor ANTERIOR e o envio
+  -- (que sai pela sessão da conversa) fazia o vendedor novo responder pelo
+  -- WhatsApp do colega. Aqui a conversa passa para o número conectado do dono
+  -- novo, na MESMA transação — e como esta é a porta única da atribuição, a
+  -- regra vale para Transferir (um e em lote), Assumir, MCP, automação e a
+  -- passagem de carteira sem nenhum deles precisar conhecê-la.
+  --
+  -- QUAL número é a `fn_numero_da_transferencia` — a mesma que o diálogo de
+  -- Transferir consulta para avisar antes de confirmar, então o aviso e o efeito
+  -- não divergem. Nulo = o número fica (número compartilhado, número sem dono,
+  -- dono novo sem número conectado do mesmo canal, grupo, ou o contato já tem
+  -- conversa no número novo). A transferência nunca falha por causa do número.
+  v_numero := public.fn_numero_da_transferencia(p_organization_id, p_conversation_id, p_to_user_id);
+  v_trocou_de_numero := v_numero is not null;
+
+  -- ─── #3732: e quando o número NÃO pode seguir ──────────────────────────────
+  -- O caso que a 9039 deixou em pé: o contato já tem conversa no número do dono
+  -- novo, então o número fica, e a conversa ficava presa com o dono novo num
+  -- número que não é dele (envio em 409, "transfira para você" — já feito).
+  --
+  -- A conversa que está NESSE número passa para o dono novo quando estava sem
+  -- dono ou com o dono ANTERIOR: é a metade que faltava para ele ter onde
+  -- responder. Conversa que já é de uma TERCEIRA pessoa não é tomada — quem a
+  -- assumiu no meio continua com ela, e o aviso do envio diz o nome dele. A
+  -- adoção passa por esta mesma função, então o evento da linha do tempo e o
+  -- resto vão junto.
+  if not v_trocou_de_numero and p_to_user_id is not null then
+    select o.id into v_continua
+      from public.conversations o
+     where o.id = public.fn_conversa_que_continua(
+             p_organization_id, p_conversation_id, p_to_user_id)
+       and (o.assigned_to_user_id is null
+            or o.assigned_to_user_id is not distinct from v_from)
+       and o.assigned_to_user_id is distinct from p_to_user_id
+       -- Doc 237, escolha 3-B: a conversa que a IA está atendendo fica com a
+       -- IA. Sem esta condição, conversa sem dono e com a IA ativa era adotada
+       -- e calada sem prazo (`bot_silenced_until = 'infinity'`), inclusive por
+       -- tabela numa troca de carteira, que pula essa conversa de propósito.
+       and public.comando_da_conversa(o) <> 'automatico';
+  end if;
+
+  update public.conversations
+     set assigned_to_user_id = p_to_user_id,
+         -- Desnormalizado JUNTO com o dono, na mesma transação: nunca existe
+         -- uma janela em que id e nome discordam. NULL junto com o id quando
+         -- a atribuição é removida (release) — nunca sobra um nome órfão de
+         -- dono nenhum. Lido de auth.users porque quem chama esta função
+         -- (RPC) não necessariamente tem acesso ao Admin API — a definer
+         -- resolve por dentro.
+         assigned_to_user_name = case
+           when p_to_user_id is null then null
+           else (select raw_user_meta_data ->> 'full_name' from auth.users where id = p_to_user_id)
+         end,
+         assigned_at = case when p_to_user_id is null then null else now() end,
+         assignee_kind = case when p_to_user_id is null then null else 'user' end,
+         status = case when p_to_user_id is null then 'open' else 'claimed' end,
+         status_changed_at = now(),
+         unread_count_for_assignee = 0,
+         bot_silenced_until = case
+           when p_reason = 'routing'  then bot_silenced_until
+           when p_to_user_id is null  then (case when last_handoff_at is null
+                                                 then null
+                                                 else bot_silenced_until end)
+           else 'infinity'::timestamptz
+         end,
+         -- #3642: o número acompanha o dono, e a thread do provider ANTERIOR não
+         -- viaja — ela pertence ao número antigo.
+         channel_session_id = case when v_trocou_de_numero then v_numero
+                                   else channel_session_id end,
+         provider_conversation_id = case when v_trocou_de_numero then null
+                                         else provider_conversation_id end,
+         updated_at = now()
+   where id = p_conversation_id
+   returning * into v_conv;
+
+  insert into public.conversation_assignment_events
+    (organization_id, conversation_id, from_user_id, to_user_id, changed_by, reason, source_job_id)
+  values
+    (p_organization_id, p_conversation_id, v_from, p_to_user_id, auth.uid(), p_reason, p_source_job_id);
+
+  -- #3732: a conversa que continua no número do dono novo vai junto (depois do
+  -- evento da conversa transferida, para a linha do tempo contar na ordem).
+  if v_continua is not null then
+    perform public.fn_conversation_assign(
+      p_organization_id, v_continua, p_to_user_id, 'transfer', null, false, p_source_job_id);
+  end if;
+
+  return next v_conv;
+end;
+$function$;
+
+revoke all     on function public.fn_conversation_assign(uuid, uuid, uuid, text, uuid, boolean, uuid) from public;
+revoke execute on function public.fn_conversation_assign(uuid, uuid, uuid, text, uuid, boolean, uuid) from anon;
+grant  execute on function public.fn_conversation_assign(uuid, uuid, uuid, text, uuid, boolean, uuid)
+  to authenticated, service_role;
+
+-- O gatilho da 0594 ganha UMA exceção: o job que pediu a atribuição. O resto
+-- da regra (quem é assumir, o dono real na mesma organização, o fato terminal
+-- em event_log, os tipos que não têm dono autônomo) fica idêntico.
+create or replace function public.fn_interromper_turnos_ao_assumir()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  -- Distribuir ao responsável não é assumir; handoff é decisão do próprio turno.
+  if new.reason not in ('claim', 'transfer') or new.to_user_id is null then return new; end if;
+  -- O fato de atribuição deve corresponder ao dono real, na MESMA organização.
+  if not exists (select 1 from public.conversations c
+    where c.organization_id = new.organization_id and c.id = new.conversation_id
+      and c.assigned_to_user_id = new.to_user_id) then return new; end if;
+  -- O turno que PEDIU esta atribuição não perde o próprio comando (#3926): é o
+  -- único poupado — os OUTROS turnos da conversa continuam revogados, e uma
+  -- atribuição feita por pessoa (source_job_id nulo) revoga todos, como antes.
+  insert into public.event_log (organization_id, event_type, entity_kind, entity_id, payload, status)
+    select new.organization_id, 'conversation.autonomous_turn_revoked', 'job', j.id,
+      jsonb_build_object('conversation_id', new.conversation_id, 'assignment_event_id', new.id), 'done'
+    from public.job_queue j
+    where j.organization_id = new.organization_id and j.kind = 'followup_turn' and j.status = 'running'
+      and j.payload->'service_boundary'->>'conversation_id' = new.conversation_id::text
+      and j.payload->'service_boundary'->>'organization_id' = new.organization_id::text
+      and j.id is distinct from new.source_job_id
+      and j.contact_id = (select c.contact_id from public.conversations c
+        where c.organization_id = new.organization_id and c.id = new.conversation_id);
+  update public.job_queue j
+     set status = 'failed', locked_by = null, locked_at = null,
+         last_error = 'conversation_command_taken'
+   where j.organization_id = new.organization_id
+     and j.payload->'service_boundary'->>'conversation_id' = new.conversation_id::text
+     and j.payload->'service_boundary'->>'organization_id' = new.organization_id::text
+     and j.id is distinct from new.source_job_id
+     and j.contact_id = (select c.contact_id from public.conversations c
+       where c.organization_id = new.organization_id and c.id = new.conversation_id)
+     and j.kind in ('inbound_turn', 'case_reply_turn')
+     and j.status in ('pending', 'running');
+  return new;
+end;
+$$;
+revoke execute on function public.fn_interromper_turnos_ao_assumir() from public, anon, authenticated, service_role;
+
+drop trigger if exists trg_interromper_turnos_ao_assumir on public.conversation_assignment_events;
+create trigger trg_interromper_turnos_ao_assumir
+  after insert on public.conversation_assignment_events
+  for each row execute function public.fn_interromper_turnos_ao_assumir();
+
+notify pgrst, 'reload schema';
+
+-- ---- Skills por agente: skill_names por versão (migration 9107) ----
+-- Espelho idêntico da 9107 (o porquê está no cabeçalho dela). Fica ANTES da
+-- VARREDURA anon porque recria `fn_ai_agent_version_content_immutable`; o corpo
+-- é o da 9101 (a última definição acima) mais a linha de `skill_names`.
+alter table public.ai_agent_versions
+  add column if not exists skill_names text[];
+
+comment on column public.ai_agent_versions.skill_names is
+  'Migration 9107. NULL = todas as skills da organização e da plataforma '
+  '(o comportamento anterior, e o default de toda versão); vazio = nenhuma; '
+  'nomes = só estas. Resolvido em lib/agent-engine/agent/skills.ts:skillsDoAgente.';
+
+create or replace function fn_ai_agent_version_content_immutable() returns trigger
+-- search_path fixo na PRÓPRIA definição: um create or replace sem a cláusula
+-- apaga o alter function ... set search_path da 0521 (invariante
+-- tests/invariants/avisos-do-security-advisor.test.ts).
+language plpgsql set search_path = '' as $fn$
+begin
+  if old.status <> 'draft' and (
+       new.system_prompt          is distinct from old.system_prompt
+    or new.provider               is distinct from old.provider
+    or new.model                  is distinct from old.model
+    or new.credential_id          is distinct from old.credential_id
+    or new.tool_ids               is distinct from old.tool_ids
+    or new.trigger_config         is distinct from old.trigger_config
+    or new.channel_session_id     is distinct from old.channel_session_id
+    or new.max_steps              is distinct from old.max_steps
+    or new.token_budget           is distinct from old.token_budget
+    or new.cost_budget_cents      is distinct from old.cost_budget_cents
+    or new.history_message_window is distinct from old.history_message_window
+    or new.history_token_window   is distinct from old.history_token_window
+    or new.handoff_keywords       is distinct from old.handoff_keywords
+    or new.handoff_tool_enabled   is distinct from old.handoff_tool_enabled
+    or new.handoff_legal_enabled  is distinct from old.handoff_legal_enabled
+    or new.followup               is distinct from old.followup
+    or new.multimodal_input       is distinct from old.multimodal_input
+    or new.video_frames_enabled   is distinct from old.video_frames_enabled
+    or new.split_messages         is distinct from old.split_messages
+    or new.split_max_chars        is distinct from old.split_max_chars
+    or new.cases_enabled          is distinct from old.cases_enabled
+    or new.operator_enabled       is distinct from old.operator_enabled
+    or new.operator_model         is distinct from old.operator_model
+    or new.operator_tool_ids      is distinct from old.operator_tool_ids
+    or new.pipeline_ids           is distinct from old.pipeline_ids
+    or new.knowledge_source_ids   is distinct from old.knowledge_source_ids
+    or new.skill_names            is distinct from old.skill_names
+    or new.proposal_ai_draft_enabled is distinct from old.proposal_ai_draft_enabled
+    or new.inbound_debounce_ms    is distinct from old.inbound_debounce_ms
+    or new.reply_min_interval_ms  is distinct from old.reply_min_interval_ms
+    or new.voz_enabled            is distinct from old.voz_enabled
+    or new.voz_quando             is distinct from old.voz_quando
+    or new.version_number         is distinct from old.version_number
+    or new.agent_id               is distinct from old.agent_id
+    or new.organization_id        is distinct from old.organization_id
+  ) then
+    raise exception 'ai_agent_versions % é imutável (status=%): mudança de conteúdo = versão draft nova; rollback = revert (clona + publica)',
+      old.id, old.status;
+  end if;
+  return new;
+end;
+$fn$;
+-- ---- Visão de foto por agente: image_vision_enabled por versão (migration 9108) ----
+-- Espelho idêntico da 9108 (o porquê está no cabeçalho dela). Fica ANTES da
+-- VARREDURA anon porque recria `fn_ai_agent_version_content_immutable`; o corpo
+-- é o da 9107 (a última definição acima) mais a linha de `image_vision_enabled`.
+alter table public.ai_agent_versions
+  add column if not exists image_vision_enabled boolean not null default true;
+
+comment on column public.ai_agent_versions.image_vision_enabled is
+  'Migration 9108. O agente vê as fotos que o cliente envia (descrição pela visão e '
+  'imagem no turno). Desligado: recebe o aviso de que chegou uma imagem que não viu. '
+  'Lido em lib/agent-engine/agent/agent-config.ts e no predicado '
+  'lib/messaging/media/leitura-adiada.ts:haLeitorDaDescricao.';
+
+create or replace function fn_ai_agent_version_content_immutable() returns trigger
+-- search_path fixo na PRÓPRIA definição: um create or replace sem a cláusula
+-- apaga o alter function ... set search_path da 0521 (invariante
+-- tests/invariants/avisos-do-security-advisor.test.ts).
+language plpgsql set search_path = '' as $fn$
+begin
+  if old.status <> 'draft' and (
+       new.system_prompt          is distinct from old.system_prompt
+    or new.provider               is distinct from old.provider
+    or new.model                  is distinct from old.model
+    or new.credential_id          is distinct from old.credential_id
+    or new.tool_ids               is distinct from old.tool_ids
+    or new.trigger_config         is distinct from old.trigger_config
+    or new.channel_session_id     is distinct from old.channel_session_id
+    or new.max_steps              is distinct from old.max_steps
+    or new.token_budget           is distinct from old.token_budget
+    or new.cost_budget_cents      is distinct from old.cost_budget_cents
+    or new.history_message_window is distinct from old.history_message_window
+    or new.history_token_window   is distinct from old.history_token_window
+    or new.handoff_keywords       is distinct from old.handoff_keywords
+    or new.handoff_tool_enabled   is distinct from old.handoff_tool_enabled
+    or new.handoff_legal_enabled  is distinct from old.handoff_legal_enabled
+    or new.followup               is distinct from old.followup
+    or new.multimodal_input       is distinct from old.multimodal_input
+    or new.video_frames_enabled   is distinct from old.video_frames_enabled
+    or new.image_vision_enabled   is distinct from old.image_vision_enabled
+    or new.split_messages         is distinct from old.split_messages
+    or new.split_max_chars        is distinct from old.split_max_chars
+    or new.cases_enabled          is distinct from old.cases_enabled
+    or new.operator_enabled       is distinct from old.operator_enabled
+    or new.operator_model         is distinct from old.operator_model
+    or new.operator_tool_ids      is distinct from old.operator_tool_ids
+    or new.pipeline_ids           is distinct from old.pipeline_ids
+    or new.knowledge_source_ids   is distinct from old.knowledge_source_ids
+    or new.skill_names            is distinct from old.skill_names
+    or new.proposal_ai_draft_enabled is distinct from old.proposal_ai_draft_enabled
+    or new.inbound_debounce_ms    is distinct from old.inbound_debounce_ms
+    or new.reply_min_interval_ms  is distinct from old.reply_min_interval_ms
+    or new.voz_enabled            is distinct from old.voz_enabled
+    or new.voz_quando             is distinct from old.voz_quando
+    or new.version_number         is distinct from old.version_number
+    or new.agent_id               is distinct from old.agent_id
+    or new.organization_id        is distinct from old.organization_id
+  ) then
+    raise exception 'ai_agent_versions % é imutável (status=%): mudança de conteúdo = versão draft nova; rollback = revert (clona + publica)',
+      old.id, old.status;
+  end if;
+  return new;
+end;
+$fn$;
+
+notify pgrst, 'reload schema';
+
+-- Integridade de organização, funil e etapa (9111)
+-- manifest: Exige a mesma organização/funil/etapa em todo caminho SQL, sem reparar legado automaticamente.
+-- Operator controls statement/lock timeout; applying/validating takes locks and needs a reviewed target window.
+do $integridade_funil_etapa$
+declare actual record;expected smallint[];ref_expected smallint[];legado_invalido boolean;
+begin
+ lock table public.crm_pipelines,public.crm_stages,public.crm_leads in share row exclusive mode;
+legado_invalido:=exists(select 1 from public.crm_stages s left join public.crm_pipelines p on p.id=s.pipeline_id where p.id is null or p.organization_id is distinct from s.organization_id)
+ or exists(select 1 from public.crm_leads l left join public.crm_pipelines p on p.id=l.pipeline_id left join public.crm_stages s on s.id=l.stage_id where p.id is null or s.id is null or p.organization_id is distinct from l.organization_id or s.organization_id is distinct from l.organization_id or s.pipeline_id is distinct from l.pipeline_id);
+-- Legado inconsistente não é reparado nem derruba a atualização. As chaves antigas de uma
+-- coluna FICAM: a composta não casaria com as linhas legadas, e trocá-las deixaria apagar a
+-- etapa/funil a que elas apontam. Lado a lado também não: duas chaves entre as mesmas tabelas
+-- tornam ambíguo o join embutido do PostgREST (PGRST201). A troca, validada, acontece no
+-- update.sh seguinte ao legado revisto.
+if legado_invalido then raise warning 'crm_integrity_legacy_invalid_no_automatic_repair: chaves antigas mantidas; a troca pelas chaves compostas espera o legado ser revisto';end if;
+expected:=array[(select attnum from pg_attribute where attrelid='public.crm_pipelines'::regclass and attname='organization_id'and not attisdropped),(select attnum from pg_attribute where attrelid='public.crm_pipelines'::regclass and attname='id'and not attisdropped)]::smallint[];
+ if to_regclass('public.crm_integridade_pipelines_org_id_uq')is null then
+  create unique index crm_integridade_pipelines_org_id_uq on public.crm_pipelines(organization_id,id);
+  comment on index public.crm_integridade_pipelines_org_id_uq is 'crm-integridade-funil-etapa-v1';
+ else
+  select i.*,obj_description(i.indexrelid,'pg_class')marker into actual from pg_index i where i.indexrelid=to_regclass('public.crm_integridade_pipelines_org_id_uq');
+  if not found or actual.indrelid<>'public.crm_pipelines'::regclass or not actual.indisunique or not actual.indisvalid or not actual.indisready or actual.indpred is not null or actual.indexprs is not null or actual.indnatts<>cardinality(expected)or actual.indnkeyatts<>cardinality(expected)or actual.indkey::text<>array_to_string(expected,' ')or actual.marker is distinct from 'crm-integridade-funil-etapa-v1'then
+   raise exception 'crm_integrity_index_name_conflict'using errcode='23514';end if;
+ end if;
+expected:=array[(select attnum from pg_attribute where attrelid='public.crm_stages'::regclass and attname='organization_id'and not attisdropped),(select attnum from pg_attribute where attrelid='public.crm_stages'::regclass and attname='pipeline_id'and not attisdropped),(select attnum from pg_attribute where attrelid='public.crm_stages'::regclass and attname='id'and not attisdropped)]::smallint[];
+ if to_regclass('public.crm_integridade_stages_org_pipeline_id_uq')is null then
+  create unique index crm_integridade_stages_org_pipeline_id_uq on public.crm_stages(organization_id,pipeline_id,id);
+  comment on index public.crm_integridade_stages_org_pipeline_id_uq is 'crm-integridade-funil-etapa-v1';
+ else
+  select i.*,obj_description(i.indexrelid,'pg_class')marker into actual from pg_index i where i.indexrelid=to_regclass('public.crm_integridade_stages_org_pipeline_id_uq');
+  if not found or actual.indrelid<>'public.crm_stages'::regclass or not actual.indisunique or not actual.indisvalid or not actual.indisready or actual.indpred is not null or actual.indexprs is not null or actual.indnatts<>cardinality(expected)or actual.indnkeyatts<>cardinality(expected)or actual.indkey::text<>array_to_string(expected,' ')or actual.marker is distinct from 'crm-integridade-funil-etapa-v1'then
+   raise exception 'crm_integrity_index_name_conflict'using errcode='23514';end if;
+ end if;
+select c.*,obj_description(c.oid,'pg_constraint') marker into actual from pg_constraint c where c.conrelid='public.crm_stages'::regclass and c.conname='crm_stages_pipeline_id_fkey';
+ if not found then raise exception 'crm_integrity_required_base_fk_missing' using errcode='23514';end if;
+ if actual.contype<>'f' or actual.confrelid<>'public.crm_pipelines'::regclass or actual.confdeltype<>'c' or actual.confupdtype<>'a' or actual.confmatchtype<>'s' or actual.condeferrable or actual.condeferred then raise exception 'crm_integrity_base_fk_conflict' using errcode='23514';end if;
+ expected:=array[(select attnum from pg_attribute where attrelid='public.crm_stages'::regclass and attname='organization_id' and not attisdropped),(select attnum from pg_attribute where attrelid='public.crm_stages'::regclass and attname='pipeline_id' and not attisdropped)]::smallint[];ref_expected:=array[(select attnum from pg_attribute where attrelid='public.crm_pipelines'::regclass and attname='organization_id' and not attisdropped),(select attnum from pg_attribute where attrelid='public.crm_pipelines'::regclass and attname='id' and not attisdropped)]::smallint[];
+ if actual.conkey=expected and actual.confkey=ref_expected and actual.marker='crm-integridade-funil-etapa-v1' then
+  null;
+ elsif actual.conkey=array[(select attnum from pg_attribute where attrelid='public.crm_stages'::regclass and attname='pipeline_id' and not attisdropped)]::smallint[] and actual.confkey=array[(select attnum from pg_attribute where attrelid='public.crm_pipelines'::regclass and attname='id' and not attisdropped)]::smallint[] and actual.marker is null and actual.convalidated then
+  if not legado_invalido then
+   alter table public.crm_stages drop constraint crm_stages_pipeline_id_fkey;
+   alter table public.crm_stages add constraint crm_stages_pipeline_id_fkey foreign key(organization_id,pipeline_id) references public.crm_pipelines(organization_id,id) on delete cascade not valid;
+   comment on constraint crm_stages_pipeline_id_fkey on public.crm_stages is 'crm-integridade-funil-etapa-v1';
+  end if;
+ else raise exception 'crm_integrity_base_fk_conflict' using errcode='23514';end if;
+ if not legado_invalido then alter table public.crm_stages validate constraint crm_stages_pipeline_id_fkey;end if;
+select c.*,obj_description(c.oid,'pg_constraint') marker into actual from pg_constraint c where c.conrelid='public.crm_leads'::regclass and c.conname='crm_leads_pipeline_id_fkey';
+ if not found then raise exception 'crm_integrity_required_base_fk_missing' using errcode='23514';end if;
+ if actual.contype<>'f' or actual.confrelid<>'public.crm_pipelines'::regclass or actual.confdeltype<>'r' or actual.confupdtype<>'a' or actual.confmatchtype<>'s' or actual.condeferrable or actual.condeferred then raise exception 'crm_integrity_base_fk_conflict' using errcode='23514';end if;
+ expected:=array[(select attnum from pg_attribute where attrelid='public.crm_leads'::regclass and attname='organization_id' and not attisdropped),(select attnum from pg_attribute where attrelid='public.crm_leads'::regclass and attname='pipeline_id' and not attisdropped)]::smallint[];ref_expected:=array[(select attnum from pg_attribute where attrelid='public.crm_pipelines'::regclass and attname='organization_id' and not attisdropped),(select attnum from pg_attribute where attrelid='public.crm_pipelines'::regclass and attname='id' and not attisdropped)]::smallint[];
+ if actual.conkey=expected and actual.confkey=ref_expected and actual.marker='crm-integridade-funil-etapa-v1' then
+  null;
+ elsif actual.conkey=array[(select attnum from pg_attribute where attrelid='public.crm_leads'::regclass and attname='pipeline_id' and not attisdropped)]::smallint[] and actual.confkey=array[(select attnum from pg_attribute where attrelid='public.crm_pipelines'::regclass and attname='id' and not attisdropped)]::smallint[] and actual.marker is null and actual.convalidated then
+  if not legado_invalido then
+   alter table public.crm_leads drop constraint crm_leads_pipeline_id_fkey;
+   alter table public.crm_leads add constraint crm_leads_pipeline_id_fkey foreign key(organization_id,pipeline_id) references public.crm_pipelines(organization_id,id) on delete restrict not valid;
+   comment on constraint crm_leads_pipeline_id_fkey on public.crm_leads is 'crm-integridade-funil-etapa-v1';
+  end if;
+ else raise exception 'crm_integrity_base_fk_conflict' using errcode='23514';end if;
+ if not legado_invalido then alter table public.crm_leads validate constraint crm_leads_pipeline_id_fkey;end if;
+select c.*,obj_description(c.oid,'pg_constraint') marker into actual from pg_constraint c where c.conrelid='public.crm_leads'::regclass and c.conname='crm_leads_stage_id_fkey';
+ if not found then raise exception 'crm_integrity_required_base_fk_missing' using errcode='23514';end if;
+ if actual.contype<>'f' or actual.confrelid<>'public.crm_stages'::regclass or actual.confdeltype<>'r' or actual.confupdtype<>'a' or actual.confmatchtype<>'s' or actual.condeferrable or actual.condeferred then raise exception 'crm_integrity_base_fk_conflict' using errcode='23514';end if;
+ expected:=array[(select attnum from pg_attribute where attrelid='public.crm_leads'::regclass and attname='organization_id' and not attisdropped),(select attnum from pg_attribute where attrelid='public.crm_leads'::regclass and attname='pipeline_id' and not attisdropped),(select attnum from pg_attribute where attrelid='public.crm_leads'::regclass and attname='stage_id' and not attisdropped)]::smallint[];ref_expected:=array[(select attnum from pg_attribute where attrelid='public.crm_stages'::regclass and attname='organization_id' and not attisdropped),(select attnum from pg_attribute where attrelid='public.crm_stages'::regclass and attname='pipeline_id' and not attisdropped),(select attnum from pg_attribute where attrelid='public.crm_stages'::regclass and attname='id' and not attisdropped)]::smallint[];
+ if actual.conkey=expected and actual.confkey=ref_expected and actual.marker='crm-integridade-funil-etapa-v1' then
+  null;
+ elsif actual.conkey=array[(select attnum from pg_attribute where attrelid='public.crm_leads'::regclass and attname='stage_id' and not attisdropped)]::smallint[] and actual.confkey=array[(select attnum from pg_attribute where attrelid='public.crm_stages'::regclass and attname='id' and not attisdropped)]::smallint[] and actual.marker is null and actual.convalidated then
+  if not legado_invalido then
+   alter table public.crm_leads drop constraint crm_leads_stage_id_fkey;
+   alter table public.crm_leads add constraint crm_leads_stage_id_fkey foreign key(organization_id,pipeline_id,stage_id) references public.crm_stages(organization_id,pipeline_id,id) on delete restrict not valid;
+   comment on constraint crm_leads_stage_id_fkey on public.crm_leads is 'crm-integridade-funil-etapa-v1';
+  end if;
+ else raise exception 'crm_integrity_base_fk_conflict' using errcode='23514';end if;
+ if not legado_invalido then alter table public.crm_leads validate constraint crm_leads_stage_id_fkey;end if;
+end;
+$integridade_funil_etapa$;
+
 -- ---- VARREDURA anon: função nova nasce exposta em quem ATUALIZA (migration 0116) ----
 --
 -- ⚠️ DE PROPÓSITO, NENHUMA FUNÇÃO É CRIADA DEPOIS DESTE BLOCO. Apêndice que cria
