@@ -18,6 +18,7 @@ import type { NextRequest } from "next/server";
 
 import { fail } from "@/lib/api/wrappers";
 import { loadAuthUser, resolveActiveOrg } from "@/lib/auth/server";
+import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export const dynamic = "force-dynamic";
@@ -57,6 +58,21 @@ export async function GET(
     return fail("no_active_org", "No active organization.", 403, { requestId });
   }
 
+  // A sessão humana respeita o recorte RLS (upstream #3990): o admin abaixo
+  // assina a foto, então quem não enxerga o contato pela própria sessão não
+  // pode recebê-la. (Fork: a rota só tem a porta do navegador.)
+  {
+    const session = await createClient();
+    const { data: visible, error: scopeError } = await session
+      .from("contacts")
+      .select("id")
+      .eq("organization_id", activeOrg.orgId)
+      .eq("id", id)
+      .maybeSingle();
+    if (scopeError)
+      return fail("internal_error", "Não foi possível conferir o contato.", 500, { requestId });
+    if (!visible) return new Response(null, { status: 404 });
+  }
   const admin = createAdminClient();
   // Service role bypassa RLS: o filtro por organization_id é obrigatório e vem
   // da sessão, nunca do path (doutrina do CLAUDE.md).

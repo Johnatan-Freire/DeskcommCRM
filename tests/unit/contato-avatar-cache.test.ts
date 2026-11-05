@@ -65,6 +65,11 @@ vi.mock("@/lib/auth/server", () => ({
   resolveActiveOrg: async () => orgAtiva,
 }));
 
+// Cliente de sessão da nova conferência RLS; a autorização tem teste próprio na rota.
+vi.mock("@/lib/supabase/server", () => ({
+  createClient: async () => ({ from: () => ({ select: () => chain() }) }),
+}));
+
 vi.mock("@/lib/supabase/admin", () => ({
   createAdminClient: () => ({
     from: () => ({ select: () => chain() }),
