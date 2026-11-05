@@ -122,6 +122,8 @@ export {
   DotsThree,
   CaretDown,
   CaretUp,
+  // reordenar por arrastar e soltar (#3244/#4043): a alça das listas reordenáveis
+  DotsSixVertical as DragHandle,
   CaretDoubleLeft,
   CaretDoubleRight,
   CaretLeft,
