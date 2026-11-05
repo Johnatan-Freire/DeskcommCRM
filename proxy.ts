@@ -9,15 +9,26 @@ import {
 } from "@/lib/impersonate/cookie-edge";
 
 const COOKIE_NAME = "sb-deskcomm-auth";
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export async function proxy(request: NextRequest) {
+  // O id da requisição (#3971): o que veio do navegador, se for um UUID, ou um
+  // novo. ANTES do `next`, para chegar a quem lê `x-request-id` (Server
+  // Actions, `requestIdOf(req)`) e daí ao audit log.
+  const recebido = request.headers.get("x-request-id");
+  const requestId = recebido && UUID.test(recebido) ? recebido : crypto.randomUUID();
+  request.headers.set("x-request-id", requestId);
+
   const response = NextResponse.next({ request: { headers: request.headers } });
 
-  // Inject X-Request-Id for downstream correlation (audit log, error wrappers).
-  const requestId = request.headers.get("x-request-id") ?? crypto.randomUUID();
-  response.headers.set("x-request-id", requestId);
-
   const { pathname, search } = request.nextUrl;
+  // Sob `/api/`, o `X-Request-Id` da RESPOSTA é de `ok()`/`fail()`: é o id que a
+  // rota grava no log e no audit. Cabeçalho posto aqui VENCE o da rota, e o
+  // `ID:` que a tela mostra deixava de existir no log. Fora de `/api/`, ninguém
+  // mais o põe.
+  if (!pathname.startsWith("/api/")) {
+    response.headers.set("x-request-id", requestId);
+  }
   // Expose pathname to Server Components via header (used by onboarding layout).
   response.headers.set("x-pathname", pathname);
   request.headers.set("x-pathname", pathname);
