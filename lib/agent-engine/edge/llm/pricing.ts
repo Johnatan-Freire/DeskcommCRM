@@ -107,15 +107,32 @@ export function precoDoModelo(model: string): Preco | undefined {
   // na MESMA ordem da tolerância do sufixo de data, para um id com prefixo+sufixo
   // (`anthropic/claude-sonnet-5-20250929`) casar também. O id completo segue
   // tentado PRIMEIRO: um id que a tabela conheça com barra vence o recorte.
+  //
+  // O catálogo do OpenRouter escreve a versão com PONTO (`anthropic/claude-haiku-5.5`)
+  // e a tabela indexa com HÍFEN (`claude-haiku-5-5`). Por isso as variantes com o
+  // ponto trocado por hífen entram no FIM: o id exato, o sem data e o sem prefixo
+  // continuam vencendo, e um id que a tabela já conhece COM ponto (`gpt-6.1-terra`)
+  // não é reescrito (issue #1931).
   const semPrefixo = model.includes("/") ? model.slice(model.indexOf("/") + 1) : model;
-  return (
-    USD_PER_MTOK[model] ??
-    USD_PER_MTOK[model.replace(/-\d{8}$/, "")] ??
-    USD_PER_MTOK[model.replace(/-\d{4}-\d{2}-\d{2}$/, "")] ??
-    USD_PER_MTOK[semPrefixo] ??
-    USD_PER_MTOK[semPrefixo.replace(/-\d{8}$/, "")] ??
-    USD_PER_MTOK[semPrefixo.replace(/-\d{4}-\d{2}-\d{2}$/, "")]
-  );
+  const comHifen = (id: string) => id.replace(/\./g, "-");
+  const candidatos = [
+    model,
+    model.replace(/-\d{8}$/, ""),
+    model.replace(/-\d{4}-\d{2}-\d{2}$/, ""),
+    semPrefixo,
+    semPrefixo.replace(/-\d{8}$/, ""),
+    semPrefixo.replace(/-\d{4}-\d{2}-\d{2}$/, ""),
+    // #1931: o id com ponto ("gpt-5.4-mini") casa a linha de preço com hífen.
+    comHifen(semPrefixo),
+    comHifen(semPrefixo.replace(/-\d{8}$/, "")),
+    comHifen(semPrefixo.replace(/-\d{4}-\d{2}-\d{2}$/, "")),
+    comHifen(model),
+  ];
+  for (const id of candidatos) {
+    const preco = USD_PER_MTOK[id];
+    if (preco !== undefined) return preco;
+  }
+  return undefined;
 }
 
 /**
