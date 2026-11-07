@@ -12,7 +12,8 @@ export interface Contact {
   email: string | null;
   email_normalized: string | null;
   phone_number: string | null;
-  cpf_hash: string | null;
+  /** Se a ficha tem CPF. O valor não sai pela API: é pedido à parte, por quem pode. */
+  cpf_available: boolean;
   birthdate: string | null;
   is_blocked: boolean;
   blocked_reason: string | null;
