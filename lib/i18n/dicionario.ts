@@ -13598,6 +13598,10 @@ export const DICIONARIO: Traducoes = {
   },
 
 
+  // Teto de upload que vale também para envio sem tamanho (lib/api/corpo-com-teto.ts).
+  "O envio passa do tamanho máximo aceito.": { es: "El envío supera el tamaño máximo aceptado." },
+  "O tamanho declarado do envio é inválido.": { es: "El tamaño declarado del envío no es válido." },
+  "O arquivo passa de 20 MB.": { es: "El archivo supera los 20 MB." },
 };
 
 /**
