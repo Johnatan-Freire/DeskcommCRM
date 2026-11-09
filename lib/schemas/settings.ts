@@ -265,6 +265,24 @@ export const customFieldSchema = z.object({
    * existe pronta para as escritas do servidor, ainda não plugada (#2521).
    */
   allow_new: z.boolean().optional(),
+  /**
+   * MOSTRAR NO RESUMO DA PASSAGEM (issue #4303).
+   *
+   * LIGADO, o valor que este campo tem no CARD entra no resumo que a pessoa lê
+   * ao assumir a conversa (`montarBriefingDaPassagem`, bloco "Dados coletados
+   * automaticamente"), com o RÓTULO do campo. É o dado que decide a próxima
+   * frase de quem atende — consumo em kWh, valor da conta — e que hoje só
+   * aparece se a pessoa abrir o card.
+   *
+   * DESLIGADO (o padrão) é o que toda definição já instalada é: a chave ausente
+   * não liga nada, e o resumo sai byte a byte como saía antes desta opção. Não
+   * há migration porque a definição é o jsonb `pipelines.settings.fields`; um
+   * funil antigo simplesmente não tem a chave.
+   *
+   * A leitura é `lib/leads/campos-do-resumo-da-passagem.ts`; quem lê só o CARD
+   * da conversa (negócio), nunca campos do contato nem de outra organização.
+   */
+  mostrar_no_resumo_da_passagem: z.boolean().optional(),
 });
 export type CustomFieldDef = z.infer<typeof customFieldSchema>;
 
