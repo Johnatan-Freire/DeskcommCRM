@@ -33,7 +33,19 @@ import { emitirTelefoneGanho } from "@/lib/contacts/telefone-ganho";
 import { extrairAtribuicaoMeta } from "@/lib/channels/atribuicao-de-anuncio-oficial";
 import { estamparAtribuicaoDoContato } from "@/lib/leads/atribuicao-de-anuncio";
 import { extrairEEstamparAtribuicaoGoogle } from "@/lib/plataformas-de-anuncio/google/atribuicao";
-import { pausarIaPorAtendimentoManual } from "@/lib/escalacao/atendimento-manual";
+import { audit } from "@/lib/audit";
+import { pausarIaPorAtendimentoManual, type FalhaDaPausa } from "@/lib/escalacao/atendimento-manual";
+
+/** Aviso durável de que a pausa da IA não foi garantida (#534) — mesmo desenho do WAHA. */
+function avisarPausaNaoGravada(falha: FalhaDaPausa): Promise<void> {
+  return audit({
+    action: "ai.pausa_nao_gravada",
+    organizationId: falha.organizationId,
+    resourceType: "conversation",
+    resourceId: falha.conversationId,
+    metadata: { canal: falha.canal ?? "zernio", motivo: falha.motivo, detalhe: falha.detalhe ?? null },
+  });
+}
 import {
   ehNumeroInternoDeAviso,
   registrarMensagemIgnorada,
@@ -227,6 +239,7 @@ export async function ingestZernioInbound(
           organizationId: input.organizationId,
           conversationId: existente.id,
           canal: "zernio",
+          avisar: avisarPausaNaoGravada,
         });
       }
     }
@@ -299,6 +312,7 @@ export async function ingestZernioInbound(
       organizationId: input.organizationId,
       conversationId,
       canal: "zernio",
+      avisar: avisarPausaNaoGravada,
     });
   }
 
