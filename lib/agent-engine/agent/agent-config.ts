@@ -15,6 +15,8 @@
  */
 import type pg from 'pg';
 
+import { lerFraseDoAvisoConfigurada } from '@/lib/escalacao/frase-do-aviso-configurada';
+
 import { lerJanelaDeAtendimento, type JanelaDeAtendimento } from './janela-de-atendimento';
 import { lerTextoDoAvisoForaDoHorario } from './aviso-fora-do-horario';
 import { lerFiltroDePalavraChave } from './palavra-chave-do-gatilho';
@@ -137,6 +139,14 @@ export interface PublishedAgentConfig {
    * Opcional porque nasce depois das fixtures que montam esta interface à mão.
    */
   avisoForaDoHorario?: string | null;
+  /**
+   * A frase que o cliente lê quando a IA sai de campo (#3725), escrita pelo
+   * tenant em `ai_agents.config.aviso_de_handoff`. `null` = sem frase própria:
+   * sai o padrão do produto (curto e humano) de `textoDoAviso`. Lida por
+   * `lerFraseDoAvisoConfigurada`, que também recusa frase vazia/absurda — um
+   * aviso de passagem inválido não pode virar silêncio.
+   */
+  fraseDoAviso?: string | null;
   /** criadores (p/ mint do token efêmero de audit — padrão do runtime nativo). */
   versionCreatedBy: string | null;
   agentCreatedBy: string | null;
@@ -300,6 +310,9 @@ function mapAgentConfigRow(r: Row): PublishedAgentConfig {
     // `null` (sem janela ⇒ atende sempre), nunca uma mordaça acidental.
     janelaDeAtendimento: lerJanelaDeAtendimento(r.trigger_config),
     avisoForaDoHorario: lerTextoDoAvisoForaDoHorario(r.trigger_config),
+    // #3725: `null` = sem frase própria, sai o padrão do produto. A leitura
+    // valida tamanho e conteúdo (ver `frase-do-aviso-configurada.ts`).
+    fraseDoAviso: lerFraseDoAvisoConfigurada(r.config),
     // Leitura defensiva: regex torta/valor vazio ⇒ `null` (sem filtro ⇒ entra em tudo),
     // nunca uma mordaça acidental (#2679).
     filtroDePalavraChave: lerFiltroDePalavraChave(r.trigger_config),
