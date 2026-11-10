@@ -291,7 +291,9 @@ export function makeDb(opts: DbOpts = {}): Registro {
     let patch: Record<string, unknown> | null = null;
     let nova: Record<string, unknown> | Record<string, unknown>[] | null = null;
     let colunas: string[] | null = null;
-    let ordem: string | null = null;
+    // Várias chamadas de `.order()` compõem a ordem, como no PostgREST: a primeira
+    // decide, as seguintes desempatam.
+    const ordens: string[] = [];
     let contar = false;
     let head = false;
     let apagar = false;
@@ -321,7 +323,19 @@ export function makeDb(opts: DbOpts = {}): Registro {
      */
     const lidos = () => {
       let rows = [...casam()];
-      if (ordem) rows.sort((a, b) => Number(a[ordem!]) - Number(b[ordem!]));
+      if (ordens.length > 0)
+        rows.sort((a, b) => {
+          for (const col of ordens) {
+            const x = a[col];
+            const y = b[col];
+            if (x === y) continue;
+            const nx = Number(x);
+            const ny = Number(y);
+            if (!Number.isNaN(nx) && !Number.isNaN(ny)) return nx - ny;
+            return String(x) < String(y) ? -1 : 1;
+          }
+          return 0;
+        });
       if (teto !== null) rows = rows.slice(desde, desde + teto);
       if (opts.maxRows !== undefined) rows = rows.slice(0, opts.maxRows);
       // `select("*")` (usado por `app/api/v1/leads/_handler.ts`) é o CURINGA do
@@ -463,7 +477,7 @@ export function makeDb(opts: DbOpts = {}): Registro {
         return b;
       },
       order: (col: string) => {
-        ordem = col;
+        ordens.push(col);
         return b;
       },
       maybeSingle: async () => {
