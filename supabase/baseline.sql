@@ -6277,12 +6277,27 @@ drop policy if exists "tenant_isolation_crm_lead_activities_insert" on public.cr
 drop policy if exists "crm_lead_activities_select" on public.crm_lead_activities;
 drop policy if exists "crm_lead_activities_insert" on public.crm_lead_activities;
 
+-- 8003: o escopo é o de crm_leads_select (0656), calculado UMA vez por consulta;
+-- antes era fn_can_view_lead em cada negócio da organização (1.061 ms medidos na
+-- ficha de um contato). Versão FINAL, no lugar da antiga. Vigiado por
+-- tests/invariants/atividades-do-negocio-escopo-uma-vez.test.ts.
 create policy "crm_lead_activities_select" on public.crm_lead_activities
   for select using (
     exists (
       select 1 from public.crm_leads l
       where l.id = crm_lead_activities.lead_id
-        and public.fn_can_view_lead(l.organization_id, l.owner_user_id)
+        and (
+          (select public.fn_is_platform_admin())
+          or l.organization_id in (
+               select e.organization_id from public.fn_escopo_de_conversas() e where e.ve_todas)
+          or (l.owner_user_id = (select auth.uid())
+              and l.organization_id in (
+                   select e.organization_id from public.fn_escopo_de_conversas() e))
+          or (l.owner_user_id is null
+              and l.organization_id in (
+                   select e.organization_id from public.fn_escopo_de_conversas() e
+                    where e.ve_nao_atribuidas))
+        )
     )
   );
 
@@ -6298,12 +6313,27 @@ drop policy if exists "crm_lead_links_insert" on public.crm_lead_links;
 drop policy if exists "crm_lead_links_update" on public.crm_lead_links;
 drop policy if exists "crm_lead_links_delete" on public.crm_lead_links;
 
+-- 8003: o escopo é o de crm_leads_select (0656), calculado UMA vez por consulta;
+-- antes era fn_can_view_lead em cada negócio da organização (1.061 ms medidos na
+-- ficha de um contato). Versão FINAL, no lugar da antiga. Vigiado por
+-- tests/invariants/atividades-do-negocio-escopo-uma-vez.test.ts.
 create policy "crm_lead_links_select" on public.crm_lead_links
   for select using (
     exists (
       select 1 from public.crm_leads l
       where l.id = crm_lead_links.lead_id
-        and public.fn_can_view_lead(l.organization_id, l.owner_user_id)
+        and (
+          (select public.fn_is_platform_admin())
+          or l.organization_id in (
+               select e.organization_id from public.fn_escopo_de_conversas() e where e.ve_todas)
+          or (l.owner_user_id = (select auth.uid())
+              and l.organization_id in (
+                   select e.organization_id from public.fn_escopo_de_conversas() e))
+          or (l.owner_user_id is null
+              and l.organization_id in (
+                   select e.organization_id from public.fn_escopo_de_conversas() e
+                    where e.ve_nao_atribuidas))
+        )
     )
   );
 
