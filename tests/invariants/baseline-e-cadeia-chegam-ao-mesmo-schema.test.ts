@@ -99,8 +99,6 @@ const MIGRATIONS_QUE_NAO_RODAM: Record<string, string> = {
     "function public.rls_auto_enable() does not exist",
   "20260827040000_0190_o_mesmo_state_do_google_valia_duas_vezes.sql":
     'cannot change name of input parameter "p_retencao_dias"',
-  "20260831000000_0203_comando_da_conversa.sql":
-    "function public.fn_comando_da_conversa(text, uuid, timestamp with time zone, boolean, boolean, timestamp with time zone) is not unique",
   "20260907010000_0225_google_reconciliacao.sql":
     "cannot drop column needs_google_push of table calendar_appointments because other objects depend on it",
   "20260914170000_0243_chamada_de_api_tem_prazo_de_trava.sql":
@@ -113,13 +111,11 @@ const MIGRATIONS_QUE_NAO_RODAM: Record<string, string> = {
  * extensões: módulo opcional não cria tabela para quem não o tem). O valor é o
  * nome da função que as cria, conferido contra o `baseline.sql`.
  */
-const TABELAS_PROVISIONADAS: Record<string, string> = {
-  "public.sales": "fn_financeiro_provisionar",
-  "public.sale_items": "fn_financeiro_provisionar",
-  "public.commissions": "fn_financeiro_provisionar",
-  "public.commission_rules": "fn_financeiro_provisionar",
-  "public.loyalty_ledger": "fn_financeiro_provisionar",
-};
+// Fork: vazio — o módulo financeiro (sales, sale_items, commissions,
+// commission_rules, loyalty_ledger) nasce no CORPO do baseline aqui, como nasce
+// na cadeia; a provisionadora `fn_financeiro_provisionar` é desenho posterior
+// do upstream, não portado. Os dois caminhos não divergem por ele.
+const TABELAS_PROVISIONADAS: Record<string, string> = {};
 
 const BANCO_ESPELHO = "cerca_espelho";
 const BANCO_CADEIA = "cerca_cadeia";
@@ -551,51 +547,9 @@ describe("baseline e cadeia de migrations chegam ao mesmo schema", () => {
     ).toEqual(Object.keys(TABELAS_PROVISIONADAS).sort());
   });
 
-  it("constraint que aponta para tabela provisionada só existe com o módulo instalado", () => {
-    const porReferencia = resultado.cadeia.filter(
-      (linha) => linha.startsWith("con|") && ehDoModuloProvisionado(linha) &&
-        tabelaDaLinha(linha) !== null && !(tabelaDaLinha(linha) as string in TABELAS_PROVISIONADAS),
-    );
-    expect(
-      porReferencia.length,
-      "nenhuma constraint de módulo foi medida — se a 0619 mudou de forma, esta guarda está cega",
-    ).toBeGreaterThan(0);
+  // Fork: sem o caso "constraint que aponta para tabela provisionada só existe com o módulo instalado" — não há módulo provisionado neste schema.
 
-    for (const linha of porReferencia) {
-      const nome = linha.split("|")[2] as string;
-      expect(
-        BASELINE.includes(nome),
-        `${nome} é criada pela cadeia e não é citada em nenhum ponto do baseline`,
-      ).toBe(true);
-      expect(
-        resultado.espelho.some((outra) => outra.startsWith("con|") && outra.split("|")[2] === nome),
-        `${nome} passou a existir na INSTALAÇÃO — a provisionadora virou DDL direto e a exclusão apodreceu`,
-      ).toBe(false);
-    }
-  });
-
-  it("cada tabela declarada como provisionada continua nascendo só dentro da provisionadora", () => {
-    const inicio = BASELINE.indexOf("create or replace function public.fn_financeiro_provisionar(");
-    const proximaFuncao = BASELINE.indexOf("create or replace function public.", inicio + 10);
-    expect(inicio, "fn_financeiro_provisionar não existe mais no baseline").toBeGreaterThan(0);
-    expect(proximaFuncao, "não consegui delimitar o corpo da provisionadora").toBeGreaterThan(inicio);
-
-    for (const [tabela, provisionadora] of Object.entries(TABELAS_PROVISIONADAS)) {
-      const posicao = BASELINE.indexOf(`create table if not exists ${tabela}`);
-      expect(
-        posicao,
-        `${tabela} deixou de existir no baseline — a lista TABELAS_PROVISIONADAS apodreceu`,
-      ).toBeGreaterThan(0);
-      if (provisionadora !== "fn_financeiro_provisionar") {
-        throw new Error(`provisionadora ${provisionadora} não é a medida nesta cerca`);
-      }
-      expect(
-        posicao > inicio && posicao < proximaFuncao,
-        `${tabela} saiu do corpo de ${provisionadora} e passou a ser criada no corpo do baseline — ` +
-          "tire-a da lista de exclusão",
-      ).toBe(true);
-    }
-  });
+  // Fork: sem o caso "cada tabela declarada como provisionada continua nascendo só dentro da provisionadora" — não há módulo provisionado neste schema.
 
   it("nenhum objeto fora das tabelas provisionadas diverge", () => {
     // Controle: dois retratos vazios também "não divergem". Se o instrumento

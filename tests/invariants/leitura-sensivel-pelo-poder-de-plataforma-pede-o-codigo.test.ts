@@ -77,9 +77,9 @@ describe("0762 — o ramo de plataforma de decrypt_cpf pede scope full e a sess�
     expect(() => decifrar(SUPORTE, "aal2")).toThrow(RECUSA);
   });
 
-  it("admin de plataforma full com fator e sessão aal1 não decifra", () => {
-    expect(() => decifrar(PLAT, "aal1")).toThrow(RECUSA);
-  });
+  // Fork: sem o caso "fator + sessão aal1 não decifra" — a régua de aal2 dentro de
+  // `fn_is_platform_admin_full` é a 0757 (#3351), adiada (MFA desligado nesta
+  // instalação). Volta junto com o porte do MFA.
 
   it("admin de plataforma full com fator e sessão aal2 decifra", () => {
     expect(decifrar(PLAT, "aal2")).toBe(CPF);

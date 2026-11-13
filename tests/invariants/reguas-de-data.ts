@@ -228,10 +228,12 @@ export function reguasDeData(pool: pg.Pool): ReguaDeData[] {
  * ramificar REPROVA com "dívida paga" — senão a isenção vira cemitério.
  */
 export const FORA_DA_LISTA: readonly { arquivo: string; motivo: string }[] = [
+  // Fork: sem a entrada de `inbound-turn.ts` — o turno do fork não ramifica por
+  // `Date` (o snapshot do caso com `sent_at` é do upstream, não portado).
   {
-    arquivo: "lib/agent-engine/agent/inbound-turn.ts",
+    arquivo: "lib/external-db/leitura.ts",
     motivo:
-      "é a ESCRITA do snapshot do caso (`sent_at instanceof Date ? toISOString : String`), não uma régua de leitura; quem decide a hora na leitura é `falasDoSnapshot`, coberto",
+      "`serializarValor` só converte o valor lido do banco externo para JSON (`Date` vira ISO); não decide nada por data",
   },
   {
     arquivo: "lib/agent-engine/edge/crm/session-watchdog.ts",

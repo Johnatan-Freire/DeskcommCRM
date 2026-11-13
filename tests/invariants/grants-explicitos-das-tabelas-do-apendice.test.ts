@@ -118,10 +118,8 @@ const MAPA: Record<string, readonly string[]> = {
 const TABELAS = Object.keys(MAPA).sort();
 
 /** Criadas pelo apêndice sem `grant` próprio, de propósito — cada uma com o porquê. */
+// Fork: sem modulo_secoes_lgpd e o módulo de honorários, que este schema não cria.
 const EXCECOES: Record<string, string> = {
-  modulo_secoes_lgpd: "fechada a todos os papéis, inclusive service_role (ADR-0002 D8)",
-  honorarios_contratos: "módulo opcional: nasce dentro de fn_honorarios_provisionar()",
-  honorarios_parcelas: "módulo opcional: nasce dentro de fn_honorarios_provisionar()",
   sales: "módulo opcional: nasce dentro da provisionadora de vendas",
   sale_items: "módulo opcional: nasce dentro da provisionadora de vendas",
   commission_rules: "módulo opcional: nasce dentro da provisionadora de vendas",

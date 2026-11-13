@@ -1,6 +1,8 @@
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import pg from "pg";
 
+import { publicarAgenteNaSessao } from "./agente-no-ar";
+
 import type * as InboundTurn from "@/lib/agent-engine/agent/inbound-turn";
 import type * as Providers from "@/lib/agent-engine/edge/llm/providers";
 import type * as Queue from "@/lib/agent-engine/queue/queue";
@@ -261,6 +263,9 @@ async function semear(
      values ($1,$2,$3,'WORKING','\\x00'::bytea) on conflict (id) do nothing`,
     [sessionId, c.org, `${org.slug}-session`],
   );
+  // Fork: turno sem agente publicado no número não responde (0403 — sem o
+  // "genérico"). O agente fica no ar desde antes da mensagem.
+  await publicarAgenteNaSessao(pool, c.org, sessionId, { ativoDesde: "2020-01-01T00:00:00Z" });
   await pool.query(
     `insert into conversations (id, organization_id, contact_id, channel_session_id, status, is_group)
      values ($1,$2,$3,$4,'ai_handling',false) on conflict (id) do nothing`,
