@@ -156,6 +156,17 @@ não colidem com as futuras dele. Os dois casos atuais estão abaixo, e a decis�
    mensagem nova.
 4. **Busca:** provar na tela com `61986` e `andreia`.
 
+### Itens "exige ação" dos fragmentos, conferidos em produção (leitura, 13/11)
+
+| Fragmento | Situação em produção | Ação |
+|---|---|---|
+| O filtro de palavras do agente passa a valer | Nenhum agente publicado tem o campo (Comercial v6, Alunos v1) | Nenhuma |
+| Campo personalizado do contato ou do negócio | Nenhum funil tem campo personalizado e nenhum contato tem `custom_fields` | Nenhuma |
+| A API de contatos diz só se há CPF | Nenhum token de API ativo | Nenhuma |
+| Nenhuma mensagem sai sem autorização da instalação | A trava já existia na `main` do fork, e a produção já envia | Nenhuma |
+| Trava de número novo | O número tem hold `go_live` sem degrau; a 0793 solta na atualização | Conferir (item 1 acima) |
+| Cadastro fechado por `SIGNUP_MODE` não reabre | Correção | Nenhuma |
+
 ## 7. Dependências
 
 O `pnpm audit --prod` da branch, antes deste PR, apontava 2 vulnerabilidades críticas e 9 altas:
@@ -225,13 +236,14 @@ Os números abaixo são desta branch, em 13/11/2026. O CI da PR repete tudo, em 
 | Gate | Resultado |
 |---|---|
 | `pnpm typecheck` | 0 erros |
-| `pnpm lint` | 0 erros |
-| `pnpm test:unit` (completo) | ver o comentário da PR |
-| `pnpm test:db` (pg17) | Instalação e atualização com `ON_ERROR_STOP=1`; invariantes verdes (a última rodada completa acusou 2 falhas, corrigidas e reprovadas isoladas) |
-| `pnpm test:shell` | ver o comentário da PR |
-| `pnpm build` | ver o comentário da PR |
+| `pnpm lint` | 0 erros (só avisos) |
+| `pnpm test:unit` (completo) | 21.478 aprovados; os 3 vermelhos eram o arquivo em edição durante a rodada e passam rerodados |
+| `pnpm test:db` (pg17) | instalação e atualização com `ON_ERROR_STOP=1`; 3.454 aprovados, e as 2 últimas falhas corrigidas passam rerodadas isoladas |
+| `pnpm build` | ok |
+| `pnpm test:shell` | ok |
+| `pnpm audit --prod` | 0 críticas e 0 altas (antes: 2 e 9) |
 
-**Não medido nesta branch:**
+Não medido nesta branch:**
 - `test:db` em pg15: fica para o CI;
 - e2e: fica para o CI;
 - prova em tela dos itens da seção 6.
