@@ -14,11 +14,9 @@ begin
   for v_alvo in
     select distinct nullif(regexp_replace(coalesce(a.telefone, ''), '\D', '', 'g'), '') as telefone, a.lid
       from (
+        -- Fork: um telefone por ficha (sem `contact_phones`, a 9043 do upstream
+        -- não foi portada) — a marca cobre o principal e o lid, que são tudo.
         select old.phone_number as telefone, old.wa_lid as lid
-        union all
-        select t.phone_number, t.wa_lid
-          from public.contact_phones t
-         where t.organization_id = new.organization_id and t.contact_id = new.id
       ) as a
   loop
     continue when v_alvo.telefone is null and v_alvo.lid is null;

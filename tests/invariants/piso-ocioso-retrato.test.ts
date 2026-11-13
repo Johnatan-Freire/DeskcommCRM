@@ -79,9 +79,8 @@ describe("retrato do piso ocioso contra o baseline", () => {
     );
     try {
       expect(await leitura("lembrete_de_agenda")).toBe(true);
-      // controle: é trabalho de verdade — a limpeza da rodada resolve o aviso
-      await pool.query("select public.fn_resolver_avisos_de_lembrete_expirados()");
-      expect(await leitura("lembrete_de_agenda")).toBe(false);
+      // Fork: sem o controle por `fn_resolver_avisos_de_lembrete_expirados` (a
+      // limpeza do aviso de remetente é do upstream, não portada).
     } finally {
       await pool.query("delete from agent_inbox_items where id = $1", [aviso]);
     }

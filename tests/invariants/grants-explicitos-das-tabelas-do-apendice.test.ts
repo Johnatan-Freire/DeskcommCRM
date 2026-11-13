@@ -86,7 +86,6 @@ const MAPA: Record<string, readonly string[]> = {
   calendar_availability_exceptions: DML,
   calendar_event_types: DML,
   contact_field_proposals: DML,
-  crm_lead_attachments: DML,
   crm_lead_reactivations: DML,
   crm_lead_risk_states: DML,
   crm_lead_scores: DML,
@@ -95,7 +94,6 @@ const MAPA: Record<string, readonly string[]> = {
   external_db_connections: DML,
   financial_accounts: DML,
   financial_entries: DML,
-  lead_field_proposals: DML,
   meta_templates: DML,
   org_guardrail_layers: DML,
   org_voice_calls: DML,
@@ -109,24 +107,14 @@ const MAPA: Record<string, readonly string[]> = {
   calendar_locations: LE_E_CRIA,
   calendar_connection_calendars: SO_LE,
   calendar_connections: SO_LE,
-  calendar_resources: SO_LE,
-  calendar_service_blocks: SO_LE,
-  calendar_service_calendar_sources: SO_LE,
-  calendar_service_occurrence_resources: SO_LE,
-  calendar_service_occurrences: SO_LE,
-  calendar_service_professionals: SO_LE,
-  calendar_service_resources: SO_LE,
-  calendar_service_schedule: SO_LE,
-  channel_session_groups: SO_LE,
   conversation_assignment_events: SO_LE,
   webhook_lead_captures: SO_LE,
   calendar_oauth_nonces: NADA,
-  crm_proposal_counters: NADA,
-  mfa_trusted_devices: NADA,
   modulos_instalados: NADA,
   system_update_runs: NADA,
   system_version: NADA,
 };
+// Fork: saem do mapa as tabelas da 9037 que este schema não tem (crm_lead_attachments, lead_field_proposals, calendar_resources, calendar_service_blocks, calendar_service_calendar_sources, calendar_service_occurrence_resources, calendar_service_occurrences, calendar_service_professionals, calendar_service_resources, calendar_service_schedule, channel_session_groups, crm_proposal_counters, mfa_trusted_devices).
 const TABELAS = Object.keys(MAPA).sort();
 
 /** Criadas pelo apêndice sem `grant` próprio, de propósito — cada uma com o porquê. */
