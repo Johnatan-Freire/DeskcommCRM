@@ -100,7 +100,8 @@ const MIGRATIONS_QUE_NAO_RODAM: Record<string, string> = {
   "20260827040000_0190_o_mesmo_state_do_google_valia_duas_vezes.sql":
     'cannot change name of input parameter "p_retencao_dias"',
   "20260907010000_0225_google_reconciliacao.sql":
-    "cannot drop column needs_google_push of table calendar_appointments because other objects depend on it",
+    // Fork: a view da agenda do fork tem outra forma, e a 0225 tropeça nela antes.
+    'cannot change name of view column "starts_at" to "title"',
   "20260914170000_0243_chamada_de_api_tem_prazo_de_trava.sql":
     'role "authenticator" does not exist',
 };

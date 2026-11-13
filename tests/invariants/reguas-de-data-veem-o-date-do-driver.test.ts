@@ -259,7 +259,9 @@ describe("as réguas de data do repositório veem o `Date` que o driver entrega"
       "utf8",
     );
     const nomesDoAnterior = [...anterior.matchAll(/nome:\s*"([^"]+)"/g)].map((m) => m[1]!);
-    expect(nomesDoAnterior.length).toBeGreaterThanOrEqual(2);
+    // Fork: a lista anterior tem uma régua (`instanteDoBanco`); a segunda do
+    // upstream (`midiaDerivavelPendente`) é de recurso de mídia não portado.
+    expect(nomesDoAnterior.length).toBeGreaterThanOrEqual(1);
     const daLista = new Set(REGUAS.map((r) => r.nome));
     expect(nomesDoAnterior.filter((n) => !daLista.has(n))).toEqual([]);
   });
