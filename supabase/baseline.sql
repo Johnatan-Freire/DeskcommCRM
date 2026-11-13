@@ -46997,7 +46997,9 @@ create trigger trg_mensagem_do_vendedor_e_atividade
   when (new.direction = 'outbound'
         and new.sent_via in ('user', 'crm', 'external_device')
         and new.type not in ('reaction', 'system')
-        and coalesce(new.metadata ->> 'historico_importado', '') <> 'true')
+        and coalesce(new.metadata ->> 'historico_importado', '') <> 'true'
+        -- Fork: o histórico importado aqui é `origem = 'historico'` (0561).
+        and new.origem is distinct from 'historico')
   execute function public.fn_mensagem_do_vendedor_e_atividade();
 
 notify pgrst, 'reload schema';

@@ -116,6 +116,11 @@ describe("inventário: quem reage a uma linha nova", () => {
         "messages.trg_appointment_inbound",
         "messages.trg_messages_sincroniza_campanha",
         "messages.trg_messages_updated_at",
+        // 0686: AFTER INSERT de fala humana do vendedor — carimba o
+        // last_activity_at do negócio. Ignora `origem = 'historico'` (decidido
+        // na integração com o upstream v1.108: o upstream marcava o histórico
+        // por metadata, o fork por coluna, e o gatilho passou a ler as duas).
+        "messages.trg_mensagem_do_vendedor_e_atividade",
         // conversations — no INSERT: o rodízio ignora conversa FECHADA (é como a
         // importação cria), e o do Meet só reescreve link. Os de UPDATE não
         // disparam: conversa existente não é tocada.
@@ -159,6 +164,13 @@ describe("inventário: quem reage a uma linha nova", () => {
         "contacts.trg_redigir_pre_matriculas_ao_anonimizar",
         "contacts.trg_redigir_tarefas_ao_anonimizar",
         "contacts.trg_reply_redact",
+        // Integração upstream v1.108 — os três só agem na ANONIMIZAÇÃO
+        // (`is_anonymized` passa a true), que a importação nunca faz:
+        // 0593 (esquece o nome da agenda), 9241 (marca de apagamento) e a
+        // limpeza do retrato do catálogo.
+        "contacts.trg_contato_anonimizado_esquece_a_agenda",
+        "contacts.trg_lgpd_guardar_marca_de_apagamento",
+        "contacts.trg_limpar_snapshot_catalogo_ao_anonimizar",
       ].sort(),
     );
   });
