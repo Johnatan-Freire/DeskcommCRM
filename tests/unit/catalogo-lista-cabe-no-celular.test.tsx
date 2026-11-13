@@ -72,10 +72,6 @@ function tela(p: Produto, podeEditar = true) {
   return render(
     <ProdutosClient
       inicial={[p]}
-      total={1}
-      pagina={1}
-      porPagina={1}
-      buscaInicial=""
       urlsDasFotos={{}}
       podeEditar={podeEditar}
       textos={TEXTOS}
