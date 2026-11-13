@@ -165,7 +165,8 @@ describe("as réguas de data do repositório veem o `Date` que o driver entrega"
   });
 
   it("a lista não é oca e não repete régua", () => {
-    expect(REGUAS.length).toBeGreaterThanOrEqual(10);
+    // Fork: 8 réguas (três dependem de módulos não portados).
+    expect(REGUAS.length).toBeGreaterThanOrEqual(8);
     const nomes = REGUAS.map((r) => r.nome);
     expect(new Set(nomes).size).toBe(nomes.length);
     // O normalizador de borda é o que a mensagem de erro do RED recomenda; se

@@ -50,12 +50,9 @@ import type pg from "pg";
 
 import { precisaRenovar } from "@/lib/agenda/google/oauth";
 import { falasDoSnapshot } from "@/lib/agent-engine/agent/conversa-do-caso/leitura";
-import { midiaDerivavelPendente } from "@/lib/agent-engine/edge/crm/midia-derivavel";
 import { normalizarInstante } from "@/lib/ai/elegibilidade/gate";
 import { estaPresente } from "@/lib/atendimento/presenca";
 import { acaoDaAgenda } from "@/lib/channels/agenda-de-pausa";
-import { serializarValor } from "@/lib/external-db/montagem";
-import { diaDoValor } from "@/lib/followup/condicao-por-data";
 import { camposAlterados } from "@/lib/leads/campos-alterados";
 import { diaDoPrazo } from "@/lib/lgpd/sla";
 import { instanteDoBanco } from "@/lib/tempo/agora";
@@ -117,22 +114,9 @@ const mesmoInstante = (texto: string | null): boolean =>
  * aceita as duas formas e de que não desloca o instante.
  */
 export function reguasDeData(pool: pg.Pool): ReguaDeData[] {
+  // Fork: sem midiaDerivavelPendente (#3841), diaDoValor (condição por data) e
+  // serializarValor (banco externo) — módulos não portados.
   return [
-    {
-      nome: "midiaDerivavelPendente",
-      onde: "lib/agent-engine/edge/crm/midia-derivavel.ts:102",
-      // O caso de origem (#3846): a régua consulta a conversa e devolve a mídia
-      // pendente com a hora de chegada. Contra `pg` ela recebia `Date` e
-      // respondia "nada pendente" — a espera nunca acontecia.
-      entrada: "consulta",
-      exercitar: async () => {
-        const pendente = await midiaDerivavelPendente(pool, {
-          organizationId: IDS_DO_CASO.organizacao,
-          conversationId: IDS_DO_CASO.conversa,
-        });
-        return pendente !== null && mesmoInstante(pendente.quando);
-      },
-    },
     {
       nome: "instanteDoBanco",
       onde: "lib/tempo/agora.ts:171",
@@ -169,18 +153,6 @@ export function reguasDeData(pool: pg.Pool): ReguaDeData[] {
       },
     },
     {
-      nome: "diaDoValor",
-      onde: "lib/followup/condicao-por-data.ts:62",
-      // Condição por data relativa ("o período de teste terminou?"): a régua
-      // compara DIA DE CALENDÁRIO. Recusar o `Date` do driver faria o fluxo
-      // nunca disparar — ou disparar sempre, se a regra fosse negativa.
-      entrada: "valor",
-      exercitar: (valorCru) => {
-        const dia = diaDoValor(valorCru);
-        return dia !== null && dia.ano === 2026 && dia.mes === 11 && dia.dia === 4;
-      },
-    },
-    {
       nome: "estaPresente",
       onde: "lib/atendimento/presenca.ts:84",
       // `users.last_heartbeat_at` (timestamptz). Recusar o `Date` marcaria todo
@@ -206,15 +178,6 @@ export function reguasDeData(pool: pg.Pool): ReguaDeData[] {
           },
           new Date(CHEGADA_MS - 3_600_000),
         ) === "aguardando",
-    },
-    {
-      nome: "serializarValor",
-      onde: "lib/external-db/montagem.ts:189",
-      // A leitura de banco EXTERNO: `bytea`/`bigint`/`Date` de outro motor viram
-      // JSON. É o caminho em que o `Date` do driver mais aparece — e o que
-      // alimenta a grade que o operador lê.
-      entrada: "valor",
-      exercitar: (valorCru) => mesmoInstante(serializarValor(valorCru, "0x") as string | null),
     },
     {
       nome: "diaDoPrazo",
