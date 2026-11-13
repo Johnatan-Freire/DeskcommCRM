@@ -102,7 +102,6 @@ correspondentes localizados no repo):
   agente envia; RFC 9728/8414/7591/7636/8707/7009), escrita delegada opcional, revogação no
   encerramento e por LGPD. **Incompleto:** o callback não reabre o turno (a próxima mensagem do
   cliente já encontra o acesso); o servidor da organização segue ao lado, como compartilhado.
-  Guia: `docs/integracao/mcp-oauth-por-contato.md`.
 - **Status do WhatsApp por integração** — módulo opcional `status_whatsapp`, desligado de fábrica
   (liga em `/admin/sistema`). A ferramenta MCP `crm_publish_whatsapp_status` publica imagem por
   `publishStatus` do canal. Medido em 10/11/2026 num número de teste real (WAHA NOWEB): a lista de

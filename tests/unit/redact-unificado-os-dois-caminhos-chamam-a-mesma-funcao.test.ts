@@ -147,9 +147,10 @@ describe("redact unificado: os dois caminhos chamam a MESMA função", () => {
   });
 
   it("o diálogo promete o rótulo que a cascata grava", () => {
-    // A cascata escreve `v_anon_label := 'Cliente Anonimizado #' || …`; com a
-    // unificação é esse rótulo que o botão da ficha passa a gravar.
-    expect(cascatas).toContain("Cliente Anonimizado #");
+    // A cascata grava o rótulo que `fn_lgpd_rotulo_anonimizado` monta (0650,
+    // rótulo opaco): o literal mora nessa função, e a cascata tem de chamá-la.
+    expect(cascatas).toContain("fn_lgpd_rotulo_anonimizado(p_contact_id)");
+    expect(ultimaDefinicao(BASELINE, "fn_lgpd_rotulo_anonimizado")).toContain("Cliente Anonimizado #");
     expect(dialogo).toContain("Cliente Anonimizado #N");
     expect(dialogo).not.toContain("Contato Anonimizado #N");
   });

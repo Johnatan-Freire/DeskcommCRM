@@ -1283,11 +1283,7 @@ spec não publica agente — quem prova o veto é `lib/ai/elegibilidade/gate.tes
 `tests/invariants/org-suspensa.test.ts` e o controle do gate na própria spec);
 APROVAR um pedido de LGPD pelo hub (a spec abre o pedido, não aprova).
 
-**Evidência:** `evidence/suspensao-administrativa/leitura-recusada.png`,
-`evidence/suspensao-administrativa/hub-admin.png`,
-`evidence/suspensao-administrativa/hub-pedido-lgpd.png`,
-`evidence/suspensao-administrativa/hub-atendente.png`,
-`evidence/suspensao-administrativa/central-apos-reativar.png`.
+**Evidência:** gerada no upstream; as capturas não foram trazidas para este fork.
 
 ## J41 — O dono cria planos e os limites de pessoas, números e IA valem de verdade `[P1]` (2026-09-30)
 
@@ -1317,15 +1313,7 @@ gravam `platform_config.MODULO_COBRANCA='ligado'` direto no banco pelo fixture.
 | Teto de IA do plano: chave própria nunca bloqueia; finalidade isenta segue; `AI_BUDGET_ENFORCEMENT=off` desliga | `lib/agent-engine/edge/llm/orcamento.test.ts` | unit |
 | O mapa vivo espelha os mapas vizinhos e nenhuma peça é ilha | `tests/unit/mapas-de-arquitetura.test.ts` | unit |
 
-**Evidência** (gerada pelo e2e da PARTE_6 no CI e versionada a partir do artefato
-`evidencia-parte-6`): `evidence/cobranca-planos-e-limites/admin-cobranca-planos.png`,
-`evidence/cobranca-planos-e-limites/tenant-card-cobranca.png`,
-`evidence/cobranca-planos-e-limites/convite-recusado-pelo-plano.png`,
-`evidence/cobranca-planos-e-limites/billing-teste-gratis.png`,
-`evidence/cobranca-planos-e-limites/sistema-desligar-libera.png`,
-`evidence/cobranca-planos-e-limites/desligada-novo-tenant.png`,
-`evidence/cobranca-planos-e-limites/desligada-billing.png`,
-`evidence/cobranca-planos-e-limites/desligada-recursos-opcionais.png`.
+**Evidência:** gerada no upstream (artefato `evidencia-parte-6`); as capturas não foram trazidas para este fork.
 
 **Não coberto pela tela:** ligar a chave pela tela (PR 3a, quando ela sair de
 `MODULOS_AINDA_NAO_LIGAVEIS`); pagamento, régua de avisos e suspensão
@@ -1361,18 +1349,18 @@ real, não pela tela).
 **Nota (2026-10-14):** o "Assinar" desta jornada e o "Gerar link de pagamento" do dono (J45) passam pelo mesmo núcleo (`lib/cobranca/checkout.ts`); o contrato do "Assinar" é provado pelo `route.test.ts` dele, mantido sem edição na extração.
 
 **Evidência** (PNG em `evidence/cobranca-revendedor/`):
-- `evidence/cobranca-revendedor/billing-cobranca-agendada.png`
-- `evidence/cobranca-revendedor/billing-em-dia.png`
-- `evidence/cobranca-revendedor/billing-troca-agendada.png`
-- `evidence/cobranca-revendedor/central-aviso-final.png`
-- `evidence/cobranca-revendedor/central-aviso-venceu.png`
-- `evidence/cobranca-revendedor/checkout-do-duble.png`
-- `evidence/cobranca-revendedor/conexao-modo-de-teste.png`
-- `evidence/cobranca-revendedor/faixa-em-atraso.png`
-- `evidence/cobranca-revendedor/hub-pagar-agora.png`
-- `evidence/cobranca-revendedor/reativada-sem-rajada.png`
-- `evidence/cobranca-revendedor/sistema-cobranca-ligada.png`
-- `evidence/cobranca-revendedor/visao-geral-checklist.png`
+- evidence/cobranca-revendedor/billing-cobranca-agendada.png (upstream)
+- evidence/cobranca-revendedor/billing-em-dia.png (upstream)
+- evidence/cobranca-revendedor/billing-troca-agendada.png (upstream)
+- evidence/cobranca-revendedor/central-aviso-final.png (upstream)
+- evidence/cobranca-revendedor/central-aviso-venceu.png (upstream)
+- evidence/cobranca-revendedor/checkout-do-duble.png (upstream)
+- evidence/cobranca-revendedor/conexao-modo-de-teste.png (upstream)
+- evidence/cobranca-revendedor/faixa-em-atraso.png (upstream)
+- evidence/cobranca-revendedor/hub-pagar-agora.png (upstream)
+- evidence/cobranca-revendedor/reativada-sem-rajada.png (upstream)
+- evidence/cobranca-revendedor/sistema-cobranca-ligada.png (upstream)
+- evidence/cobranca-revendedor/visao-geral-checklist.png (upstream)
 
 ## J53 — Tocar os controles da casca no celular `[P1]` (2026-10-23)
 
@@ -1427,12 +1415,12 @@ emulado, login `admin`, nada semeado. Catraca de classe em
 - **A publicação com chave de produção do Asaas (D-7).**
 
 **Evidência** (PNG em `evidence/cobranca-asaas/`):
-- `evidence/cobranca-asaas/conexao-asaas-modo-de-teste.png`
-- `evidence/cobranca-asaas/checkout-asaas-documento.png`
-- `evidence/cobranca-asaas/fatura-do-asaas.png`
-- `evidence/cobranca-asaas/billing-asaas-aguardando.png`
-- `evidence/cobranca-asaas/billing-asaas-em-dia.png`
-- `evidence/cobranca-asaas/billing-asaas-cancelada.png`
+- evidence/cobranca-asaas/conexao-asaas-modo-de-teste.png (upstream)
+- evidence/cobranca-asaas/checkout-asaas-documento.png (upstream)
+- evidence/cobranca-asaas/fatura-do-asaas.png (upstream)
+- evidence/cobranca-asaas/billing-asaas-aguardando.png (upstream)
+- evidence/cobranca-asaas/billing-asaas-em-dia.png (upstream)
+- evidence/cobranca-asaas/billing-asaas-cancelada.png (upstream)
 - `evidence/cobranca-asaas/smoke-asaas.txt`
 
 ## J54 — Acompanhar os números no celular `[P1]` (2026-10-23)
@@ -3645,12 +3633,12 @@ Spec: `tests/e2e/pausa-de-reentrada.spec.ts`.
 
 | # | Caso | Expectativa | Resultado |
 |---|------|-------------|-----------|
-| J39.1 | Pôr 48 h no campo «Pausa antes de recomeçar (horas)» e salvar | o banco guarda `reentry_pause_minutes: 2880`; o botão diz «pausa de 48 h» | **PASS pela tela** — Evidência: `evidence/triagem-16set-l12/pausa-01-campo-preenchido.png`, `evidence/triagem-16set-l12/pausa-02-rotulo-com-pausa.png` |
+| J39.1 | Pôr 48 h no campo «Pausa antes de recomeçar (horas)» e salvar | o banco guarda `reentry_pause_minutes: 2880`; o botão diz «pausa de 48 h» | **PASS pela tela** — Evidência: evidence/triagem-16set-l12/pausa-01-campo-preenchido.png (upstream), evidence/triagem-16set-l12/pausa-02-rotulo-com-pausa.png (upstream) |
 | J39.2 | Editar OUTRO campo do gatilho | a pausa sobrevive | **PASS pela tela** |
 | J39.3 | Zerar a pausa | a chave sai do gatilho (comportamento de antes) | **PASS pela tela** |
 | J39.4 | Quem encerrou uma inscrição há menos que a pausa / quem nunca passou / conversa com pessoa no comando / sem pausa (só o cooldown) | pula / entra / pula (salvo `handoff_policy='allow'`) / entra de novo no limiar | **PASS (invariante)** — `tests/invariants/followup-silence-sweep.test.ts` |
-| J39.5 | Teto do silêncio: 5 com mínimo 10 é recusado; 60 é gravado e o botão mostra «10–60 min»; na varredura, quem está calado há 20 min entra e há 3 h fica de fora | tela + invariante | **PASS pela tela** — Evidência: `evidence/triagem-16set-l12/silencio-01-teto-de-60.png`; invariante no mesmo arquivo de J39.4 |
-| J39.6 | Pausa de 24 h contada do último envio (a opção só aparece com pausa > 0) | o banco guarda `reentry_pause_basis: "ultimo_envio"`; o botão diz «no máximo 1× a cada 24 h»; desligar tira a chave; na varredura, quem encerrou há 25 h e escreveu há 20 min entra (pela base padrão, fica na pausa) | **PASS pela tela** — Evidência: `evidence/triagem-16set-l12/pausa-03-base-do-ultimo-envio.png`; invariante no mesmo arquivo de J39.4 |
+| J39.5 | Teto do silêncio: 5 com mínimo 10 é recusado; 60 é gravado e o botão mostra «10–60 min»; na varredura, quem está calado há 20 min entra e há 3 h fica de fora | tela + invariante | **PASS pela tela** — Evidência: evidence/triagem-16set-l12/silencio-01-teto-de-60.png (upstream); invariante no mesmo arquivo de J39.4 |
+| J39.6 | Pausa de 24 h contada do último envio (a opção só aparece com pausa > 0) | o banco guarda `reentry_pause_basis: "ultimo_envio"`; o botão diz «no máximo 1× a cada 24 h»; desligar tira a chave; na varredura, quem encerrou há 25 h e escreveu há 20 min entra (pela base padrão, fica na pausa) | **PASS pela tela** — Evidência: evidence/triagem-16set-l12/pausa-03-base-do-ultimo-envio.png (upstream); invariante no mesmo arquivo de J39.4 |
 
 ## J40 — O pino de localização chega com a rua e a cidade aproximadas `[P1]` (2026-09-28)
 
@@ -3666,13 +3654,13 @@ Spec: `tests/e2e/mapas-em-provedores.spec.ts`.
 
 | # | Caso | Expectativa | Resultado |
 |---|------|-------------|-----------|
-| J40.1 | Admin cola a chave e grava | o banco guarda a chave CIFRADA e os 4 últimos; a tela mostra «Chave gravada ···XXXX», limpa o campo, e a chave não aparece no HTML | **PASS pela tela** — Evidência: `evidence/triagem-16set-l12/mapas-01-chave-colada.png` |
-| J40.2 | «Testar» com chave recusada pelo Google | a tela explica a recusa (API não habilitada × chave recusada são mensagens diferentes), nunca «Funcionou» | **PASS pela tela** — Evidência: `evidence/triagem-16set-l12/mapas-02-teste-explica-a-recusa.png` |
+| J40.1 | Admin cola a chave e grava | o banco guarda a chave CIFRADA e os 4 últimos; a tela mostra «Chave gravada ···XXXX», limpa o campo, e a chave não aparece no HTML | **PASS pela tela** — Evidência: evidence/triagem-16set-l12/mapas-01-chave-colada.png (upstream) |
+| J40.2 | «Testar» com chave recusada pelo Google | a tela explica a recusa (API não habilitada × chave recusada são mensagens diferentes), nunca «Funcionou» | **PASS pela tela** — Evidência: evidence/triagem-16set-l12/mapas-02-teste-explica-a-recusa.png (upstream) |
 | J40.3 | Remover a chave | a linha sai do banco e o cartão volta a «Sem chave» | **PASS pela tela** |
 | J40.4 | Pino recebido com chave / sem chave / Google fora | corpo com «… (aprox.)» / corpo idêntico ao de antes e nenhuma chamada ao Google / corpo de antes | **PASS (unit)** — `tests/unit/mapas-pino-com-endereco.test.ts` |
 | J40.5 | A tabela não é servida pelo PostgREST | `anon`/`authenticated` sem privilégio, `permission denied`, RLS ligada sem policy | **PASS (invariante)** — `tests/invariants/credencial-de-mapas-e-server-side.test.ts` |
 | J40.6 | O que o Google diz × o endereço anotado em 8 pedidos confirmados (28/09/2026, numa instalação real) | município 8/8, região 8/8, localidade 7/8 (na zona rural virou o povoado), rua 3/5, bairro 1/8, número interpolado → a cidade é o MUNICÍPIO; bairro e número não saem | **MEDIDO em produção** (fora deste repositório); regra em `tests/unit/mapas-pino-com-endereco.test.ts` |
-| J40.7 | O pino com endereço aproximado, aberto na conversa pela equipe | o cartão do pino mostra «Rua, Cidade, Estado (aprox.)», com o texto inteiro no `title` (o cartão corta com …) e o toque abre as COORDENADAS no mapa | **PASS pela tela** — Evidência: `evidence/triagem-16set-l12/mapas-03-pino-na-conversa.png` |
+| J40.7 | O pino com endereço aproximado, aberto na conversa pela equipe | o cartão do pino mostra «Rua, Cidade, Estado (aprox.)», com o texto inteiro no `title` (o cartão corta com …) e o toque abre as COORDENADAS no mapa | **PASS pela tela** — Evidência: evidence/triagem-16set-l12/mapas-03-pino-na-conversa.png (upstream) |
 | J40.8 | A API do canal intermediado não responde a tempo na ingestão do pino (medido 29/09/2026: timeout duas vezes seguidas) | a mensagem entra com o marcador e pede nova busca (`message.location_retry_requested`); 1 min depois, e a cada 2 min até 15, busca de novo e grava tipo `location` + link (+ endereço aproximado com chave); nunca rebaixa um pino que já tem coordenadas; desiste sem virar incidente | **PASS (unit)** — `tests/unit/pino-reintento.test.ts`, `tests/unit/channel-ingest-zernio.test.ts` |
 
 ### Dados externos — o que o assistente pode ver
@@ -3696,11 +3684,11 @@ e o próprio login e se desfaz deles), em instalação sem envio de e-mail confi
 **Estado da medição: os casos abaixo ainda NÃO rodaram na forma recortada.** A spec foi
 reescrita sem rodar localmente (pedido do dono: máquina sem memória para `next build` +
 `next start`); a primeira medição é a do job `e2e` deste PR. As fotos versionadas
-`evidence/admin-gestao-de-tenants/01-ativo.png`,
-`evidence/admin-gestao-de-tenants/02-email-corrigido.png`,
-`evidence/admin-gestao-de-tenants/04-dados-editados.png`,
-`evidence/admin-gestao-de-tenants/06-confirmacao-da-exclusao.png` e
-`evidence/admin-gestao-de-tenants/07-lista-depois.png` são da versão de 29/09 do PR
+evidence/admin-gestao-de-tenants/01-ativo.png (upstream),
+evidence/admin-gestao-de-tenants/02-email-corrigido.png (upstream),
+evidence/admin-gestao-de-tenants/04-dados-editados.png (upstream),
+evidence/admin-gestao-de-tenants/06-confirmacao-da-exclusao.png (upstream) e
+evidence/admin-gestao-de-tenants/07-lista-depois.png (upstream) são da versão de 29/09 do PR
 (renomeadas para a numeração nova) e são regravadas na primeira rodada; as da Central
 e da recusa por cobrança só existem depois dela. A transação da exclusão tem prova
 própria em `tests/invariants/gestao-de-tenants.test.ts` e
