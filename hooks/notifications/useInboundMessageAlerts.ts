@@ -159,6 +159,7 @@ export function useInboundMessageAlerts(): void {
         openConversationId: getOpenConversationId(conversationId),
         tabFocused: tabFocused(),
         tipo: (payload as { tipo?: unknown }).tipo,
+        origem: row.origem,
       })
     ) {
       return;
