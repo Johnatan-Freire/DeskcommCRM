@@ -191,6 +191,8 @@ function turno(body: string, identidadeRelacionada: boolean) {
       resolverIdentidade,
       politicaDoContato: vi.fn(async () => politica),
       agenteAcademicoDoNumero: vi.fn(async () => "academico"),
+      // Sem passagem de conversa entre agentes (8004): o banco falso não a conhece.
+      agentePassado: vi.fn(async () => null),
     } as never,
   );
   return { r, resolverIdentidade };

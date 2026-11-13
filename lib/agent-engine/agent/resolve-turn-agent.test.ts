@@ -87,6 +87,9 @@ function makeDeps(overrides: {
     loadPublishedAgentConfigById: overrides.loadPublishedAgentConfigById ?? vi.fn(),
     loadPublishedAgentConfig: overrides.loadPublishedAgentConfig ?? vi.fn(),
     classifyIntent: overrides.classifyIntent ?? vi.fn(),
+    // Sem passagem em vigor (8004) por padrão: os bancos falsos destes casos não
+    // conhecem `fn_agente_passado_da_conversa`.
+    agentePassado: vi.fn().mockResolvedValue(null),
   } as never;
 }
 
@@ -526,5 +529,63 @@ describe('2155 — destino de funil na intenção casada', () => {
     expect(out.outcome).toBe('fallback');
     expect(out.config?.agentId).toBe('agent-reserva');
     expect(out.destinationPipelineId ?? null).toBeNull();
+  });
+});
+
+describe('8004 — passagem de conversa entre agentes vence a etapa', () => {
+  /** Banco falso: conversa sem sticky e nenhuma mensagem (turno de follow-up). */
+  const db = { query: vi.fn(async () => ({ rows: [] })) };
+  const entrada = { ...baseInput, inbound: false };
+
+  function depsDaEtapa(over: {
+    politica?: string;
+    passado?: string | null;
+    campanha?: string | null;
+    loader?: ReturnType<typeof vi.fn>;
+  }) {
+    return {
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+      agenteDaCampanha: vi.fn().mockResolvedValue(over.campanha ?? null),
+      loadActiveRouter: vi.fn().mockResolvedValue(null),
+      loadPublishedAgentConfig: vi.fn().mockResolvedValue(fakeConfig('agent-sessao')),
+      loadPublishedAgentConfigById: over.loader ?? idAwareLoader(),
+      classifyIntent: vi.fn(),
+      politicaDoContato: vi.fn().mockResolvedValue(over.politica ?? 'academico'),
+      agenteAcademicoDoNumero: vi.fn().mockResolvedValue('agent-alunos'),
+      agenteComercialDoNumero: vi.fn().mockResolvedValue('agent-comercial'),
+      agentePassado: vi.fn().mockResolvedValue(over.passado ?? null),
+    } as never;
+  }
+
+  it('contato em etapa acadêmica, conversa passada ao Comercial: quem atende é o Comercial', async () => {
+    const out = await resolveConversationTurn(db as never, {} as never, entrada,
+      depsDaEtapa({ politica: 'academico', passado: 'agent-comercial' }));
+    expect(out.outcome).toBe('passagem');
+    expect(out.config?.agentId).toBe('agent-comercial');
+    expect(out.routerId).toBeNull();
+    expect(out.destinationPipelineId).toBeNull();
+  });
+
+  it('sem passagem, a etapa acadêmica continua escolhendo o agente de Alunos', async () => {
+    const out = await resolveConversationTurn(db as never, {} as never, entrada,
+      depsDaEtapa({ politica: 'academico', passado: null }));
+    expect(out.outcome).toBe('etapa_academica');
+    expect(out.config?.agentId).toBe('agent-alunos');
+  });
+
+  it('conversa de campanha com agente próprio: a passagem não passa por cima da campanha', async () => {
+    const out = await resolveConversationTurn(db as never, {} as never, entrada,
+      depsDaEtapa({ politica: 'comercial', passado: 'agent-alunos', campanha: 'agent-campanha' }));
+    expect(out.outcome).toBe('campanha');
+    expect(out.config?.agentId).toBe('agent-campanha');
+  });
+
+  it('agente da passagem pausado: o turno segue pela etapa em vez de calar', async () => {
+    const loader = vi.fn(async (_db: unknown, _org: unknown, id: string) =>
+      id === 'agent-comercial' ? { ...fakeConfig(id), pausedAt: '2026-11-13T10:00:00Z' } : fakeConfig(id));
+    const out = await resolveConversationTurn(db as never, {} as never, entrada,
+      depsDaEtapa({ politica: 'academico', passado: 'agent-comercial', loader }));
+    expect(out.outcome).toBe('etapa_academica');
+    expect(out.config?.agentId).toBe('agent-alunos');
   });
 });
