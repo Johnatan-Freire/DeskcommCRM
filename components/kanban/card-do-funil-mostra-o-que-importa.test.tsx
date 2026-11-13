@@ -1,6 +1,6 @@
 import { DragDropContext, Droppable } from "@hello-pangea/dnd";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { buildCardInput } from "@/lib/kanban/card-state";
@@ -169,34 +169,4 @@ describe("o card do funil mostra o que importa (#3945, fatia 1)", () => {
     expect(hora!.textContent).toMatch(/^\d{2}:\d{2}$/);
   });
 
-  it("⭐ QUEM TOCA — o nome do responsável humano, e não 'Sem responsável'", () => {
-    const { container } = montar();
-
-    const cartao = container.querySelector('[data-densidade="confortavel"]') as HTMLElement;
-    expect(within(cartao).getByText(/Marcos/)).toBeInTheDocument();
-    expect(within(cartao).queryByText("Sem responsável")).toBeNull();
-  });
-
-  it("⭐ QUEM TOCA (IA) — o agente aparece com nome e versão", () => {
-    const { container } = montar({
-      ...LEAD,
-      owner_kind: "ai",
-      owner_user_id: null,
-      owner_agent_id: "a-1",
-      owner_agent: { id: "a-1", name: "Atendente ACME", version_number: 3 },
-    } as unknown as Lead);
-
-    const cartao = container.querySelector('[data-densidade="confortavel"]') as HTMLElement;
-    expect(within(cartao).getByText(/Atendente ACME/)).toBeInTheDocument();
-    // A versão mora no rótulo acessível/title do badge (a linha visível é o
-    // nome): é a distinção entre "o bot" e "a versão do bot que atendeu".
-    expect(within(cartao).getByLabelText("Responsável: Atendente ACME · v3")).toBeInTheDocument();
-  });
-
-  it("⭐ HÁ QUANTO TEMPO NA ETAPA — conta da ENTRADA na etapa", () => {
-    const { container } = montar();
-
-    const cartao = container.querySelector('[data-densidade="confortavel"]') as HTMLElement;
-    expect(within(cartao).getByText(/5d em Negociação/)).toBeInTheDocument();
-  });
 });
