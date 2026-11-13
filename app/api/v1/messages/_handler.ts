@@ -61,6 +61,7 @@ import { nomeDoContato } from "@/lib/contacts/rotulo-do-contato";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { Message } from "@/lib/types/messaging";
 import { camposAoConfirmarEnvio, maiorAck } from "@/lib/messaging/progresso-da-entrega";
+import { assertUrlDeMidiaSegura } from "@/lib/messaging/media/url-de-midia-externa";
 
 type SB = SupabaseClient;
 
@@ -560,6 +561,22 @@ export async function sendMessageHandler(
       ctx.requestId,
       "media_storage_path fora da conversa.",
     );
+  }
+
+  // Só `media_url` (sem `media_storage_path`) é baixada pelo gateway: é esse o
+  // envio que precisa da guarda anti-SSRF, e antes de a linha existir.
+  if (input.media_url && !input.media_storage_path) {
+    try {
+      await assertUrlDeMidiaSegura(input.media_url);
+    } catch (erro) {
+      throw new ApiError(
+        422,
+        "unsafe_media_url",
+        { motivo: erro instanceof Error ? erro.message : "unsafe_url" },
+        ctx.requestId,
+        "media_url recusada: o endereço não pode ser baixado pelo servidor.",
+      );
+    }
   }
 
   let outboundBody = input.body ?? null;

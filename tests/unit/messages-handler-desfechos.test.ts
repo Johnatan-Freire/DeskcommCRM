@@ -309,6 +309,28 @@ describe('sendMessageHandler — os 6 desfechos do envio', () => {
     );
   });
 
+  // SSRF: quem baixa a `media_url` é o gateway, de dentro da rede do servidor,
+  // e ela chega também pela API pública e pelo MCP. Endereço interno é recusado
+  // ANTES de a linha existir — nada sai pela rede.
+  it.each([
+    ['metadata da nuvem', 'http://169.254.169.254/latest/meta-data/'],
+    ['serviço do compose por IP', 'http://172.18.0.5:6379/'],
+    ['loopback', 'http://localhost:3000/api/v1/health'],
+  ])('4c. media_url para %s: 422 unsafe_media_url, nada enviado', async (_nome, url) => {
+    wahaConfigured(true);
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(
+      sendMessageHandler(
+        makeSupabase(conversationRow()),
+        ctx,
+        textInput({ type: 'document', body: undefined, media_url: url }),
+      ),
+    ).rejects.toMatchObject({ status: 422, code: 'unsafe_media_url' });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it('5. texto puro: sent + external_id + ack 0, pelo endpoint de texto', async () => {
     wahaConfigured(true);
     const fetchMock = vi.fn(async (..._args: unknown[]) => Response.json({ key: { id: 'TEXT1' } }));
