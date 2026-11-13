@@ -100,7 +100,12 @@ export interface TurnAgentResolution {
      * acadêmica vai ao agente de escopo acadêmico, qualquer que seja o palpite
      * do classificador de texto.
      */
-    | 'etapa_academica';
+    | 'etapa_academica'
+    /**
+     * A conversa foi passada a este agente (`transfer_to_agent`, migration 8004):
+     * a passagem vence a etapa até o atendimento ser encerrado.
+     */
+    | 'passagem';
   /**
    * Fluxo de atendimento que o membro casado aponta (migration 0394; 0237 na branch do autor). O turno
    * começa o fluxo para o contato; `null` = nenhum. Só rótulos casados o trazem
@@ -137,6 +142,8 @@ export interface ResolveTurnAgentDeps {
   agenteAcademicoDoNumero?: (db: pg.Pool, tenantId: string, channelSessionId: string) => Promise<string | null>;
   /** O agente comercial do número — o par do acima, para o desvio inverso. */
   agenteComercialDoNumero?: (db: pg.Pool, tenantId: string, channelSessionId: string) => Promise<string | null>;
+  /** A passagem em vigor na conversa (8004) — injetável pelo mesmo motivo. */
+  agentePassado?: (db: pg.Pool, tenantId: string, conversationId: string) => Promise<string | null>;
 }
 
 export async function resolveTurnAgent(
@@ -431,7 +438,7 @@ export async function resolveConversationTurn(
  */
 async function aplicaEscopoDaEtapa(
   db: pg.Pool,
-  input: { tenantId: string; leadId: string; channelSessionId: string },
+  input: { tenantId: string; leadId: string; channelSessionId: string; conversationId: string },
   resolvido: TurnAgentResolution,
   deps: ResolveTurnAgentDeps,
 ): Promise<TurnAgentResolution> {
@@ -439,6 +446,32 @@ async function aplicaEscopoDaEtapa(
   const _academico = deps.agenteAcademicoDoNumero ?? agenteAcademicoDoNumero;
   const _comercial = deps.agenteComercialDoNumero ?? agenteComercialDoNumero;
   const _loadAgentById = deps.loadPublishedAgentConfigById ?? loadPublishedAgentConfigById;
+  const _passado = deps.agentePassado ?? agentePassadoDaConversa;
+
+  // A PASSAGEM vence a etapa (8004): um agente entregou esta conversa a outro, e
+  // até o atendimento ser encerrado é este quem atende. A campanha continua
+  // acima (degrau 0 do resolvedor), e a etapa só-humana/terminal continua
+  // vencendo na autorização (`fn_ia_pode_responder_mensagem`, que lê a mesma
+  // regra SQL). Agente da passagem sem versão publicada ou pausado: a regra SQL
+  // já não o devolve, e o turno segue pela etapa.
+  if (resolvido.outcome !== 'campanha') {
+    const passadoId = await _passado(db, input.tenantId, input.conversationId);
+    if (passadoId !== null) {
+      const config = await _loadAgentById(db, input.tenantId, passadoId);
+      if (config !== null && !config.pausedAt) {
+        return {
+          config,
+          routerId: null,
+          intentName: null,
+          confidence: null,
+          outcome: 'passagem',
+          flowPointerId: null,
+          destinationPipelineId: null,
+          destinationStageId: null,
+        };
+      }
+    }
+  }
 
   const politica = await _politica(db, input.tenantId, input.leadId);
   if (politica === 'academico') {
@@ -472,6 +505,15 @@ async function aplicaEscopoDaEtapa(
     return { ...resolvido, destinationPipelineId: null, destinationStageId: null };
   }
   return resolvido;
+}
+
+/** `fn_agente_passado_da_conversa` — a mesma regra que a autorização da resposta lê. */
+async function agentePassadoDaConversa(db: pg.Pool, tenantId: string, conversationId: string): Promise<string | null> {
+  const { rows } = await db.query<{ id: string | null }>(
+    'select public.fn_agente_passado_da_conversa($1,$2) as id',
+    [tenantId, conversationId],
+  );
+  return rows[0]?.id ?? null;
 }
 
 /** `fn_politica_de_atendimento_do_contato` — a mesma régua das funções de decisão. */

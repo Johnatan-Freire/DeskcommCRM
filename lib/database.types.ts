@@ -2332,39 +2332,51 @@ export type Database = {
       ai_router_decisions: {
         Row: {
           agent_id: string | null
+          agente_anterior_id: string | null
           confidence: number | null
           conversation_id: string | null
           created_at: string
           id: string
           intent_name: string | null
           job_id: string | null
+          motivo: string | null
           organization_id: string
+          origem: string
           outcome: string
           router_id: string | null
+          solicitado_por: string | null
         }
         Insert: {
           agent_id?: string | null
+          agente_anterior_id?: string | null
           confidence?: number | null
           conversation_id?: string | null
           created_at?: string
           id?: string
           intent_name?: string | null
           job_id?: string | null
+          motivo?: string | null
           organization_id: string
+          origem?: string
           outcome: string
           router_id?: string | null
+          solicitado_por?: string | null
         }
         Update: {
           agent_id?: string | null
+          agente_anterior_id?: string | null
           confidence?: number | null
           conversation_id?: string | null
           created_at?: string
           id?: string
           intent_name?: string | null
           job_id?: string | null
+          motivo?: string | null
           organization_id?: string
+          origem?: string
           outcome?: string
           router_id?: string | null
+          solicitado_por?: string | null
         }
         Relationships: [
           {
@@ -4238,10 +4250,11 @@ export type Database = {
       }
       conversations: {
         Row: {
-          reply_context_revision: number
           active_agent_set_at: string | null
           active_ai_agent_id: string | null
           active_intent: string | null
+          agente_passado_em: string | null
+          agente_passado_id: string | null
           assigned_at: string | null
           assigned_to_user_id: string | null
           assigned_to_user_name: string | null
@@ -4267,6 +4280,7 @@ export type Database = {
           organization_id: string
           provider_conversation_id: string | null
           rag_review_status: string | null
+          reply_context_revision: number
           service_closed_at: string | null
           service_revision: number
           service_started_at: string | null
@@ -4283,10 +4297,11 @@ export type Database = {
           usable_for_rag_marked_by: string | null
         }
         Insert: {
-          reply_context_revision?: number
           active_agent_set_at?: string | null
           active_ai_agent_id?: string | null
           active_intent?: string | null
+          agente_passado_em?: string | null
+          agente_passado_id?: string | null
           assigned_at?: string | null
           assigned_to_user_id?: string | null
           assigned_to_user_name?: string | null
@@ -4312,6 +4327,7 @@ export type Database = {
           organization_id: string
           provider_conversation_id?: string | null
           rag_review_status?: string | null
+          reply_context_revision?: number
           service_closed_at?: string | null
           service_revision?: number
           service_started_at?: string | null
@@ -4328,10 +4344,11 @@ export type Database = {
           usable_for_rag_marked_by?: string | null
         }
         Update: {
-          reply_context_revision?: number
           active_agent_set_at?: string | null
           active_ai_agent_id?: string | null
           active_intent?: string | null
+          agente_passado_em?: string | null
+          agente_passado_id?: string | null
           assigned_at?: string | null
           assigned_to_user_id?: string | null
           assigned_to_user_name?: string | null
@@ -4357,6 +4374,7 @@ export type Database = {
           organization_id?: string
           provider_conversation_id?: string | null
           rag_review_status?: string | null
+          reply_context_revision?: number
           service_closed_at?: string | null
           service_revision?: number
           service_started_at?: string | null
@@ -9348,6 +9366,10 @@ export type Database = {
         }
       }
       fn_service_inbound: { Args: { p_message: string }; Returns: undefined }
+      fn_agente_passado_da_conversa: {
+        Args: { p_org: string; p_conversation: string }
+        Returns: string
+      }
       fn_ia_pode_responder_mensagem: {
         Args: { p_org: string; p_message: string; p_agent?: string | null }
         Returns: string

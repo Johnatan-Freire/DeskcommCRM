@@ -191,6 +191,7 @@ import { janelaDeEnvioAberta, proximaAberturaDaJanela } from '../pacing/engine';
 import { loadChannelKnobs } from '../pacing/store';
 import { avisarJanelaFechada, resolverAvisoDeJanela } from '../pacing/aviso-de-janela';
 import { resolveConversationTurn, type TurnAgentResolution } from './resolve-turn-agent';
+import { ferramentaDePassagemEntreAgentes } from './transferir-agente';
 import {
   hasOpenCaseForContact,
   getCaseAwaitingLead,
@@ -4631,6 +4632,29 @@ async function executarTurnoDoAgente(
         }
       },
     });
+  }
+
+  // 8004 — `transfer_to_agent`: o agente em turno passa a conversa a outro agente
+  // no ar deste número (motivo `pedido_do_agente`). A passagem vence a etapa do
+  // contato até o atendimento ser encerrado (`aplicaEscopoDaEtapa` e
+  // `fn_ia_pode_responder_mensagem`). Só entra quando há outro agente no número;
+  // falha ao montar = turno sem a ferramenta, nunca turno derrubado.
+  if (!preview && agentConfig !== null) {
+    try {
+      const passagem = await ferramentaDePassagemEntreAgentes(pool, {
+        organizationId: tenantId,
+        conversationId: input.conversationId,
+        channelSessionId: input.channelSessionId,
+        agenteAtualId: agentConfig.agentId,
+        jobId: liveJob().id,
+        noteRunError,
+      });
+      if (passagem !== null) rawTools.transfer_to_agent = passagem;
+    } catch (err) {
+      runLog.warn('ferramenta de passagem entre agentes não montada — turno segue sem ela', {
+        error: (err instanceof Error ? err.message : String(err)).slice(0, 120),
+      });
+    }
   }
 
   // Fase 2B: a tela pode DESLIGAR a tool de handoff do modelo (a detecção
