@@ -521,6 +521,15 @@ export const NAV_CATALOG = [
     minRole: "agent",
   },
   {
+    href: "/app/ai/materiais",
+    label: "Materiais do agente",
+    description: "Vídeos, imagens e PDFs que os agentes enviam na conversa, cada um com a situação em que deve ir.",
+    icon: "FilmStrip",
+    group: "ia",
+    section: "Ensinar o agente",
+    minRole: "agent",
+  },
+  {
     href: "/app/ai/memory",
     label: "Memória",
     description: "O que o agente já aprendeu sobre a sua operação e reaproveita.",

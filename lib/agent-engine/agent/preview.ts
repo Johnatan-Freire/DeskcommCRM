@@ -1,4 +1,5 @@
 /** Preview is an execution policy of the real turn, never a simulated queue job. */
+import type { MaterialPreparado } from './material-do-agente';
 import type pg from 'pg';
 import { hasOpenCaseForContact } from './human-cases';
 import type { ToolSet } from '../edge/llm/run-model-call';
@@ -266,6 +267,11 @@ export function applyPreviewPolicy(
    * teste falha a mídia em vez de aprovar texto com foto pendente.
    */
   prepararMidia?: (codigo: string) => Promise<FotosPreparadas>,
+  /**
+   * 8006 — confere o `material_id` como o envio real confere (existe, está ativo,
+   * é deste agente, não saiu nesta conversa), sem copiar nem enviar nada.
+   */
+  conferirMaterial?: (materialId: string) => Promise<MaterialPreparado>,
 ): ToolSet {
   return Object.fromEntries(
     Object.entries(tools).map(([name, definition]) => {
@@ -325,6 +331,30 @@ export function applyPreviewPolicy(
                       `O produto ${JSON.stringify(midia.codigo)} não tem fotos cadastradas: ` +
                       'nenhuma imagem seria enviada no envio real — só o texto.',
                   });
+              }
+              // 8006 — o material do agente: conferido como no envio real, e o
+              // operador lê na tela QUAL material sairia. Material que o envio
+              // real recusaria reprova o teste.
+              const materialId =
+                args && typeof args === 'object' && 'material_id' in args && typeof args.material_id === 'string'
+                  ? args.material_id
+                  : undefined;
+              if (materialId !== undefined && materialId.trim() !== '') {
+                const conferido = conferirMaterial
+                  ? await conferirMaterial(materialId)
+                  : ({
+                      ok: false,
+                      code: 'material_nao_encontrado',
+                      message: 'o material não pôde ser conferido neste teste.',
+                    } as const);
+                if (!conferido.ok) {
+                  p.result.impediments.push({ code: conferido.code, message: conferido.message });
+                  return { ok: false, error: { code: conferido.code, message: conferido.message } };
+                }
+                p.result.warnings.push({
+                  code: 'material_seria_enviado',
+                  message: `O material "${conferido.titulo}" seria enviado junto com esta mensagem.`,
+                });
               }
               const avisos: Array<{ code: string; message: string }> = [];
               const result = evaluateBeforeSend(

@@ -195,4 +195,28 @@ describe("corpoDoEnvio — a foto chega ao handler como imagem da conversa", () 
   it("texto comum segue texto", () => {
     expect(corpoDoEnvio({ ...base, body: "oi" }, "k")).toMatchObject({ type: "text", body: "oi" });
   });
+
+  // 8006 — o material do agente: o tipo sai do MIME. Vídeo marcado como imagem
+  // não sai pelo canal (o WAHA manda pelo endpoint de imagem).
+  it("material de vídeo: type video e o material_id na metadata (é o que barra o reenvio)", () => {
+    expect(
+      corpoDoEnvio(
+        { ...base, body: "veja o curso", media: { storagePath: "v.mp4", mime: "video/mp4" }, materialId: "mat-1" },
+        "k",
+      ),
+    ).toEqual({
+      conversation_id: CONVERSA,
+      type: "video",
+      media_storage_path: "v.mp4",
+      media_mime: "video/mp4",
+      body: "veja o curso",
+      metadata: { idempotency_key: "k", material_id: "mat-1" },
+    });
+  });
+
+  it("material em PDF sai como documento", () => {
+    expect(
+      corpoDoEnvio({ ...base, body: "a grade", media: { storagePath: "g.pdf", mime: "application/pdf" } }, "k"),
+    ).toMatchObject({ type: "document" });
+  });
 });

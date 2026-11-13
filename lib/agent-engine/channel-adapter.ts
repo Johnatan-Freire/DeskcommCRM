@@ -40,12 +40,19 @@ export interface ChannelSendInput {
     /** Valor por slot, chaveado por `slotKey` — a mesma chave da tela. */
     values: Record<string, string>;
   };  /**
-   * Presente = este envio é uma IMAGEM já guardada no Storage da conversa, e o
-   * `body` é a legenda (pode ser vazio). Hoje só a foto do catálogo usa
-   * (`agent/fotos-do-produto.ts`). Caminho, nunca URL nem bytes: quem assina a
+   * Presente = este envio é uma MÍDIA já guardada no Storage da conversa, e o
+   * `body` é a legenda (pode ser vazio). O tipo da mensagem sai do `mime`
+   * (vídeo, imagem ou documento). Usam: a foto do catálogo
+   * (`agent/fotos-do-produto.ts`) e os materiais do agente (`agent/material-do-agente.ts`). Caminho, nunca URL nem bytes: quem assina a
    * URL curta para o canal é o handler de mensagens, como em toda mídia.
    */
   media?: { storagePath: string; mime: string };
+  /**
+   * O material de "Materiais do agente" que este envio leva (migration 8006).
+   * Vai para `messages.metadata.material_id`: é o que impede reenviar o mesmo
+   * material na mesma conversa.
+   */
+  materialId?: string;
 }
 
 /**
