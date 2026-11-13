@@ -37,6 +37,11 @@ import type { Idioma } from "./idiomas";
 type Traducoes = Record<string, Partial<Record<Exclude<Idioma, "pt-BR">, string>>>;
 
 export const DICIONARIO: Traducoes = {
+  // O item da trava de número novo na Central (lib/agent-engine/health/circuit.ts, doc 109).
+  "Número novo aguardando liberação (go-live)": { es: "Número nuevo en espera de liberación (go-live)" },
+  "Os retornos automáticos deste número estão parados até você liberar. Eles esperam na fila, nada é perdido, e voltam espaçados ao longo das horas seguintes. Responder quem te escreveu continua funcionando normalmente. Marque este item como resolvido quando o número estiver pronto para disparar.": {
+    es: "Los seguimientos automáticos de este número están detenidos hasta que lo liberes. Esperan en la cola, no se pierde nada, y vuelven espaciados a lo largo de las horas siguientes. Responder a quien te escribió sigue funcionando con normalidad. Marca este elemento como resuelto cuando el número esté listo para enviar.",
+  },
   "O modelo padrão gravado não existe no catálogo deste provedor. Os pontos que usam o padrão vão falhar até você escolher um modelo do provedor e salvar.": { es: "El modelo predeterminado guardado no existe en el catálogo de este proveedor. Los puntos que usan el predeterminado fallarán hasta que elijas un modelo del proveedor y guardes." },
   "Pontos facultativos de {ano} cadastrados.": { es: "Días facultativos de {ano} registrados." },
   "Adicionar Carnaval e Corpus Christi de {ano}": { es: "Agregar Carnaval y Corpus Christi de {ano}" },
