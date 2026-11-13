@@ -171,6 +171,12 @@ describe("inventário: quem reage a uma linha nova", () => {
         "contacts.trg_contato_anonimizado_esquece_a_agenda",
         "contacts.trg_lgpd_guardar_marca_de_apagamento",
         "contacts.trg_limpar_snapshot_catalogo_ao_anonimizar",
+        // 8005 — só RECUSAM: a sessão (authenticated/anon) não grava fusão nem
+        // anonimização. Não emitem evento nem escrevem em outra tabela. A
+        // importação roda no servidor e não toca nessas colunas, então nem
+        // dispara; e se disparasse, o papel do servidor passa.
+        "contacts.trg_contacts_fusao_e_anonimizacao_so_pelo_servidor",
+        "contacts.trg_contacts_fusao_e_anonimizacao_so_pelo_servidor_ao_criar",
       ].sort(),
     );
   });
