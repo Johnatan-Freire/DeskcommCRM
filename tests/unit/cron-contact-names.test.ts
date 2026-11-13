@@ -201,20 +201,6 @@ describe("LGPD e escopo", () => {
     expect(filtrosDo("update")).toContain("eq:is_anonymized");
   });
 
-  it("só ficha de pessoa ainda sem nome", async () => {
-    await chamar();
-    const f = filtrosDo("select");
-    expect(f).toContain("is:name");
-    expect(f).toContain("is:address_book_name");
-    expect(f).toContain("eq:kind");
-  });
-
-  it("deixa de fora o contato pessoal, na seleção e na gravação", async () => {
-    await chamar();
-    expect(filtrosDo("select")).toContain("eq:is_personal");
-    expect(filtrosDo("update")).toContain("eq:is_personal");
-  });
-
   it("empresa parada fica fora da seleção, no banco e no cinto", async () => {
     await chamar();
     expect(filtrosDo("select")).toContain("eq:organizations.status");

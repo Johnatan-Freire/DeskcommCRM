@@ -99,9 +99,7 @@ async function handle(req: NextRequest): Promise<Response> {
     .eq("organizations.status", STATUS_OPERANTE)
     .is("name", null)
     .is("address_book_name", null)
-    .eq("kind", "person")
     .eq("is_anonymized", false)
-    .eq("is_personal", false)
     .is("is_merged_into", null)
     .or(`name_lookup_at.is.null,name_lookup_at.lt.${cutoff}`)
     .order("name_lookup_at", { ascending: true, nullsFirst: true })
@@ -133,7 +131,6 @@ async function handle(req: NextRequest): Promise<Response> {
         .eq("id", c.id)
         .eq("organization_id", c.organization_id)
         .eq("is_anonymized", false)
-        .eq("is_personal", false)
         // A ficha pode ter ganhado nome entre a seleção e esta gravação
         // (edição na tela, planilha), ou nome da agenda pelo app WhatsApp
         // Business. Não substituir.

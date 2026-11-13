@@ -467,23 +467,6 @@ describe("o e-mail que chega depois, com o mesmo telefone", () => {
 // Sabotagem medida: sem `.eq("is_personal", false)` / `.eq("is_anonymized",
 // false)` no `completarDoEnvio`, os três casos abaixo ficam VERMELHOS.
 describe("contato fora da operação não é completado", () => {
-  it("contato PESSOAL achado pelo e-mail não ganha o telefone, e nenhum evento sai", async () => {
-    const pessoal = contato({ name: "Maria Teste", email: EMAIL, is_personal: true });
-
-    await enviar({ nome: "Maria Teste", email: EMAIL, telefone: TELEFONE });
-
-    expect(pessoal.phone_number, "a captação alterou um contato pessoal").toBeNull();
-    expect(eventosDeTelefone()).toHaveLength(0);
-  });
-
-  it("contato PESSOAL achado pelo telefone não ganha o e-mail", async () => {
-    const pessoal = contato({ name: "Maria Teste", phone_number: TELEFONE, is_personal: true });
-
-    await enviar({ nome: "Maria Teste", email: EMAIL, telefone: TELEFONE });
-
-    expect(pessoal.email, "a captação alterou um contato pessoal").toBeNull();
-  });
-
   it("contato ANONIMIZADO não volta a ser preenchido por formulário", async () => {
     const titular = contato({
       name: "Cliente Anonimizado #1",

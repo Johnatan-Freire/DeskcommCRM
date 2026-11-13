@@ -49658,6 +49658,47 @@ revoke execute on function public.fn_uso_de_ia(uuid, timestamptz, timestamptz, u
 grant  execute on function public.fn_uso_de_ia(uuid, timestamptz, timestamptz, uuid, text)
   to authenticated, service_role;
 
+-- ---- nome da agenda do celular, só para a equipe (migration 0593, PR #2439) ----
+-- Espelho idempotente da 0593. O porquê inteiro está no cabeçalho da migration.
+-- ANTES da varredura de anon: cria função.
+alter table public.contacts
+  add column if not exists address_book_name text;
+
+comment on column public.contacts.address_book_name is
+  'Nome salvo na agenda do celular (varredura contact-names; app WhatsApp Business). SÓ A EQUIPE vê: nunca entra em {{nome}} de automação nem de campanha. Pode ser apelido interno. NULL ao anonimizar.';
+
+alter table public.contacts
+  add column if not exists name_lookup_at timestamptz;
+
+comment on column public.contacts.name_lookup_at is
+  'Última vez que se PERGUNTOU ao canal o nome salvo na agenda do celular. NULL = nunca perguntado. Com valor e address_book_name ainda null = o canal não tinha o nome na ocasião.';
+
+-- Índice PARCIAL: a varredura só olha quem não tem nome nenhum escolhido aqui
+-- nem nome de agenda.
+create index if not exists idx_contacts_name_lookup_pendente
+  on public.contacts (organization_id, name_lookup_at nulls first)
+  where name is null and address_book_name is null and is_anonymized = false;
+
+create or replace function public.fn_contato_anonimizado_esquece_a_agenda()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+  new.address_book_name := null;
+  return new;
+end;
+$$;
+
+revoke execute on function public.fn_contato_anonimizado_esquece_a_agenda() from public, anon, authenticated;
+
+drop trigger if exists trg_contato_anonimizado_esquece_a_agenda on public.contacts;
+create trigger trg_contato_anonimizado_esquece_a_agenda
+  before insert or update on public.contacts
+  for each row
+  when (new.is_anonymized is true and new.address_book_name is not null)
+  execute function public.fn_contato_anonimizado_esquece_a_agenda();
+
 -- ---- busca do inbox sem acento, com unaccent em qualquer schema (migration 9100) ----
 -- Substitui o bloco da 9098 (#3924) neste apêndice: aquele fixava `public.unaccent`
 -- e, reaplicado a cada `update.sh`, recriava o corpo quebrado onde a extensão mora em
@@ -49882,47 +49923,6 @@ grant execute on function public.fn_service_inbound(uuid) to service_role;
 -- 0478). Entra antes dela porque lote novo entra no fim do apêndice, e este é o
 -- fim do apêndice.
 alter table public.conversation_notes replica identity full;
-
--- ---- nome da agenda do celular, só para a equipe (migration 0593, PR #2439) ----
--- Espelho idempotente da 0593. O porquê inteiro está no cabeçalho da migration.
--- ANTES da varredura de anon: cria função.
-alter table public.contacts
-  add column if not exists address_book_name text;
-
-comment on column public.contacts.address_book_name is
-  'Nome salvo na agenda do celular (varredura contact-names; app WhatsApp Business). SÓ A EQUIPE vê: nunca entra em {{nome}} de automação nem de campanha. Pode ser apelido interno. NULL ao anonimizar.';
-
-alter table public.contacts
-  add column if not exists name_lookup_at timestamptz;
-
-comment on column public.contacts.name_lookup_at is
-  'Última vez que se PERGUNTOU ao canal o nome salvo na agenda do celular. NULL = nunca perguntado. Com valor e address_book_name ainda null = o canal não tinha o nome na ocasião.';
-
--- Índice PARCIAL: a varredura só olha quem não tem nome nenhum escolhido aqui
--- nem nome de agenda.
-create index if not exists idx_contacts_name_lookup_pendente
-  on public.contacts (organization_id, name_lookup_at nulls first)
-  where name is null and address_book_name is null and is_anonymized = false and kind = 'person';
-
-create or replace function public.fn_contato_anonimizado_esquece_a_agenda()
-returns trigger
-language plpgsql
-set search_path = ''
-as $$
-begin
-  new.address_book_name := null;
-  return new;
-end;
-$$;
-
-revoke execute on function public.fn_contato_anonimizado_esquece_a_agenda() from public, anon, authenticated;
-
-drop trigger if exists trg_contato_anonimizado_esquece_a_agenda on public.contacts;
-create trigger trg_contato_anonimizado_esquece_a_agenda
-  before insert or update on public.contacts
-  for each row
-  when (new.is_anonymized is true and new.address_book_name is not null)
-  execute function public.fn_contato_anonimizado_esquece_a_agenda();
 
 -- ---- o telefone ganho alcança fn_upsert_wa_contact; a junção não emite (migration 0744) ----
 -- manifest: **O telefone de ficha vazia passa a emitir `contact.phone_added` também em `fn_upsert_wa_contact` (#3315).** O gatilho "quando um contato ganhar um telefone" (0670) só rodava pelo PATCH de contatos e pela captura (`#3307`); `fn_upsert_wa_contact` preenchia `phone_number` de ficha vazia em silêncio. A função passa a chamar `public.emit_event('contact.phone_added', 'contact', …)` na MESMA transação e SÓ na transição de vazio para preenchido — `phone_number = v_alt` (promoção de grafia do MESMO número) NÃO emite, e `perform` não faz HTTP (doutrina: função de banco nunca faz HTTP). Trava a linha (`for update`) antes de ler o estado anterior, senão a corrida com outro webhook poderia medir o vazio que já não existe. **`fn_mesclar_contatos` NÃO emite, de propósito:** as duas fichas já existiam e o número já estava no CRM (na ficha do perdedor), então emitir repetiria a automação para a mesma pessoa e o mesmo número; além disso a junção roda sob a sessão do usuário (rota `/api/v1/contacts/merge`) e o `emit_event` recusa `contact.phone_added` vindo de `authenticated` (0670) — emitir ali quebraria a junção pela tela. Idempotente: `create or replace` com assinatura, `search_path` e grants INALTERADOS; espelho idêntico no apêndice do `baseline.sql`, antes da VARREDURA anon. Gates: `tests/invariants/telefone-ganho-nos-caminhos-sql.test.ts`.

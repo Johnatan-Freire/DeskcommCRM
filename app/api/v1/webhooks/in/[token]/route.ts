@@ -709,11 +709,9 @@ export async function POST(req: NextRequest, ctx: RouteCtx): Promise<NextRespons
    *  - `organization_id`: mesma régua do resto da rota. Telefone e e-mail são
    *    únicos POR ORGANIZAÇÃO; sem este filtro o UPDATE alcançaria a ficha de
    *    outro tenant, que é o pior erro possível aqui.
-   *  - `is_personal = false` e `is_anonymized = false`: contato marcado como
-   *    pessoal está FORA da operação — o card dele é recusado logo adiante
-   *    (`createLeadHandler`), e completar a ficha antes disso deixaria o
-   *    contato pessoal alterado por uma captação que nem entrou. Anonimizado
-   *    é titular de LGPD: nada de formulário volta a preencher a ficha dele.
+   *  - `is_anonymized = false`: anonimizado é titular de LGPD — nada de
+   *    formulário volta a preencher a ficha dele. (Fork: não há contato
+   *    pessoal, `is_personal`, neste schema.)
    *  - o erro NÃO é engolido em silêncio: `23505` significa que o valor já é
    *    de OUTRO contato ativo da mesma organização (os dois índices únicos
    *    parciais de `contacts`) — a captação segue com o vínculo que já tinha,
@@ -729,7 +727,6 @@ export async function POST(req: NextRequest, ctx: RouteCtx): Promise<NextRespons
       .update({ [coluna]: valor })
       .eq("id", contato)
       .eq("organization_id", source.organization_id)
-      .eq("is_personal", false)
       .eq("is_anonymized", false)
       .is(coluna, null)
       .select("id")

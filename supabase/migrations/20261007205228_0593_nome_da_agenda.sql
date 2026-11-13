@@ -42,7 +42,7 @@ comment on column public.contacts.name_lookup_at is
 -- nem nome de agenda.
 create index if not exists idx_contacts_name_lookup_pendente
   on public.contacts (organization_id, name_lookup_at nulls first)
-  where name is null and address_book_name is null and is_anonymized = false and kind = 'person';
+  where name is null and address_book_name is null and is_anonymized = false;
 
 create or replace function public.fn_contato_anonimizado_esquece_a_agenda()
 returns trigger

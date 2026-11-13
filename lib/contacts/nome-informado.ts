@@ -76,7 +76,7 @@ const LER = `select m.body, c.name
    and not cv.is_group and cv.assigned_to_user_id is null
    and (cv.bot_silenced_until is null or cv.bot_silenced_until<=now())
    and cv.status not in ('closed','archived','resolved')
-   and not c.is_anonymized and not c.is_personal and not c.is_blocked and not c.force_human
+   and not c.is_anonymized and not c.is_blocked and not c.force_human
    and c.is_merged_into is null
    and o.settings->'crm'->'nome_informado_no_atendimento'='true'::jsonb`;
 
@@ -92,7 +92,7 @@ const GRAVAR = `with aplicado as (
    and m.service_revision=$5 and cv.service_revision=$5 and not cv.is_group
    and cv.assigned_to_user_id is null and (cv.bot_silenced_until is null or cv.bot_silenced_until<=now())
    and cv.status not in ('closed','archived','resolved')
-   and not c.is_anonymized and not c.is_personal and not c.is_blocked and not c.force_human
+   and not c.is_anonymized and not c.is_blocked and not c.force_human
    and c.is_merged_into is null and nullif(btrim(c.name),'') is null
    and o.settings->'crm'->'nome_informado_no_atendimento'='true'::jsonb
  returning c.id, c.name
