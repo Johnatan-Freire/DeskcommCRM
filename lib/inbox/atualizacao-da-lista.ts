@@ -193,7 +193,6 @@ export function julgarAtualizacao(
   if (filtros.channel_session_id && atual.channel_session_id !== filtros.channel_session_id) {
     return "sai";
   }
-  if (filtros.is_group !== undefined && Boolean(atual.is_group) !== filtros.is_group) return "sai";
 
   if (filtros.comando && filtros.comando.length > 0) {
     // `comandoDaConversa` é a régua única de "quem manda" (a linha da lista usa a
@@ -209,7 +208,6 @@ export function julgarAtualizacao(
       last_handoff_reason: atual.last_handoff_reason ?? null,
       force_human: atual.contacts?.force_human ?? null,
       is_blocked: atual.contacts?.is_blocked ?? null,
-      is_group: atual.is_group ?? false,
     });
     // `ninguem` é o mesmo balde do `automatico` no vocabulário do banco.
     const noVocabularioDoBanco: ComandoDoBanco =
