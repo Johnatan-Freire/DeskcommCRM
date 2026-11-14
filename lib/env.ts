@@ -441,6 +441,11 @@ const schema = z.object({
    * respondendo 500 a tudo. Padrão 365, piso 90, decisão do dono (PR #1577).
    */
   PROSPECCAO_RETENTION_DAYS: z.string().optional().default(""),
+  /**
+   * Traço do turno do agente (migration 8007). `z.string()` pela mesma razão
+   * das irmãs acima. Padrão 90, piso 30, decisão do dono em 14/11/2026.
+   */
+  TURN_TRACE_RETENTION_DAYS: z.string().optional().default(""),
 
   // LGPD export (S-08.04)
   LGPD_SIGNING_KEY: z.string().optional().default(""),

@@ -65,6 +65,8 @@ const DONO_NO_SQL: Record<string, string> = {
   // e este par é a prova: a razão escrita não correspondia ao código, e ninguém
   // percebeu até a revisão medir o repo.
   PROSPECCAO: "fn_expurgar_prospeccao_vencida",
+  // migration 8007 — o traço do turno do agente (decisão do dono: 90 dias).
+  TRACO_DO_TURNO: "fn_expurgar_traco_do_turno_vencido",
 };
 
 /**
