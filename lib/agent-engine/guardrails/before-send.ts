@@ -67,7 +67,8 @@ import {
 import type { DisclosureMode } from './disclosure/template';
 import { escalateLgpdVeto, isLegalBasisValid } from './lgpd/legal-basis';
 import type { LgpdInput } from './lgpd/legal-basis';
-import { detectHumanPromise } from './human-promise';
+import { detectHumanHandoffPromise, detectHumanPromise } from './human-promise';
+import { detectarPromessaDeRetornoDoAssistente } from './retorno-do-assistente';
 import { detectarVazamentoInterno, renderVetoDeVazamento } from './vazamento-interno';
 // Módulo PURO de propósito (`capabilities`, não `index`): o seam não arrasta o
 // adapter — e com ele o cliente HTTP do canal — para dentro do worker.
@@ -445,46 +446,134 @@ export const semanticPromiseGate: Gate = {
  * Gate anti-alucinação de casos humanos (spec 15 §10.2, Wave 4) — a garantia DURA da
  * invariante "o lead nunca recebe promessa-de-humano sem caso aberto". Off (`casesEnabled`
  * false) ou já há caso (`hasOpenCase`/`openedCaseThisTurn` — a IA abriu um NESTE turno) =
- * no-op. Só veta quando ALGUMA das duas camadas — o detector léxico (`detectHumanPromise`) ou o sinal semântico (`ctx.semanticPromise?.prometeuRetornoHumano`) — acha uma promessa
- * clara na candidata E nenhum caso existe. O fail-safe de 2ª camada (auto-abre caso e
- * re-roda a cadeia) vive na orquestração do `send_message` (inbound-turn.ts), não aqui — o
- * gate em si é síncrono/puro como os demais. Posição 6.5 de `BEFORE_SEND_GATES` (logo após
- * `semanticPromiseGate`, antes do `disclosureGate`): roda depois das duas camadas de
- * promessa comercial (preço/desconto) porque é uma categoria distinta de promessa
- * (envolvimento humano, não oferta).
+ * no-op. Só veta quando ALGUMA das camadas — o detector léxico de humano
+ * (`detectHumanPromise`), o sinal semântico (`ctx.semanticPromise?.prometeuRetornoHumano`)
+ * ou o detector léxico de retorno do assistente (`detectarPromessaDeRetornoDoAssistente`,
+ * issue #2916) — acha uma promessa clara na candidata E nenhum caso existe. O fail-safe de
+ * 2ª camada (auto-abre caso e re-roda a cadeia) vive na orquestração do `send_message`
+ * (inbound-turn.ts), não aqui — o gate em si é síncrono/puro como os demais. Posição 6.5 de
+ * `BEFORE_SEND_GATES` (logo após `semanticPromiseGate`, antes do `disclosureGate`): roda
+ * depois das duas camadas de promessa comercial (preço/desconto) porque é uma categoria
+ * distinta de promessa (envolvimento humano, não oferta).
  */
 export const casePromiseGate: Gate = {
   name: 'case_promise',
   evaluate: (ctx) => {
+    const lexicoHumano = detectHumanPromise(ctx.body, ctx.humanPromiseExtraTargets);
+    // #3725: o léxico de humano tem DUAS famílias, e só uma pede caso humano. A de
+    // AÇÃO ("já encaminhei para a equipe") envolve alguém agora; a de RETORNO ("nossa
+    // equipe vai te responder outro dia") é promessa de VOLTAR A FALAR. Mandar abrir
+    // caso humano para a segunda era o que ensinava o fail-safe a inventar atendente
+    // para um cliente que só havia respondido "Não".
+    //
+    // #3816 (CR do mantenedor): a separação sobe para o TOPO porque DOIS ramos a leem —
+    // o ramo do retorno do assistente (abaixo) e o desfecho do caminho com casos
+    // ligados. Calcular aqui também impede que os dois discordem: era essa divergência
+    // que fazia a razão mandar chamar `schedule_followup` e o gate vetar a mesma frase
+    // depois de o modelo obedecer.
+    const handoffExplicito = lexicoHumano
+      ? detectHumanHandoffPromise(ctx.body, ctx.humanPromiseExtraTargets)
+      : false;
+    const soRetornoDeHumano = lexicoHumano && !handoffExplicito;
+    // ── (A) Retorno do PRÓPRIO assistente — vale com casos LIGADOS ou DESLIGADOS ──
+    // (#2916, resíduo) A guarda de casos abaixo existe porque promessa de HUMANO
+    // precisa de caso aberto como destino. A promessa de retorno não: o destino dela
+    // é `schedule_followup`. Com os casos desligados — o padrão de um agente novo —
+    // a guarda liberava tudo na primeira linha e "Combinado, retomamos daqui a duas
+    // horas" saía sem nada agendado, deixando o cliente esperando. Aqui o ramo roda
+    // ANTES da guarda e o `!handoffExplicito` impede que ele roube a PASSAGEM para
+    // humano (que, sem casos, segue liberada de propósito: não há caso para abrir).
+    //
+    // `!handoffExplicito` e NÃO `!lexicoHumano` (#3816): o veto de passagem do léxico
+    // era o que deixava "Nossa equipe vai te responder em breve." — família do
+    // RETORNO — cair no `if (!ctx.casesEnabled)` logo abaixo e sair sem destino
+    // nenhum. É a mesma família que o #3725 separou; o ramo do retorno tem de
+    // aceitá-la, senão os casos desligados são um buraco.
+    // `followup` ausente = caminho de envio que não informa o retorno (texto
+    // determinístico, template). Sem essa informação não dá para distinguir
+    // "agendado em outro lugar" de "esquecido", e um veto falso ali calaria um texto
+    // que não é do modelo — então não veta.
+    if (ctx.followup !== undefined) {
+      const retornoDoAssistente =
+        !handoffExplicito &&
+        (detectarPromessaDeRetornoDoAssistente(ctx.body) ||
+          ctx.semanticPromise?.retornoSoDoAssistente === true ||
+          // #3816: "nossa equipe vai te responder" é promessa de RETOMADA feita por
+          // quem atende, e o destino dela também é o retorno agendado.
+          soRetornoDeHumano);
+      if (retornoDoAssistente) {
+        if (ctx.followup.agendadoNesteTurno === true) return { pass: true };
+        // Casos ligados continuam no caminho de baixo (código e fail-safe de caso
+        // aberto intactos); só o caminho sem casos usa o veto próprio.
+        if (!ctx.casesEnabled) {
+          return {
+            pass: false,
+            code: 'followup_promise_without_followup',
+            reason:
+              ctx.followup.disponivel === true
+                ? 'Você prometeu voltar a falar com o cliente, mas não deixou o retorno marcado. ' +
+                  'Chame a tool schedule_followup (agendando o retorno) antes de confirmar — ' +
+                  'ou reformule a mensagem sem prometer retorno.'
+                : 'Você prometeu voltar a falar com o cliente, mas este agente não tem a ' +
+                  'ferramenta de retorno. Reformule a mensagem sem prometer voltar.',
+          };
+        }
+      }
+    }
     if (!ctx.casesEnabled) return { pass: true };
     if (ctx.hasOpenCase || ctx.openedCaseThisTurn) return { pass: true };
-    // Lê os DOIS sinais, em OU — e o OU é o ponto. Exigir os dois faria o conserto
-    // não consertar nada: o léxico é o filtro BARATO e continua valendo sozinho
-    // (roda sem chamada de modelo, e pega as duas frases que nomeiam o alvo colado
-    // ao verbo); o semântico pega as outras cinco — as 5 de 7 que a medição de
-    // 2026-09-16 flagrou vazando. O `?.` é obrigatório: o fixture de
-    // `tests/invariants/case-guardrail.test.ts` passa `semanticPromise: null`.
-    const lexico = detectHumanPromise(ctx.body, ctx.humanPromiseExtraTargets);
+    // Lê TRÊS sinais, em OU — e o OU é o ponto. Exigir todos faria o conserto
+    // não consertar nada: o léxico de humano (`detectHumanPromise`) é o filtro
+    // BARATO e continua valendo sozinho (roda sem chamada de modelo, e pega as
+    // duas frases que nomeiam o alvo colado ao verbo); o semântico pega as outras
+    // cinco — as 5 de 7 que a medição de 2026-09-16 flagrou vazando; e o léxico de
+    // retorno do assistente (`detectarPromessaDeRetornoDoAssistente`, issue #2916)
+    // pega a promessa de RETOMAR A CONVERSA ("retomamos daqui a duas horas") que o
+    // semântico não marca de forma confiável (é modelo — varia entre execuções). O
+    // `?.` é obrigatório: o fixture de `tests/invariants/case-guardrail.test.ts`
+    // passa `semanticPromise: null`.
+    const lexico = lexicoHumano;
     const semantico = ctx.semanticPromise?.prometeuRetornoHumano === true;
-    if (!lexico && !semantico) return { pass: true };
+    const retornoLexico = detectarPromessaDeRetornoDoAssistente(ctx.body);
+    if (!lexico && !semantico && !retornoLexico) return { pass: true };
     // #1873, opção (a): o follow-up agendado é destino SÓ para a promessa do próprio
-    // assistente ("te retorno amanhã de manhã"). O léxico só casa alvo humano explícito
-    // (equipe, setor, responsável…), então o que ele acusa exige caso sempre. E o
-    // `=== true` é fechado de propósito: o parser degrada `retornoSoDoAssistente` para
-    // `false` em qualquer falha, e falha nunca libera.
+    // assistente ("te retorno amanhã de manhã", "retomamos daqui a duas horas"). O
+    // léxico de humano só casa alvo humano explícito (equipe, setor, responsável…),
+    // então o que ele acusa exige caso sempre — um lembrete para o assistente voltar
+    // a falar não põe ninguém da empresa para trabalhar. E o `=== true` é fechado de
+    // propósito: o parser degrada `retornoSoDoAssistente` para `false` em qualquer
+    // falha, e falha nunca libera. `retornoLexico` (issue #2916) entra como destino de
+    // follow-up pelo mesmo motivo do sinal semântico: quem volta a falar é o próprio
+    // assistente, e o `schedule_followup` é o compromisso que o cliente espera.
     const promessaDoAssistente =
-      !lexico && ctx.semanticPromise?.retornoSoDoAssistente === true;
-    if (promessaDoAssistente && ctx.followup?.agendadoNesteTurno === true) return { pass: true };
+      !lexico && (ctx.semanticPromise?.retornoSoDoAssistente === true || retornoLexico);
+    // #3725/#3816: `handoffExplicito` e `soRetornoDeHumano` vêm calculados do TOPO do
+    // gate (a mesma conta para os dois ramos — ver o comentário da família, acima).
+    if (
+      (promessaDoAssistente || soRetornoDeHumano) &&
+      ctx.followup?.agendadoNesteTurno === true
+    ) {
+      // #3816: o retorno JÁ AGENDADO é destino aceito também para a família de
+      // retorno do léxico humano. Antes, a razão do veto mandava chamar
+      // `schedule_followup` e este `return` só conhecia `promessaDoAssistente` — o
+      // modelo obedecia e continuava barrado, com a MESMA razão. Gate e razão têm
+      // de concordar, senão o cliente fica sem o retorno que a IA prometeu.
+      return { pass: true };
+    }
     return {
       pass: false,
       code: 'case_promise_without_case',
       reason:
-        promessaDoAssistente && ctx.followup?.disponivel === true
+        (promessaDoAssistente || soRetornoDeHumano) && ctx.followup?.disponivel === true
           ? 'Você prometeu voltar a falar com o cliente, mas não deixou o retorno marcado. ' +
             'Chame a tool schedule_followup (agendando o retorno) OU open_human_case ' +
             '(descrevendo o que precisa) OU reformule a mensagem sem prometer retorno.'
-          : 'Você prometeu envolver um humano mas não abriu um caso. Chame a tool ' +
-            'open_human_case (descrevendo o que precisa) OU reformule a mensagem sem prometer humano.',
+          : soRetornoDeHumano
+            ? 'Você prometeu que a equipe responde depois, mas não deixou o retorno marcado. ' +
+              'Reformule a mensagem sem prometer retorno (não há retorno agendável neste turno) ' +
+              'OU chame a tool open_human_case se a conversa precisa mesmo de uma pessoa agora.'
+            : 'Você prometeu envolver um humano mas não abriu um caso. Chame a tool ' +
+              'open_human_case (descrevendo o que precisa) OU reformule a mensagem sem prometer humano.',
     };
   },
 };
@@ -1229,6 +1318,15 @@ export async function runBeforeSend(args: RunBeforeSendArgs): Promise<BeforeSend
   // antiga aberta, e o pool o reempresta nela — o envio seguinte rodaria dentro
   // da transação de quem falhou. O finally lê desta marcação.
   let erroNaTransacao: Error | undefined;
+  // #2426: marca que a transação já foi commitada/rollbackada à mão. Nada pode ser
+  // rollbackado de novo depois disso (um `rollback` tardio só geraria WARNING no pg e
+  // esconderia o erro real). O finally continua lendo `erroNaTransacao`.
+  let transacaoFechada = false;
+  // #2426: trace capturado assim que a cadeia evalua, para a auditoria DURÁVEL ser gravada
+  // FORA da janela da transação (commit no caminho enviado, rollback no veto/erro) — nunca
+  // enquanto a tx aberta segura o `contacts` (readStopFlags). `undefined` = a cadeia ainda
+  // não avaliou (falha numa leitura sob o lock) → nada a persistir.
+  let traceDaAuditoria: GateTraceEntry[] | undefined;
   try {
     await client.query('begin');
     // Serialização por número: dois workers no MESMO channel_session esperam a vez.
@@ -1364,57 +1462,71 @@ export async function runBeforeSend(args: RunBeforeSendArgs): Promise<BeforeSend
     // sem ninguém poder auditar depois. A linha entra ANTES da cadeia porque a
     // reescrita acontece antes dela, e leva só rótulos — nunca o corpo (sem PII).
     const trace: GateTraceEntry[] = [...rastroDoEstilo(estilo, args.body, bodyDoModelo), ...traceDaCadeia];
+    traceDaAuditoria = trace;
     ctx.body = evaluatedBody;
     emitTrace(args.log, args.channelSessionId, trace);
-    // Auditoria DURÁVEL por run (F4-08 acceptance 3): escrita autônoma (pool, fora da tx
-    // serializada) — o trace do VETO tem de sobreviver ao rollback abaixo. Nunca bloqueia
-    // o message-plane: falha aqui vira log.error (o trace do logger já é o backup), não
-    // exceção. ponytail: 1 insert por tentativa; se virar gargalo, batelar por run.
-    const traceId = await persistTrace(args, trace, veto);
 
-    // Wave 3 (CORE 2), cenário 11: o agente decidir NÃO falar é evento. Silêncio
-    // com motivo é informação; silêncio sem registro é abandono. Só o VETO entra
-    // — gate que passou é telemetria e fica na tabela de origem.
-    if (veto && traceId) {
-      try {
-        const r = await emitVetoActivity({
-          pool: args.pool,
-          organizationId: args.tenantId,
-          contactId: args.leadId,
-          traceId,
-          gate: veto.gate,
-          code: veto.code,
-          agentId: args.agentId ?? null,
-        });
-        if (!r.routed) {
-          args.log.info('veto sem negócio para pendurar: registrado no event_log', {
-            channel_session_id: args.channelSessionId,
-            reason: r.reason,
-          });
-        }
-      } catch (err) {
-        // A timeline do veto não pode derrubar o veto.
-        args.log.error('falha ao registrar atividade de veto (segue)', {
-          channel_session_id: args.channelSessionId,
-          error: err instanceof Error ? err.name : 'unknown',
-        });
-      }
-    }
-
-    // Veto de LGPD (F4-09): escala à inbox do runtime (regra dura nº 13) para o DPO/comercial
-    // regularizar. Escrita autônoma no pool (fora da tx serializada), como o trace — sobrevive
-    // ao rollback do veto e nunca derruba o message-plane (o gate já barrou o envio).
-    if (veto !== null && veto.code.startsWith('lgpd_')) {
-      await escalateLgpdVeto(
-        args.pool,
-        { tenantId: args.tenantId, leadId: args.leadId, code: veto.code },
-        args.log,
-      );
-    }
+    // #2426 — as escritas DURÁVEIS (trace de auditoria, timeline do veto, escalação LGPD)
+    // saem da JANELA da transação. `before_send_traces` (e a timeline do veto) têm FK para
+    // `contacts`: feitas pelo `args.pool` ENQUANTO esta tx aberta segura o `contacts`
+    // (readStopFlags), enfileiravam atrás de um DDL pendente de `ALTER TABLE contacts` — o
+    // insert esperava o DDL, o DDL esperava a tx (ACCESS SHARE) e a tx esperava o insert.
+    // Mesmo ciclo medido no #2363 (8m47s idle in transaction); a aresta que o #2121 não
+    // encerrou, porque uma das bordas mora no Node e o Postgres não a detecta. Autônomas no
+    // pool, sobrevivem ao rollback por natureza — gravá-las DEPOIS do commit/rollback as tira
+    // da janela sem mudar o desfecho.
+    //
+    // O envio (`args.send`) continua DENTRO da tx, sob o advisory lock do número: tirá-lo
+    // derrubaria a serialização anti-ban (a vez por número e a gravação do pacing no mesmo
+    // commit). Fechar essa outra aresta (o `send_ledger` e a `messages`, gravados noutra
+    // conexão/Supabase dentro do handler) exige o advisory lock de SESSÃO proposto no #2426 —
+    // redesign que precisa de prova com 2 conexões (job `invariants`), fora desta fatia.
 
     if (veto !== null) {
-      // Nada foi escrito: rollback fecha a tx e solta o lock. O envio NÃO acontece.
+      // Nada foi escrito na tx: rollback fecha a transação e solta o lock. O envio NÃO acontece.
       await client.query('rollback');
+      transacaoFechada = true;
+      // Auditoria DURÁVEL por run (F4-08 acc 3): escrita autônoma no pool — o trace do VETO
+      // tem de sobreviver ao rollback ACIMA. Nunca bloqueia o message-plane: falha aqui vira
+      // log.error (o trace do logger já é o backup), não exceção.
+      const traceId = await persistTrace(args, trace, veto);
+      // Wave 3 (CORE 2), cenário 11: o agente decidir NÃO falar é evento. Silêncio com motivo
+      // é informação; silêncio sem registro é abandono. Só o VETO entra na timeline.
+      if (traceId) {
+        try {
+          const r = await emitVetoActivity({
+            pool: args.pool,
+            organizationId: args.tenantId,
+            contactId: args.leadId,
+            traceId,
+            gate: veto.gate,
+            code: veto.code,
+            agentId: args.agentId ?? null,
+          });
+          if (!r.routed) {
+            args.log.info('veto sem negócio para pendurar: registrado no event_log', {
+              channel_session_id: args.channelSessionId,
+              reason: r.reason,
+            });
+          }
+        } catch (err) {
+          // A timeline do veto não pode derrubar o veto.
+          args.log.error('falha ao registrar atividade de veto (segue)', {
+            channel_session_id: args.channelSessionId,
+            error: err instanceof Error ? err.name : 'unknown',
+          });
+        }
+      }
+      // Veto de LGPD (F4-09): escala à inbox do runtime (regra dura nº 13) para o DPO/comercial
+      // regularizar. Escrita autônoma no pool, como o trace — sobrevive ao rollback e nunca
+      // derruba o message-plane (o gate já barrou o envio).
+      if (veto.code.startsWith('lgpd_')) {
+        await escalateLgpdVeto(
+          args.pool,
+          { tenantId: args.tenantId, leadId: args.leadId, code: veto.code },
+          args.log,
+        );
+      }
       return { status: 'vetoed', trace, ...veto };
     }
 
@@ -1430,7 +1542,9 @@ export async function runBeforeSend(args: RunBeforeSendArgs): Promise<BeforeSend
     // já foram (ou serão) contabilizados na tentativa original — o ledger F2-06 faz as
     // repetições curto-circuitarem, então re-registrar aqui inflaria o cap.
     if (outcome.kind === 'sent') {
-      await recordSend(client, args.tenantId, args.channelSessionId, args.now);
+      await recordSend(client, args.tenantId, args.channelSessionId, args.now, {
+        resposta: tipoDeEnvio(args.resposta) === 'resposta',
+      });
       // Simetria com o gate desarmado: quem não é julgado pela janela não entra
       // nela. Ver `GateContext.spinningEnforced`.
       if (args.enforceSpinning !== false) {
@@ -1438,10 +1552,23 @@ export async function runBeforeSend(args: RunBeforeSendArgs): Promise<BeforeSend
       }
     }
     await client.query('commit');
+    transacaoFechada = true;
+    // Auditoria DURÁVEL por run (F4-08 acc 3): gravada DEPOIS do commit — antes, o insert em
+    // `before_send_traces` (FK `contacts`) saía pelo pool enquanto a tx aberta segurava o
+    // `contacts` e podia enfileirar atrás de um DDL (#2426). Autônoma no pool; falha vira
+    // log.error (o logger é o backup).
+    await persistTrace(args, trace, null);
     return { status: 'sent', outcome, trace };
   } catch (err) {
     erroNaTransacao = err instanceof Error ? err : new Error(String(err));
-    await rollback(client, err);
+    // Uma tx já fechada (commit/rollback explícito acima) não pode ser rollback de novo.
+    if (!transacaoFechada) {
+      await rollback(client, err);
+      // Auditoria da tentativa que ERROU (ex.: envio com o transporte fora): o rollback desfaz
+      // a tx, mas a linha de auditoria é autônoma no pool e sobrevive — gravada AQUI, fora da
+      // janela, para não reabrir o ciclo do #2426. O veto já gravou o seu no ramo dele.
+      if (traceDaAuditoria !== undefined) await persistTrace(args, traceDaAuditoria, null);
+    }
     throw err;
   } finally {
     client.release(erroNaTransacao);

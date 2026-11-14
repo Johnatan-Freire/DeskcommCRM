@@ -99,13 +99,17 @@ export function limparCacheDoNumeroInterno(): void {
 export function ehOChatDoAviso(parsed: ChatIdentidade, cfg: NumeroInternoDeAviso): boolean {
   if (!cfg.destino && !cfg.jid) return false;
 
-  if (parsed.kind === "phone" && parsed.phone && cfg.destino) {
-    return phoneLookupVariants(cfg.destino).includes(parsed.phone);
+  // Em modo privacidade (`@lid`) o ingestor preenche `phone` com o
+  // `_data.key.remoteJidAlt` do payload (#3716) — e é por ele que o número
+  // cadastrado é reconhecido, porque o transporte resolve o destino por telefone.
+  if ((parsed.kind === "phone" || parsed.kind === "lid") && parsed.phone && cfg.destino &&
+      phoneLookupVariants(cfg.destino).includes(parsed.phone)) {
+    return true;
   }
 
-  // O destinatário em modo privacidade chega SEM telefone, com um identificador
-  // que o canal inventa. O JID só é conhecido depois do primeiro aviso enviado —
-  // antes disso uma resposta dele passa, e esse buraco está declarado no teste.
+  // Sem o telefone alternativo, o `@lid` só casa pelo JID, que só é conhecido
+  // depois de um aviso enviado a esse endereço — esse buraco está declarado no
+  // teste.
   if (parsed.kind === "lid" && parsed.lid && cfg.jid) {
     return cfg.jid === `${parsed.lid}@lid`;
   }

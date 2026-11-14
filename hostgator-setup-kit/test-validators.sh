@@ -357,6 +357,53 @@ rede_morta "chave Anthropic segue pelo ramo 000"  pass v_anthropic  "sk-ant-abc1
 rede_morta "chave OpenRouter segue pelo ramo 000" pass v_openrouter "sk-or-abc123"  "não consegui checar"
 rede_morta "chave OpenAI segue pelo ramo 000"     pass v_openai     "sk-abc123"     "não consegui checar"
 
+# ── A prova da chave, no single-server, bate no Supabase LOCAL ────────────────
+# Defeito medido numa instalação real (10/10/2026; single-server com o domínio
+# atrás de Cloudflare no modo proxy): a fase 2 provava a chave contra
+# NEXT_PUBLIC_SUPABASE_URL, mas quem serve essa URL é o Caddy DESTA instalação,
+# que só sobe DEPOIS desta fase — o proxy devolve 521 e a instalação PARA
+# mandando conferir uma chave que está certa. O `curl` abaixo é o juiz: ele
+# registra QUAL endereço foi chamado e responde por host (a pública, 521 ou 200
+# conforme o caso; o gateway local do Supabase, sempre 200).
+prova_no_local() {  # prova_no_local <descrição> <SINGLE_SERVER> <resposta da pública> <url esperada>
+  local desc="$1" single="$2" publica="$3" esperada="$4" log chamadas rc
+  log="$(mktemp)"
+  SINGLE_DO_CASO="$single" PUBLICA_DO_CASO="$publica" CURL_LOG="$log" \
+  JWT_DO_CASO="$(mkjwt anon abcdefghijklmnop)" bash -c '
+      INSTALL_SH_LIB=1 . ./install.sh
+      set +e
+      NEXT_PUBLIC_SUPABASE_URL="https://abcdefghijklmnop.supabase.co"
+      SUPABASE_INTERNAL_URL="http://127.0.0.1:8000"
+      SINGLE_SERVER="$SINGLE_DO_CASO"
+      curl() {
+        local a url=""
+        for a in "$@"; do case "$a" in http://*|https://*) url="$a";; esac; done
+        printf "%s\n" "$url" >> "$CURL_LOG"
+        case "$url" in
+          http://127.0.0.1:8000/*) printf 200;;
+          *) printf "%s" "$PUBLICA_DO_CASO";;
+        esac
+        return 0
+      }
+      v_anon "$JWT_DO_CASO"' >/dev/null 2>&1
+  rc=$?
+  chamadas="$(cat "$log" 2>/dev/null)"
+  if [ -n "$chamadas" ] && [ "$chamadas" != "$esperada" ]; then
+    printf '  ✗ %s  (chamou o endereço errado)\n     esperava: %s\n     chamou:   %s\n' \
+      "$desc" "$esperada" "$chamadas"; fail=1
+  elif [ $rc -ne 0 ]; then
+    printf '  ✗ %s  (a chave CERTA foi recusada)\n' "$desc"; fail=1
+  else
+    printf '  ✓ %s\n' "$desc"
+  fi
+  rm -f "$log"
+}
+
+prova_no_local "single-server com o proxy no caminho: a chave certa SEGUE (prova no Supabase local)" \
+  1 521 "http://127.0.0.1:8000/auth/v1/settings"
+prova_no_local "fora do single-server: a prova continua na URL pública que o operador deu" \
+  0 200 "https://abcdefghijklmnop.supabase.co/auth/v1/settings"
+
 echo "leitura do .env (load_env)"
 . ./_common.sh
 set +e

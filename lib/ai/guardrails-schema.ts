@@ -5,6 +5,7 @@
 import { z } from "zod";
 
 import { DEFAULT_SENTIMENT_THRESHOLD } from "@/lib/ai/prompts/sentiment";
+import { TETO_DA_FRASE_DO_AVISO } from "@/lib/escalacao/frase-do-aviso-configurada";
 
 // ---------------------------------------------------------------------------
 // Models permitidos (Vercel AI Gateway)
@@ -154,6 +155,15 @@ export const agentConfigSchema = z.object({
    * então não se liga por migration — se liga na tela do agente.
    */
   aceita_comandos_celular: z.boolean().default(false),
+  /**
+   * A frase que o CLIENTE lê quando a IA passa a conversa para uma pessoa
+   * (#3725, tela desde o #3816). `null`/ausente = a frase padrão do produto,
+   * curta e humana (`textoDoAviso`). Lida em runtime por
+   * `lerFraseDoAvisoConfigurada`, que é quem valida tamanho e conteúdo — aqui o
+   * teto é o MESMO `TETO_DA_FRASE_DO_AVISO`, para o PATCH recusar com 400 o que
+   * a leitura recusaria em silêncio.
+   */
+  aviso_de_handoff: z.string().max(TETO_DA_FRASE_DO_AVISO).nullable().optional(),
 });
 export type AgentConfig = z.infer<typeof agentConfigSchema>;
 

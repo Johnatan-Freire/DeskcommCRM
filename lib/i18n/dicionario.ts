@@ -37,6 +37,41 @@ import type { Idioma } from "./idiomas";
 type Traducoes = Record<string, Partial<Record<Exclude<Idioma, "pt-BR">, string>>>;
 
 export const DICIONARIO: Traducoes = {
+  // ─── MATERIAIS DO AGENTE (8006): vídeo, imagem e PDF enviados pela IA ───
+  "Abrir o PDF": { es: "Abrir el PDF" },
+  "Algum agente escolhido não é desta organização.": { es: "Algún agente elegido no es de esta organización." },
+  "Arquivo": { es: "Archivo" },
+  "Ativo: os agentes podem enviar": { es: "Activo: los agentes pueden enviarlo" },
+  "Descreva a situação, como faria com uma pessoa da equipe. Exemplo: quando o lead demonstrar interesse em Informática Básica ou pedir para saber como é o curso.": { es: "Describe la situación, como lo harías con una persona del equipo. Ejemplo: cuando el lead muestre interés en Informática Básica o pida saber cómo es el curso." },
+  "Erro ao carregar os materiais.": { es: "Error al cargar los materiales." },
+  "Erro ao guardar o arquivo.": { es: "Error al guardar el archivo." },
+  "Erro ao remover o material.": { es: "Error al eliminar el material." },
+  "Erro ao salvar o material.": { es: "Error al guardar el material." },
+  "Escolha o arquivo do material.": { es: "Elige el archivo del material." },
+  "Formato não aceito. Envie um vídeo MP4, uma imagem JPEG ou PNG, ou um PDF.": { es: "Formato no aceptado. Envía un video MP4, una imagen JPEG o PNG, o un PDF." },
+  "Materiais do agente": { es: "Materiales del agente" },
+  "Material ativado.": { es: "Material activado." },
+  "Material desativado.": { es: "Material desactivado." },
+  "Material inválido.": { es: "Material no válido." },
+  "Material removido.": { es: "Material eliminado." },
+  "Material salvo.": { es: "Material guardado." },
+  "Nenhum material ainda. Sem material, os agentes respondem só com texto.": { es: "Todavía no hay materiales. Sin material, los agentes responden solo con texto." },
+  "Novo material": { es: "Nuevo material" },
+  "Não foi possível remover o material.": { es: "No fue posible eliminar el material." },
+  "Não foi possível salvar o material.": { es: "No fue posible guardar el material." },
+  "O arquivo passa de 16 MB, o limite do WhatsApp para vídeo.": { es: "El archivo supera 16 MB, el límite de WhatsApp para video." },
+  "PDF": { es: "PDF" },
+  "Quando enviar": { es: "Cuándo enviar" },
+  "Remover este material? O arquivo sai do CRM; o que já foi enviado nas conversas continua lá.": { es: "¿Eliminar este material? El archivo sale del CRM; lo que ya se envió en las conversaciones sigue allí." },
+  "Todos os agentes": { es: "Todos los agentes" },
+  "Vídeo MP4, imagem JPEG ou PNG, ou PDF, até 16 MB.": { es: "Video MP4, imagen JPEG o PNG, o PDF, hasta 16 MB." },
+  "Vídeos, imagens e PDFs que os agentes de IA enviam na conversa. Para cada um, escreva em que situação ele deve ser enviado: o agente lê essa instrução e decide pelo contexto, e não manda o mesmo material duas vezes na mesma conversa.": { es: "Videos, imágenes y PDF que los agentes de IA envían en la conversación. Para cada uno, escribe en qué situación debe enviarse: el agente lee esa instrucción y decide por el contexto, y no envía el mismo material dos veces en la misma conversación." },
+  "Vídeos, imagens e PDFs que os agentes enviam na conversa, cada um com a situação em que deve ir.": { es: "Videos, imágenes y PDF que los agentes envían en la conversación, cada uno con la situación en que debe enviarse." },
+  // O item da trava de número novo na Central (lib/agent-engine/health/circuit.ts, doc 109).
+  "Número novo aguardando liberação (go-live)": { es: "Número nuevo en espera de liberación (go-live)" },
+  "Os retornos automáticos deste número estão parados até você liberar. Eles esperam na fila, nada é perdido, e voltam espaçados ao longo das horas seguintes. Responder quem te escreveu continua funcionando normalmente. Marque este item como resolvido quando o número estiver pronto para disparar.": {
+    es: "Los seguimientos automáticos de este número están detenidos hasta que lo liberes. Esperan en la cola, no se pierde nada, y vuelven espaciados a lo largo de las horas siguientes. Responder a quien te escribió sigue funcionando con normalidad. Marca este elemento como resuelto cuando el número esté listo para enviar.",
+  },
   "O modelo padrão gravado não existe no catálogo deste provedor. Os pontos que usam o padrão vão falhar até você escolher um modelo do provedor e salvar.": { es: "El modelo predeterminado guardado no existe en el catálogo de este proveedor. Los puntos que usan el predeterminado fallarán hasta que elijas un modelo del proveedor y guardes." },
   "Pontos facultativos de {ano} cadastrados.": { es: "Días facultativos de {ano} registrados." },
   "Adicionar Carnaval e Corpus Christi de {ano}": { es: "Agregar Carnaval y Corpus Christi de {ano}" },
@@ -112,6 +147,87 @@ export const DICIONARIO: Traducoes = {
   "Todos os follow-ups estão pausados desde {quando}. Nenhum passo anda, ninguém é inscrito e nenhuma mensagem automática de follow-up sai.": { es: "Todos los seguimientos están pausados desde {quando}. Ningún paso avanza, nadie es inscrito y no sale ningún mensaje automático de seguimiento." },
   "Promoções, início de turma e mudanças com prazo que os agentes usam só enquanto valem.": { es: "Promociones, inicio de clases y cambios con plazo que los agentes usan solo mientras están vigentes." },
   "Quem pediu para se matricular pelo WhatsApp e espera um consultor.": { es: "Quien pidió matricularse por WhatsApp y espera a un asesor." },
+  "Não foi possível executar o teste. Confira modelo, credencial e materiais do agente.": { es: "No fue posible ejecutar la prueba. Revisa el modelo, la credencial y los materiales del agente." },
+  "Não foi possível executar o teste: o banco de dados não respondeu (indisponibilidade ou tempo esgotado). Modelo e credencial do agente não têm relação com esta falha — tente de novo em instantes. O motivo exato fica no log do app, em [ai.test].": { es: "No fue posible ejecutar la prueba: la base de datos no respondió (indisponibilidad o tiempo agotado). El modelo y la credencial del agente no tienen relación con esta falla — inténtalo de nuevo en unos instantes. El motivo exacto está en el log de la app, en [ai.test]." },
+  "Os dados de autorização devolvidos são de outro endereço, não do servidor informado — o cadastro foi recusado.": { es: "Los datos de autorización devueltos son de otra dirección, no del servidor indicado: el registro fue rechazado." },
+  // Ordenação da tabela de campanhas (#3911). "Ordenar por" é igual nos dois
+  // idiomas de propósito: é a mesma expressão em espanhol.
+  "Ordenar por": { es: "Ordenar por" },
+  "Mais recentes": { es: "Más recientes" },
+  "Mais antigas": { es: "Más antiguas" },
+  "Ativas primeiro": { es: "Activas primero" },
+  "Avisar também nas transferências para atendimento humano": { es: "Avisar también en las transferencias a atención humana" },
+  "Cada transferência manda uma mensagem ao mesmo número e conta no limite diário dele. Desligue para receber só os avisos de casos.": { es: "Cada transferencia envía un mensaje al mismo número y cuenta en su límite diario. Desactívalo para recibir solo los avisos de casos." },
+  "Também param de sair, até você cadastrar um número de novo: os avisos de transferência para atendimento humano, os avisos da Agenda que usam o mesmo número dos casos e as automações com a ação \"Mensagem para a equipe\".": { es: "También dejan de salir, hasta que registres otro número: los avisos de transferencia a atención humana, los avisos de la Agenda que usan el mismo número que los casos y las automatizaciones con la acción \"Mensaje para el equipo\"." },
+  "Nas transferências para atendimento humano, há uma tentativa de aviso por episódio, sem resumo da conversa. Depois de retomar o atendimento automático, uma nova transferência pode gerar outro aviso. Consulte o resultado na Central de alertas; responda ao cliente pelo CRM.": { es: "En las transferencias a atención humana hay un intento de aviso por episodio, sin resumen de la conversación. Después de reanudar la atención automática, una nueva transferencia puede generar otro aviso. Consulta el resultado en la Central de alertas; responde al cliente desde el CRM." },
+  "Os avisos podem sair fora do horário comercial e respeitam a conexão e os limites de envio do número.": { es: "Los avisos pueden enviarse fuera del horario comercial y respetan la conexión y los límites de envío del número." },
+  "Os avisos de casos dependem dessa permissão. As transferências para atendimento humano continuam podendo avisar a equipe, sem habilitar a abertura de casos.": { es: "Los avisos de casos dependen de este permiso. Las transferencias a atención humana pueden seguir avisando al equipo sin habilitar la apertura de casos." },
+  "Um assistente em modo assistido não abre casos sozinho. Os avisos de transferência dependem de a conversa ser efetivamente passada para atendimento humano.": { es: "Un asistente en modo asistido no abre casos por sí solo. Los avisos de transferencia dependen de que la conversación pase efectivamente a atención humana." },
+  "Últimos avisos de casos": { es: "Últimos avisos de casos" },
+  "Esta lista registra avisos de casos. O resultado dos avisos de transferência para atendimento humano aparece no respectivo item da Central de alertas.": { es: "Esta lista registra avisos de casos. El resultado de los avisos de transferencia a atención humana aparece en el elemento correspondiente de la Central de alertas." },
+  "Ainda não há avisos de casos nesta lista. As tentativas aparecem aqui quando o assistente abre um caso, inclusive se falharem.": { es: "Todavía no hay avisos de casos en esta lista. Los intentos aparecen aquí cuando el asistente abre un caso, incluso si fallan." },
+  "Preencher o nome que o cliente informa no atendimento": { es: "Completar el nombre que el cliente informa durante la atención" },
+  "Quando o assistente identifica o próprio nome informado por texto e usa a capacidade Anotar dado que o cliente informou, pode preencher o nome vazio da ficha. O apelido do WhatsApp fica separado. Nomes existentes e e-mail continuam exigindo revisão humana. Confira a ficha se o assistente interpretar a mensagem incorretamente.": { es: "Cuando el asistente identifica el nombre propio informado por texto y usa la capacidad Anotar un dato que el cliente informó, puede completar el nombre vacío de la ficha. El apodo de WhatsApp queda separado. Los nombres existentes y el correo siguen requiriendo revisión humana. Revise la ficha si el asistente interpreta incorrectamente el mensaje." },
+  "Ligado para novas mensagens de atendimento.": { es: "Activado para nuevos mensajes de atención." },
+  "Desligado: o nome continua como sugestão para revisão.": { es: "Desactivado: el nombre sigue como sugerencia para revisar." },
+  "Mensagens da conversa": { es: "Mensajes de la conversación" },
+  "Novas mensagens · Ir para o fim": { es: "Mensajes nuevos · Ir al final" },
+  // Versão anterior barrada na prévia (doc de decisão 234): a moldura e as causas de `motivoDoVeto`.
+  "Uma versão anterior desta sugestão foi barrada: {causa}. Confira antes de enviar.": { es: "Una versión anterior de esta sugerencia fue bloqueada: {causa}. Revísala antes de enviar." },
+  "o contato pediu para não receber mensagens (opt-out)": { es: "el contacto pidió no recibir mensajes (opt-out)" },
+  "a conversa estava com a equipe, com o atendimento automático pausado": { es: "la conversación estaba con el equipo, con la atención automática en pausa" },
+  "o contato foi anonimizado (LGPD)": { es: "el contacto fue anonimizado (LGPD)" },
+  "não havia base legal (LGPD) registrada para o primeiro contato com este lead": { es: "no había base legal (LGPD) registrada para el primer contacto con este lead" },
+  "prometia um preço ou condição fora da tabela aprovada": { es: "prometía un precio o condición fuera de la tabla aprobada" },
+  "continha uma promessa que o sistema não registrou": { es: "contenía una promesa que el sistema no registró" },
+  "prometia voltar a falar com o cliente sem deixar o retorno marcado no CRM": { es: "prometía volver a hablar con el cliente sin dejar el seguimiento agendado en el CRM" },
+  "usava um termo interno que não pode chegar ao cliente": { es: "usaba un término interno que no puede llegar al cliente" },
+  "fazia uma afirmação clínica, e a camada de afirmações clínicas está ligada": { es: "hacía una afirmación clínica, y la capa de afirmaciones clínicas está activada" },
+  "dependia de horário, e o agente não tem ferramenta de agenda ligada": { es: "dependía de un horario, y el agente no tiene la herramienta de agenda activada" },
+  "não se apresentava como assistente virtual na primeira mensagem a um contato novo": { es: "no se presentaba como asistente virtual en el primer mensaje a un contacto nuevo" },
+  "a janela de 24 horas com este contato estava fechada": { es: "la ventana de 24 horas con este contacto estaba cerrada" },
+  "afirmava um fato que o material de referência CONTRADIZ": { es: "afirmaba un hecho que el material de referencia CONTRADICE" },
+  "afirmava um fato sem apoio no material de referência": { es: "afirmaba un hecho sin respaldo en el material de referencia" },
+  "ia mostrar um produto que não foi encontrado no cadastro": { es: "iba a mostrar un producto que no se encontró en el registro" },
+  // Encaminhar mensagem (#2835) — botão na bolha do chat e o diálogo de destino.
+  "Encaminhar": { es: "Reenviar" },
+  "Encaminhar mensagem": { es: "Reenviar mensaje" },
+  "Escolha a conversa que vai receber esta mensagem.": { es: "Elige la conversación que recibirá este mensaje." },
+  "Buscar conversa": { es: "Buscar conversación" },
+  "Mensagem encaminhada.": { es: "Mensaje reenviado." },
+  // A rota responde 201 mesmo quando o envio falhou (`status: "failed"`): o
+  // toast precisa dizer isso, com o motivo que o envio gravou.
+  "Não foi possível encaminhar: {motivo}": { es: "No se pudo reenviar: {motivo}" },
+  // Recusas do encaminhamento (`lib/inbox/encaminhar-mensagem.ts`).
+  "Escolha uma conversa de destino desta organização.": { es: "Elige una conversación de destino de esta organización." },
+  "A conversa de destino não tem canal de envio.": { es: "La conversación de destino no tiene canal de envío." },
+  "O canal da conversa de destino está desativado. Reative-o para encaminhar.": {
+    es: "El canal de la conversación de destino está desactivado. Reactívalo para reenviar.",
+  },
+  "Esta mensagem foi apagada e não pode ser encaminhada.": { es: "Este mensaje fue eliminado y no se puede reenviar." },
+  "A mídia desta mensagem ainda não chegou ao CRM. Tente encaminhar de novo em alguns segundos.": {
+    es: "El contenido multimedia de este mensaje aún no llegó al CRM. Intenta reenviarlo de nuevo en unos segundos.",
+  },
+  "Não consegui preparar a mídia desta mensagem para o encaminhamento. Tente de novo em instantes.": {
+    es: "No pude preparar el contenido multimedia de este mensaje para reenviarlo. Inténtalo de nuevo en unos instantes.",
+  },
+  "Esta mídia não pode ser encaminhada.": { es: "Este contenido multimedia no se puede reenviar." },
+  "Só é possível encaminhar mensagens de texto ou mídia.": { es: "Solo se pueden reenviar mensajes de texto o multimedia." },
+  "Buscar etiquetas": { es: "Buscar etiquetas" },
+  "etiquetas": { es: "etiquetas" },
+  "Nenhuma etiqueta encontrada.": { es: "No se encontró ninguna etiqueta." },
+  "Digite o nome exato da etiqueta de destino": { es: "Escriba el nombre exacto de la etiqueta de destino" },
+  "Não foi possível carregar as tags.": { es: "No se pudieron cargar las etiquetas." },
+  "Essa etiqueta não existe. Juntar só leva para uma etiqueta que já existe; para dar um nome novo, use Renomear.": {
+    es: "Esa etiqueta no existe. Unir solo lleva a una etiqueta que ya existe; para darle un nombre nuevo, usa Renombrar.",
+  },
+  "Nome interno da conexão": { es: "Nombre interno de la conexión" },
+  "Nome interno": { es: "Nombre interno" },
+  "Nome interno atualizado.": { es: "Nombre interno actualizado." },
+  "Não foi possível salvar o nome.": { es: "No se pudo guardar el nombre." },
+  "Só a sua equipe vê este nome. O nome público no provedor não muda.": { es: "Solo tu equipo ve este nombre. El nombre público en el proveedor no cambia." },
+  "Ex.: WA | Fixo 7906": { es: "Ej.: WA | Fijo 7906" },
+  "Informe um nome interno com até 80 caracteres.": { es: "Indica un nombre interno de hasta 80 caracteres." },
   "Configure a assinatura da fonte antes de autorizar IA. Para remover a assinatura, desligue primeiro a autorização de IA.": { es: "Configura la firma de la fuente antes de autorizar IA. Para quitar la firma, desactiva primero la autorización de IA." },
   // Autorização por fonte de formulário.
   "Autorizar IA para leads deste formulário": { es: "Autorizar IA para los leads de este formulario" },
@@ -148,6 +264,10 @@ export const DICIONARIO: Traducoes = {
   "Pedindo…": { es: "Solicitando…" },
   "Quantos dias antes da conexão do número": { es: "Cuántos días antes de la conexión del número" },
   "Traz para o CRM as conversas que este número teve antes de ser conectado, só como registro.": { es: "Trae al CRM las conversaciones que este número tuvo antes de conectarse, solo como registro." },
+  // Atualização do card pela integração (#2316) — a opção irmã da de IA.
+  "Atualizar o card quando o envio repete o mesmo cadastro": { es: "Actualizar la tarjeta cuando el envío repite el mismo registro" },
+  "Só para integrações entre sistemas: ligado, um envio com o mesmo external_id que traga dado novo atualiza o card desta fonte — os campos, o título e a etapa pedida em stage, sempre para a frente. Desligado, o padrão, o envio repetido continua sendo reenvio e nada no card muda, nem o que a equipe corrigiu à mão.": { es: "Solo para integraciones entre sistemas: activado, un envío con el mismo external_id que traiga datos nuevos actualiza la tarjeta de esta fuente — los campos, el título y la etapa pedida en stage, siempre hacia adelante. Desactivado, lo predeterminado, el envío repetido sigue siendo un reenvío y nada en la tarjeta cambia, ni lo que el equipo corrigió a mano." },
+  "Configure a assinatura da fonte antes de deixar a integração atualizar o card. Para remover a assinatura, desligue primeiro a atualização pelo external_id.": { es: "Configura la firma de la fuente antes de permitir que la integración actualice la tarjeta. Para quitar la firma, desactiva primero la actualización por external_id." },
   // ─── BUSCA DENTRO DA CONVERSA (extraída do PR #1793) ───
   "Resultados nas mensagens carregadas": { es: "Resultados en los mensajes cargados" },
   "Buscar nesta conversa": { es: "Buscar en esta conversación" },
@@ -161,6 +281,12 @@ export const DICIONARIO: Traducoes = {
   "Ao ganhar": { es: "Al ganar" },
   "Ao perder": { es: "Al perder" },
   "arquivada": { es: "archivada" },
+  // ─── CAMPOS DO CARD NO RESUMO DA PASSAGEM (issue #4303) ───
+  "Mostrar no resumo da passagem": { es: "Mostrar en el resumen de la transferencia" },
+  "Quando a conversa passa para uma pessoa, o valor que este campo tem no card aparece no resumo do cartão de passagem. Desligado por padrão.":
+    {
+      es: "Cuando la conversación pasa a una persona, el valor que este campo tiene en la tarjeta aparece en el resumen de la transferencia. Desactivado por defecto.",
+    },
   "Sem marca nenhuma este campo nunca é exigido — é o comportamento de sempre. Marcado, ele precisa estar preenchido para o negócio entrar na etapa escolhida ou ser fechado como ganho/perdido.":
     {
       es: "Sin ninguna marca este campo nunca se exige — es el comportamiento de siempre. Marcado, debe estar completado para que el negocio entre en la etapa elegida o se cierre como ganado/perdido.",
@@ -186,6 +312,9 @@ export const DICIONARIO: Traducoes = {
     es: "Desactivado, arrastrar un negocio perdido o ganado a una etapa abierta reabre el mismo negocio. Activado, el cerrado queda como está y el tablero ofrece crear un nuevo intento con el mismo contacto.",
   },
   "Motivo do ganho": { es: "Motivo del negocio ganado" },
+  "A etapa escolhida exige alguns dados. Preencha para continuar.": {
+    es: "La etapa elegida exige algunos datos. Complétalos para continuar.",
+  },
   "Preencha os campos obrigatórios antes de continuar: {campos}.": {
     es: "Completa los campos obligatorios antes de continuar: {campos}.",
   },
@@ -491,6 +620,15 @@ export const DICIONARIO: Traducoes = {
   },
   "Testar conexão": { es: "Probar conexión" },
   "Informe uma porta entre 1 e 65535.": { es: "Indica un puerto entre 1 y 65535." },
+  "Endereço de servidor inválido. Use o nome da máquina, como smtp.suaempresa.com ou meu_relay — sem espaço, sem barra e sem http://.": {
+    es: "Dirección de servidor inválida. Usa el nombre de la máquina, como smtp.suempresa.com o meu_relay — sin espacio, sin barra y sin http://.",
+  },
+  "O e-mail do remetente está em formato inválido. Use algo como suporte@suaempresa.com.": {
+    es: "El correo del remitente tiene un formato inválido. Usa algo como soporte@suempresa.com.",
+  },
+  "Não foi possível salvar o servidor de e-mail. Nada foi gravado; tente novamente em instantes.": {
+    es: "No fue posible guardar el servidor de correo. No se guardó nada; inténtalo de nuevo en unos instantes.",
+  },
   "Informe somente o e-mail do remetente, por exemplo suporte@empresa.com.": {
     es: "Indica solo el correo del remitente, por ejemplo soporte@empresa.com.",
   },
@@ -639,10 +777,23 @@ export const DICIONARIO: Traducoes = {
   "IA aberta ao público": { es: "IA abierta al público" },
   "IA restrita por origem": { es: "IA restringida por origen" },
   "Configurar acesso da IA": { es: "Configurar acceso de la IA" },
+  "Este número está em modo de teste": { es: "Este número está en modo de prueba" },
+  "Nenhum número autorizado neste canal: a IA não responde ninguém. Cadastre o número de quem vai testar para receber as respostas automáticas.": {
+    es: "Ningún número autorizado en este canal: la IA no responde a nadie. Registra el número de quien va a probar para recibir las respuestas automáticas.",
+  },
+  "O número {numero} não está na lista de teste deste canal: a IA não responde a ele. Cadastre-o para receber as respostas automáticas.": {
+    es: "El número {numero} no está en la lista de prueba de este canal: la IA no le responde. Regístralo para recibir las respuestas automáticas.",
+  },
+  "O teste aqui não passa pelo canal: no WhatsApp real, a IA não responderia a este número.": {
+    es: "La prueba de aquí no pasa por el canal: en WhatsApp real, la IA no respondería a este número.",
+  },
+  "Peça a um administrador para cadastrar o número de teste no cartão deste canal em Conexões.": {
+    es: "Pide a un administrador que registre el número de prueba en la tarjeta de este canal en Conexiones.",
+  },
   "Acesso da IA no WhatsApp": { es: "Acceso de la IA en WhatsApp" },
   "Teste com pessoas de confiança antes de liberar o atendimento automático.": { es: "Prueba con personas de confianza antes de habilitar la atención automática." },
   "Não foi possível carregar o acesso da IA.": { es: "No se pudo cargar el acceso de la IA." },
-  "Use um telefone com DDI por linha, por exemplo +5511999998888.": { es: "Usa un teléfono con prefijo internacional por línea, por ejemplo +5511999998888." },
+  "Use um telefone com DDI por linha, por exemplo {exemplo}.": { es: "Usa un teléfono con prefijo internacional por línea, por ejemplo {exemplo}." },
   "Acesso da IA atualizado.": { es: "Acceso de la IA actualizado." },
   "Não foi possível confirmar o salvamento. Reabra este painel para conferir a configuração.": { es: "No se pudo confirmar el guardado. Vuelve a abrir este panel para comprobar la configuración." },
   "Somente os números desta lista podem receber respostas automáticas neste canal.": { es: "Solo los números de esta lista pueden recibir respuestas automáticas en este canal." },
@@ -760,6 +911,13 @@ export const DICIONARIO: Traducoes = {
   "Salvar responsáveis": { es: "Guardar responsables" },
   "Voltar ao padrão da organização": { es: "Volver al valor predeterminado de la organización" },
   "Responsáveis salvos.": { es: "Responsables guardados." },
+  // ─── Regras de atendimento POR NÚMERO (#2331) ───
+  "Como este número distribui": { es: "Cómo distribuye este número" },
+  "Usar o padrão da organização": { es: "Usar el valor predeterminado de la organización" },
+  "Vale só para este número. Os números sem regra própria continuam com o que está definido para a organização.": { es: "Vale solo para este número. Los números sin regla propia siguen con lo definido para la organización." },
+  "Atendente de destino padrão": { es: "Asesor de destino predeterminado" },
+  "Nenhum — distribuir pelo modo": { es: "Ninguno — distribuir por el modo" },
+  "Escolhendo uma pessoa, todo cliente novo deste número vai direto para ela, sem passar pela distribuição. Precisa estar disponível para receber.": { es: "Al elegir una persona, todo cliente nuevo de este número va directo a ella, sin pasar por la distribución. Debe estar disponible para recibir." },
   "Não foi possível salvar. Tente novamente.": { es: "No se pudo guardar. Inténtalo de nuevo." },
   "Atendente sem nome": { es: "Asesor sin nombre" },
   "Configurar responsáveis por número": { es: "Configurar responsables por número" },
@@ -978,6 +1136,13 @@ export const DICIONARIO: Traducoes = {
   "Nenhum dia fora da rotina daqui para a frente.": { es: "No hay días fuera de la rutina a partir de hoy." },
   "Nenhum dia fechado daqui para a frente.": { es: "No hay días cerrados a partir de hoy." },
   "aberto excepcionalmente": { es: "abierto excepcionalmente" },
+  "Fechado": { es: "Cerrado" },
+  "Fechar só algumas horas": { es: "Cerrar solo algunas horas" },
+  "Fechar estas horas": { es: "Cerrar estas horas" },
+  "fechado nessas horas": { es: "cerrado en esas horas" },
+  "Nessas horas a agenda deixa de oferecer horários, para a equipe e para a IA. O resto do dia segue a jornada de sempre.": {
+    es: "En esas horas la agenda deja de ofrecer horarios, al equipo y a la IA. El resto del día sigue la jornada de siempre.",
+  },
   "Abrir atendimento": { es: "Abrir atención" },
   "Abra o atendimento e diga o que fazer: concluir, pedir informação ao cliente ou passar para uma pessoa.": { es: "Abre la atención e indica qué hacer: concluirla, pedir información al cliente o pasarla a una persona." },
   // O caso aberto na Central, na hora (`lib/escalacao/caso-na-central.handler.ts`).
@@ -1128,6 +1293,44 @@ export const DICIONARIO: Traducoes = {
   Lembrar: { es: "Recordar" },
   Fechar: { es: "Cerrar" },
   "Devolver ao automático": { es: "Devolver al automático" },
+
+  // ─── Inbox: lote por seleção múltipla (#2484, fatia F1) ───
+  "Ações em lote": { es: "Acciones en lote" },
+  "1 conversa selecionada": { es: "1 conversación seleccionada" },
+  "conversas selecionadas": { es: "conversaciones seleccionadas" },
+  "Marcar como lida": { es: "Marcar como leída" },
+  "Mais ações": { es: "Más acciones" },
+  "Pausar IA": { es: "Pausar IA" },
+  "Transferir para…": { es: "Transferir a…" },
+  "Transferir a conversa selecionada": {
+    es: "Transferir la conversación seleccionada",
+  },
+  "Cada conversa é transferida pelo mesmo caminho de sempre, com evento e auditoria próprios.": {
+    es: "Cada conversación se transfiere por el mismo camino de siempre, con evento y auditoría propios.",
+  },
+  "Escolha um atendente": { es: "Elige un agente" },
+  "Escolha para quem transferir.": { es: "Elige a quién transferir." },
+  "Nenhum atendente disponível para transferir.": {
+    es: "Ningún agente disponible para transferir.",
+  },
+  "Selecionar conversa": { es: "Seleccionar conversación" },
+  "Selecionar todas": { es: "Seleccionar todas" },
+  "Selecionar todas as conversas visíveis": {
+    es: "Seleccionar todas las conversaciones visibles",
+  },
+  // O relatório do lote, no toast: contas e recusas por ação.
+  fechadas: { es: "cerradas" },
+  atualizadas: { es: "actualizadas" },
+  recusadas: { es: "rechazadas" },
+  "Recusada.": { es: "Rechazada." },
+  // O MESMO relatório, no singular (#2990): o verbo era fixo no plural e a barra
+  // escrevia "1 conversas fechadas" / "1 fechadas, 1 recusadas". "Conversa" é
+  // feminino, então o particípio e a recusa vão no feminino.
+  fechada: { es: "cerrada" },
+  atualizada: { es: "actualizada" },
+  recusada: { es: "rechazada" },
+  "1 conversa fechada.": { es: "1 conversación cerrada." },
+  "1 conversa atualizada.": { es: "1 conversación actualizada." },
   Aberta: { es: "Abierta" },
   Fechada: { es: "Cerrada" },
   "Em atendimento": { es: "En atención" },
@@ -1166,6 +1369,12 @@ export const DICIONARIO: Traducoes = {
 
   // ─── Painel do contato ───
   CONTATO: { es: "CONTACTO" },
+  // O recolher do painel inteiro (#3004) — mesmo verbo do recolher da barra
+  // lateral, com o alvo explícito: são dois controles na mesma tela.
+  "Recolher painel do contato": { es: "Contraer panel del contacto" },
+  "Expandir painel do contato": { es: "Expandir panel del contacto" },
+  // O atalho do negócio ativo para o quadro do funil (#3004).
+  "Abrir no funil": { es: "Abrir en el embudo" },
   "TAGS DA CONVERSA": { es: "ETIQUETAS DE LA CONVERSACIÓN" },
   "DEMANDAS ABERTAS": { es: "CASOS ABIERTOS" },
   "LEADS RECENTES": { es: "LEADS RECIENTES" },
@@ -1188,6 +1397,7 @@ export const DICIONARIO: Traducoes = {
   "Sem responsável": { es: "Sin responsable" },
   "Editar campos": { es: "Editar campos" },
   "Linha do tempo": { es: "Línea de tiempo" },
+  "Ver tudo": { es: "Ver todo" },
   "DADOS DO NEGÓCIO": { es: "DATOS DEL NEGOCIO" },
   Título: { es: "Título" },
   Descrição: { es: "Descripción" },
@@ -1406,22 +1616,42 @@ export const DICIONARIO: Traducoes = {
   "Menu do usuário": { es: "Menú del usuario" },
   Sair: { es: "Cerrar sesión" },
   "Central de avisos": { es: "Central de avisos" },
+  // Lembrete de caso parado na Central (migration 0766; ideia de @Atlasads no #2584).
+  "Lembrete de caso parado": { es: "Recordatorio de caso detenido" },
+  "Quando um caso espera uma decisão da equipe, esta Central volta a avisar. O relógio começa quando o caso chega à equipe e recomeça quando o cliente responde.": {
+    es: "Cuando un caso espera una decisión del equipo, esta Central vuelve a avisar. El reloj empieza cuando el caso llega al equipo y se reinicia cuando el cliente responde.",
+  },
+  "Lembrar a equipe dos casos parados": { es: "Recordar al equipo los casos detenidos" },
+  "Lembrar a cada": { es: "Recordar cada" },
+  "Avisos por espera": { es: "Avisos por espera" },
+  "Salvar lembrete": { es: "Guardar recordatorio" },
+  "Lembrete de caso parado salvo.": { es: "Recordatorio de caso detenido guardado." },
+  "Não foi possível salvar o lembrete de caso parado.": { es: "No se pudo guardar el recordatorio de caso detenido." },
+  "{n} dias": { es: "{n} días" },
+  "{n} horas": { es: "{n} horas" },
+  // O que a tela diz a quem NÃO alcança a Central (#3147): a frase verdadeira
+  // no lugar do estado vazio, que era falso para quem não pode ver aviso nenhum.
+  "A Central de avisos é para quem atende": { es: "La Central de avisos es para quienes atienden" },
+  "Os avisos são pedidos do assistente para as pessoas que atendem. Se precisar deles, peça a quem administra para revisar seu acesso.": {
+    es: "Los avisos son pedidos del asistente para las personas que atienden. Si los necesitas, pide a quien administra que revise tu acceso.",
+  },
   "em aberto": { es: "abiertos" },
   // ─── Agentes de IA: lista ───
-  "Agents de IA": { es: "Agentes de IA" },
-  "Configure o comportamento dos agents que respondem no WhatsApp.": {
+  "Agentes de IA": { es: "Agentes de IA" },
+  "Configure o comportamento dos agentes que respondem no WhatsApp.": {
     es: "Configura el comportamiento de los agentes que responden en WhatsApp.",
   },
-  "Nenhum agent configurado": { es: "Ningún agente configurado" },
-  "Crie um agent para responder a conversas no WhatsApp com IA. Você configura prompt, tools, gatilhos e janela de contexto.": {
+  "Nenhum agente configurado": { es: "Ningún agente configurado" },
+  "Crie um agente para responder a conversas no WhatsApp com IA. Você configura prompt, tools, gatilhos e janela de contexto.": {
     es: "Crea un agente para responder conversaciones de WhatsApp con IA. Configuras el prompt, las herramientas, los disparadores y la ventana de contexto.",
   },
   "Novo agente": { es: "Nuevo agente" },
-  "Nenhum agent corresponde aos filtros atuais.": {
+  "Criar novo": { es: "Crear nuevo" },
+  "Nenhum agente corresponde aos filtros atuais.": {
     es: "Ningún agente coincide con los filtros actuales.",
   },
   "Buscar por nome…": { es: "Buscar por nombre…" },
-  "Buscar agents": { es: "Buscar agentes" },
+  "Buscar agentes": { es: "Buscar agentes" },
   "Filtrar por status": { es: "Filtrar por estado" },
   Status: { es: "Estado" },
   status: { es: "estado" },
@@ -1439,19 +1669,20 @@ export const DICIONARIO: Traducoes = {
   Despausar: { es: "Reanudar" },
   Pausar: { es: "Pausar" },
   Arquivar: { es: "Archivar" },
-  "Agent duplicado.": { es: "Agente duplicado." },
-  "Agent reativado.": { es: "Agente reanudado." },
-  "Agent pausado.": { es: "Agente pausado." },
+  "Agente duplicado.": { es: "Agente duplicado." },
+  "Agente reativado.": { es: "Agente reanudado." },
+  "Agente pausado.": { es: "Agente pausado." },
   "Agent arquivado.": { es: "Agente archivado." },
+  "Agente arquivado.": { es: "Agente archivado." },
   Falha: { es: "Error" },
   "Erro ao executar ação.": { es: "Error al ejecutar la acción." },
-  "O agent padrão da organização não pode ser arquivado.": {
+  "O agente padrão da organização não pode ser arquivado.": {
     es: "El agente predeterminado de la organización no se puede archivar.",
   },
-  "O agent deixa de responder gatilhos e some das listas ativas. Versões publicadas são preservadas para auditoria. Não é possível desarquivar pela UI nesta versão.": {
+  "O agente deixa de responder gatilhos e some das listas ativas. Versões publicadas são preservadas para auditoria. Não é possível desarquivar pela UI nesta versão.": {
     es: "El agente deja de responder a los disparadores y desaparece de las listas activas. Las versiones publicadas se conservan para auditoría. En esta versión no se puede desarchivar desde la interfaz.",
   },
-  "Renomear agent": { es: "Renombrar agente" },
+  "Renomear agente": { es: "Renombrar agente" },
   "Apenas o nome interno muda. Versões publicadas e histórico são preservados.": {
     es: "Solo cambia el nombre interno. Las versiones publicadas y el historial se conservan.",
   },
@@ -1504,7 +1735,7 @@ export const DICIONARIO: Traducoes = {
   "Máximo de": { es: "Máximo de" },
   "capacidades por agente.": { es: "capacidades por agente." },
   "Campo inválido.": { es: "Campo inválido." },
-  "Salve o agent antes de publicar.": { es: "Guarda el agente antes de publicar." },
+  "Salve o agente antes de publicar.": { es: "Guarda el agente antes de publicar." },
   "Sem rascunho para publicar.": { es: "No hay borrador para publicar." },
   "Resolva os erros do formulário.": { es: "Corrige los errores del formulario." },
   "Salve o rascunho antes de publicar.": { es: "Guarda el borrador antes de publicar." },
@@ -1517,7 +1748,7 @@ export const DICIONARIO: Traducoes = {
   "Formulário inválido.": { es: "Formulario inválido." },
   "salvo.": { es: "guardado." },
   "Validação falhou.": { es: "La validación falló." },
-  "Agent criado.": { es: "Agente creado." },
+  "Agente criado.": { es: "Agente creado." },
   "Falha ao publicar:": { es: "Error al publicar:" },
   "publicada e ativa.": { es: "publicada y activa." },
   Novo: { es: "Nuevo" },
@@ -1552,8 +1783,8 @@ export const DICIONARIO: Traducoes = {
   ". Publish bloqueado até validar.": { es: ". Publicación bloqueada hasta validar." },
   "Por qual número ele atende": { es: "Con qué número atiende" },
   "Este agente é acionado pelo roteador": { es: "Este agente se activa mediante el enrutador" },
-  "— o campo de número abaixo não se aplica.": {
-    es: "— el campo de número de abajo no aplica.",
+  "— a publicação usa o canal do roteador, sem número próprio neste especialista.": {
+    es: "— la publicación usa el canal del enrutador, sin número propio en este especialista.",
   },
   "Número conectado": { es: "Número conectado" },
   "Selecione um número": { es: "Selecciona un número" },
@@ -1704,8 +1935,8 @@ export const DICIONARIO: Traducoes = {
   "funis em que ninguém disse ao assistente o que cada etapa significa — ele vai atender e deixar os negócios parados onde estão.": {
     es: "embudos en los que nadie le ha explicado al asistente qué significa cada etapa. Atenderá y dejará los negocios parados donde están.",
   },
-  " Isso se configura em Configurações › Funis.": {
-    es: " Esto se configura en Configuración › Embudos.",
+  "Isso se configura em": {
+    es: "Esto se configura en",
   },
   "As conversas novas viram negócio em": {
     es: "Las conversaciones nuevas se convierten en negocio en",
@@ -1719,7 +1950,7 @@ export const DICIONARIO: Traducoes = {
   "Publique um fluxo de follow-up": { es: "Publica un flujo de seguimiento" },
   "para vinculá-lo.": { es: "para vincularlo." },
   "Fluxos publicados": { es: "Flujos publicados" },
-  "Máximo de 20 fluxos por agent.": { es: "Máximo de 20 flujos por agente." },
+  "Máximo de 20 fluxos por agente.": { es: "Máximo de 20 flujos por agente." },
   // ─── Agentes de IA: gatilhos e painel de segurança ───
   "O que faz ele responder": { es: "Qué hace que responda" },
   "Uma mensagem nova do cliente": { es: "Un mensaje nuevo del cliente" },
@@ -2511,6 +2742,10 @@ export const DICIONARIO: Traducoes = {
   "Erro ao salvar": { es: "Error al guardar" },
   "Agent default": { es: "Agente predeterminado" },
   "Criado em": { es: "Creado el" },
+  "Nome na agenda do celular": { es: "Nombre en la agenda del celular" },
+  "Só a equipe vê. Para usar em mensagens, copie para o nome.": {
+    es: "Solo lo ve el equipo. Para usarlo en mensajes, cópialo al nombre.",
+  },
   "Geral": { es: "General" },
   "Descrição interna do agent": { es: "Descripción interna del agente" },
   "Agent ativo": { es: "Agente activo" },
@@ -2585,6 +2820,8 @@ export const DICIONARIO: Traducoes = {
   "Salvar e validar": { es: "Guardar y validar" },
   "Obrigatório": { es: "Obligatorio" },
   "API key muito curta": { es: "API key demasiado corta" },
+  "Voltar aos casos": { es: "Volver a los casos" },
+  "Detalhes do caso": { es: "Detalles del caso" },
   Casos: { es: "Casos" },
   "Quando a IA trava em algo que só um humano resolve, ela abre um caso aqui — e continua conversando com o cliente enquanto espera sua resposta.":
     {
@@ -2594,7 +2831,9 @@ export const DICIONARIO: Traducoes = {
   "Concluídos": { es: "Concluidos" },
   "Nenhum caso aberto": { es: "Ningún caso abierto" },
   "Nenhum caso concluído": { es: "Ningún caso concluido" },
-  "Quando a IA precisar de você, aparece aqui.": { es: "Cuando la IA te necesite, lo verás aquí." },
+  "Os casos aparecem aqui quando um agente publicado, com \"Deixar o agente pedir uma tarefa a alguém e seguir conversando\" ligado, pede algo a você. Conversa passada para uma pessoa vai para o Inbox.": {
+    es: "Los casos aparecen aquí cuando un agente publicado, con \"Dejar que el agente pida una tarea a alguien y siga conversando\" activado, te pide algo. La conversación transferida a una persona va al Inbox.",
+  },
   "Casos concluídos, cancelados ou repassados ficam aqui.": {
     es: "Los casos concluidos, cancelados o transferidos quedan aquí.",
   },
@@ -2616,6 +2855,13 @@ export const DICIONARIO: Traducoes = {
   "Escreva sua resposta para a IA...": { es: "Escribe tu respuesta para la IA..." },
   "Escolha uma das opções acima para enviar.": { es: "Elige una de las opciones de arriba para enviar." },
   "Enviando...": { es: "Enviando..." },
+  // ─── #3810: encerrar sem avisar o cliente (lib/ai/case-copy.ts + painel) ───
+  "Encerrar sem avisar o cliente": { es: "Cerrar sin avisar al cliente" },
+  "Tira o caso da fila sem mandar nada: o cliente não recebe mensagem nenhuma.": { es: "Saca el caso de la cola sin enviar nada: el cliente no recibe ningún mensaje." },
+  "Caso encerrado. O cliente não recebeu mensagem.": { es: "Caso cerrado. El cliente no recibió ningún mensaje." },
+  "Escreva por que este caso não precisa mais de resposta (o cliente não recebe esta nota).": { es: "Escribe por qué este caso ya no necesita respuesta (el cliente no recibe esta nota)." },
+  "A nota é obrigatória e fica só no caso. Nada é enviado ao cliente.": { es: "La nota es obligatoria y queda solo en el caso. No se envía nada al cliente." },
+  "Encerrar caso": { es: "Cerrar caso" },
   // ─── lib/ai/case-copy.ts (status, ações e timeline dos casos humanos) ───
   "Aguardando você": { es: "Esperando tu respuesta" },
   // Os contadores do menu (`components/shell/ContadorDeCasos.tsx` e `ContadorDaFila.tsx`).
@@ -2623,6 +2869,10 @@ export const DICIONARIO: Traducoes = {
   "casos esperando você": { es: "casos esperándote" },
   "1 conversa esperando uma pessoa": { es: "1 conversación esperando a una persona" },
   "conversas esperando uma pessoa": { es: "conversaciones esperando a una persona" },
+  // O contador de Tarefas (`components/shell/ContadorDeTarefas.tsx`): as em
+  // aberto do próprio usuário logado.
+  "1 tarefa em aberto": { es: "1 tarea abierta" },
+  "tarefas em aberto": { es: "tareas abiertas" },
   "Virou atendimento humano": { es: "Pasó a atención humana" },
   "Aguardando o cliente responder — a IA avisa você quando tiver a informação.": {
     es: "Esperando la respuesta del cliente. La IA te avisará cuando tenga la información.",
@@ -2850,6 +3100,17 @@ export const DICIONARIO: Traducoes = {
   "Aprendizado adicionado.": { es: "Aprendizaje agregado." },
   "Aprendizado arquivado.": { es: "Aprendizaje archivado." },
   "Aprendizado reativado.": { es: "Aprendizaje reactivado." },
+  // ─── app/app/ai/memory/_client.tsx (prazo do aprendizado, #2369) ───
+  "Vale até (opcional)": { es: "Válido hasta (opcional)" },
+  "Sem data, o aprendizado vale para sempre. Com data, ele sai sozinho da conversa dos agentes depois desse dia — é assim que a programação da semana ou o cardápio do dia deixam de valer.": {
+    es: "Sin fecha, el aprendizaje vale para siempre. Con fecha, deja de aparecer por sí solo en la conversación de los agentes después de ese día: así es como la programación de la semana o el menú del día dejan de valer.",
+  },
+  "Vale até": { es: "Válido hasta" },
+  "vale até": { es: "válido hasta" },
+  "Validade atualizada.": { es: "Validez actualizada." },
+  "Informe um status ou uma data de validade válidos.": {
+    es: "Informa un estado o una fecha de validez válidos.",
+  },
   Aprendizados: { es: "Aprendizajes" },
   Aprovada: { es: "Aprobada" },
   Aprovar: { es: "Aprobar" },
@@ -3323,6 +3584,15 @@ export const DICIONARIO: Traducoes = {
   "O cliente manda mensagem e ninguém responde. A conversa fica parada na Caixa de entrada sem aviso.": {
     es: "El cliente manda un mensaje y nadie responde. La conversación se queda parada en la Bandeja de entrada, sin aviso.",
   },
+  "Escrever o follow-up": {
+    es: "Escribir el seguimiento",
+  },
+  "Escreve as mensagens que o agente manda sozinho quando o cliente para de responder: os passos de IA dos fluxos de follow-up e os retornos que ele mesmo combinou. Sem escolha aqui, usa o modelo da versão publicada do agente.": {
+    es: "Escribe los mensajes que el agente envía por su cuenta cuando el cliente deja de responder: los pasos con IA de los flujos de seguimiento y los retornos que él mismo acordó. Si no eliges nada aquí, usa el modelo de la versión publicada del agente.",
+  },
+  "O follow-up não sai: o cliente que parou de responder não recebe a retomada, e o fluxo fica parado no passo da mensagem.": {
+    es: "El seguimiento no sale: nadie le vuelve a escribir al cliente que dejó de responder, y el flujo se queda parado en el paso del mensaje.",
+  },
   "Trabalhar o funil": {
     es: "Trabajar el embudo",
   },
@@ -3752,6 +4022,14 @@ export const DICIONARIO: Traducoes = {
   "Tenant redigido — ação não disponível": { es: "Tenant anonimizado — acción no disponible" },
   "Suspender tenant": { es: "Suspender tenant" },
   "Reativar tenant": { es: "Reactivar tenant" },
+  // ─── #2778 — os três botões de ícone de TODA linha da listagem de tenants ───
+  // `aria-label` E `title`, os dois saem daqui: o botão é só ícone, então o
+  // rótulo é a ÚNICA coisa que o leitor de tela anuncia. Vão com `{nome}` porque
+  // a lista tem 30 linhas iguais — `t()` traduz, `.replace("{nome}", …)` cola o
+  // display_name, que é dado e não se traduz.
+  "Acompanhar a saúde de {nome}": { es: "Dar seguimiento a la salud de {nome}" },
+  "Editar os dados de {nome}": { es: "Editar los datos de {nome}" },
+  "Suspender {nome}": { es: "Suspender a {nome}" },
   "Tenant redigido — ações de gestão não disponíveis.": {
     es: "Tenant anonimizado — acciones de gestión no disponibles.",
   },
@@ -3980,6 +4258,8 @@ export const DICIONARIO: Traducoes = {
   },
   "Uso por tenant": { es: "Uso por tenant" },
   "Exportar CSV": { es: "Exportar CSV" },
+  "Exportar": { es: "Exportar" },
+  "Exportar vCard": { es: "Exportar vCard" },
   "Invoc. AI": { es: "Invoc. IA" },
   "Custo AI": { es: "Costo IA" },
 
@@ -4300,6 +4580,18 @@ export const DICIONARIO: Traducoes = {
   },
   "Salvar alterações": { es: "Guardar cambios" },
   "Criar automação": { es: "Crear automatización" },
+  "Parar follow-up": { es: "Detener seguimiento" },
+  "Escolha o fluxo": { es: "Elige el flujo" },
+  "Follow-up iniciado.": { es: "Seguimiento iniciado." },
+  "Não foi possível iniciar o follow-up.": { es: "No se pudo iniciar el seguimiento." },
+  // #3923: a instalação não tem número conectado — `fn_service_begin` recusa
+  // com `service_channel_not_found` e a rota devolve 409. A frase diz o que
+  // fazer, não só que falhou.
+  "Conecte um número de WhatsApp antes de iniciar o follow-up.": {
+    es: "Conecta un número de WhatsApp antes de iniciar el seguimiento.",
+  },
+  "Follow-up encerrado.": { es: "Seguimiento cerrado." },
+  "Não foi possível encerrar o follow-up.": { es: "No se pudo cerrar el seguimiento." },
   "Automação ligada.": { es: "Automatización activada." },
   "Automação pausada.": { es: "Automatización pausada." },
   "Crie sua primeira automação": { es: "Crea tu primera automatización" },
@@ -4430,6 +4722,7 @@ export const DICIONARIO: Traducoes = {
   "Virou lead": { es: "Se convirtió en lead" },
   Reenvio: { es: "Reenvío" },
   "Não entrou": { es: "No entró" },
+  "Card atualizado": { es: "Tarjeta actualizada" },
   "Criar/mover lead no funil": { es: "Crear/mover lead en el embudo" },
   "Enviar mensagem no WhatsApp": { es: "Enviar mensaje por WhatsApp" },
   "Adicionar tag": { es: "Agregar etiqueta" },
@@ -4475,6 +4768,48 @@ export const DICIONARIO: Traducoes = {
   },
   "Não conseguimos preparar o arquivo para envio.": {
     es: "No pudimos preparar el archivo para el envío.",
+  },
+  "Não foi possível enviar esta mensagem.": {
+    es: "No se pudo enviar este mensaje.",
+  },
+  "A mensagem não saiu de novo.": {
+    es: "El mensaje no salió de nuevo.",
+  },
+  "Aguardando conexão": {
+    es: "Esperando conexión",
+  },
+  "Não enviada — sem conexão": {
+    es: "No enviado — sin conexión",
+  },
+  "Enviar esta mensagem de novo?": {
+    es: "¿Enviar este mensaje de nuevo?",
+  },
+  "Pode ser que esta mensagem já tenha chegado. Confira no WhatsApp do cliente antes de enviar de novo.": {
+    es: "Puede que este mensaje ya haya llegado. Verifica en el WhatsApp del cliente antes de enviarlo de nuevo.",
+  },
+  "O WhatsApp não confirmou o envio a tempo. Pode ser que a mensagem tenha chegado.": {
+    es: "WhatsApp no confirmó el envío a tiempo. Puede que el mensaje haya llegado.",
+  },
+  "Este número está desativado. Reative em Conexões para enviar.": {
+    es: "Este número está desactivado. Reactívalo en Conexiones para enviar.",
+  },
+  "Este número não tem WhatsApp.": {
+    es: "Este número no tiene WhatsApp.",
+  },
+  "A janela de 24 horas fechou. Envie um modelo aprovado ou aguarde o cliente escrever.": {
+    es: "La ventana de 24 horas se cerró. Envía una plantilla aprobada o espera a que el cliente escriba.",
+  },
+  "Esta mensagem não pode ser reenviada.": {
+    es: "Este mensaje no se puede reenviar.",
+  },
+  "Confirme antes de enviar de novo.": {
+    es: "Confirma antes de enviar de nuevo.",
+  },
+  "Esta mensagem já está sendo reenviada.": {
+    es: "Este mensaje ya se está reenviando.",
+  },
+  "Muitas tentativas seguidas. Tente em um minuto.": {
+    es: "Demasiados intentos seguidos. Intenta en un minuto.",
   },
   "O agente escolhido não tem versão publicada. Publique-o em Agentes de IA para a automação poder usá-lo.": {
     es: "El agente elegido no tiene versión publicada. Publícalo en Agentes de IA para que la automatización pueda usarlo.",
@@ -4581,6 +4916,8 @@ export const DICIONARIO: Traducoes = {
   "Quando chegar mensagem no WhatsApp": { es: "Cuando llegue un mensaje por WhatsApp" },
   "Quando um lead ganhar uma tag": { es: "Cuando un lead reciba una etiqueta" },
   "Quando um contato ganhar uma tag": { es: "Cuando un contacto reciba una etiqueta" },
+  // #2812 — o gatilho de ficha SEM número que recebe um.
+  "Quando um contato ganhar um telefone": { es: "Cuando un contacto reciba un teléfono" },
   "alterado pelo assistente": { es: "cambiado por el asistente" },
   "alterado automaticamente pelo sistema": { es: "cambiado automáticamente por el sistema" },
   é: { es: "es" },
@@ -4650,8 +4987,8 @@ export const DICIONARIO: Traducoes = {
   "Hora de início da janela": { es: "Hora de inicio de la ventana" },
   "h até": { es: "h hasta" },
   "Hora de fim da janela": { es: "Hora de fin de la ventana" },
-  "Quando o cliente escreve, o agente responde nesta janela. Em branco, segue a janela de disparo. Use 0 e 24 para responder a qualquer hora — o teto diário e o intervalo entre envios continuam valendo.": {
-    es: "Cuando el cliente escribe, el agente responde dentro de esta ventana. En blanco, sigue la ventana de envíos proactivos. Usa 0 y 24 para responder a cualquier hora: el tope diario y el intervalo entre envíos siguen valiendo.",
+  "Quando o cliente escreve, o agente responde nesta janela. Em branco, segue a janela de disparo. Use 0 e 24 para responder a qualquer hora — o intervalo entre envios continua valendo. A resposta não conta no teto diário.": {
+    es: "Cuando el cliente escribe, el agente responde dentro de esta ventana. En blanco, sigue la ventana de envíos proactivos. Usa 0 y 24 para responder a cualquier hora: el intervalo entre envíos sigue valiendo. La respuesta no cuenta en el tope diario.",
   },
   "Disparos em massa, prospecção e mensagens que retomam conversa parada só saem nesta janela. Fora dela, o envio fica agendado para a próxima abertura — você vê o motivo na conversa.": {
     es: "Los envíos masivos, la prospección y los mensajes que retoman una conversación detenida solo salen dentro de esta ventana. Fuera de ella, el envío queda programado para cuando se abra de nuevo, y el motivo aparece en la conversación.",
@@ -4686,8 +5023,8 @@ export const DICIONARIO: Traducoes = {
   "Teto diário de envios": { es: "Tope diario de envíos" },
   "sem teto definido": { es: "sin tope definido" },
   "Teto diário de mensagens": { es: "Tope diario de mensajes" },
-  "Máximo de mensagens que este número envia por dia. Números novos também respeitam o aquecimento automático abaixo, o que for menor.": {
-    es: "Máximo de mensajes que este número envía por día. En los números nuevos también rige el calentamiento automático de abajo, y se aplica el límite que sea menor.",
+  "Máximo de mensagens que este número inicia por dia: primeira mensagem, follow-up e campanha. A resposta a quem escreveu não conta. Números novos também respeitam o aquecimento automático abaixo, o que for menor.": {
+    es: "Máximo de mensajes que este número inicia por día: primer mensaje, seguimiento y campaña. La respuesta a quien escribió no cuenta. Los números nuevos también respetan el calentamiento automático de abajo, lo que sea menor.",
   },
   "Fuso horário IANA": { es: "Zona horaria IANA" },
   "Usar o padrão": { es: "Usar el predeterminado" },
@@ -5382,6 +5719,23 @@ export const DICIONARIO: Traducoes = {
   "Considerando o que está nos campos acima.": {
     es: "Según lo que hay en los campos de arriba.",
   },
+  "Como seus e-mails saem": { es: "Cómo salen tus correos" },
+  "Vale para os e-mails que as automações enviam ao seu cliente. O endereço de envio continua sendo o do sistema — o que muda é o nome que aparece e para onde vai a resposta.": {
+    es: "Vale para los correos que las automatizaciones envían a tu cliente. La dirección de envío sigue siendo la del sistema — lo que cambia es el nombre que aparece y a dónde va la respuesta.",
+  },
+  "É o que o cliente lê como remetente. Deixe em branco para usar o do sistema.": {
+    es: "Es lo que el cliente lee como remitente. Déjalo en blanco para usar el del sistema.",
+  },
+  "Responder para": { es: "Responder a" },
+  "Use um endereço de e-mail como contato@suaempresa.com": {
+    es: "Usa una dirección de correo como contacto@tuempresa.com",
+  },
+  "Para onde vai a resposta do cliente. Deixe em branco para usar o endereço do sistema.": {
+    es: "A dónde va la respuesta del cliente. Déjalo en blanco para usar la dirección del sistema.",
+  },
+  "O envio continua saindo pelo servidor de e-mail do sistema: o endereço do remetente (o domínio) não muda, e um servidor de e-mail próprio da sua empresa ainda não é configurável por aqui.": {
+    es: "El envío sigue saliendo por el servidor de correo del sistema: la dirección del remitente (el dominio) no cambia, y un servidor de correo propio de tu empresa todavía no es configurable aquí.",
+  },
   "Do jeito que está, esta cor não chegaria à tela: o sistema continuaria com a cor que já usa.": {
     es: "Tal como está, este color no se mostraría en pantalla: el sistema seguiría usando el color que ya tiene.",
   },
@@ -5509,6 +5863,10 @@ export const DICIONARIO: Traducoes = {
   },
   "Gerando…": { es: "Generando…" },
   "Regenerar códigos de recuperação": { es: "Regenerar códigos de recuperación" },
+  "Você está sem códigos de recuperação válidos: os gerados antes da última atualização deixaram de valer, e cada código só vale uma vez. Sem eles, perder o celular tira o seu acesso.": {
+    es: "No tienes códigos de recuperación válidos: los generados antes de la última actualización dejaron de valer, y cada código solo vale una vez. Sin ellos, perder el celular te deja sin acceso.",
+  },
+  "Gere novos códigos de recuperação": { es: "Genera nuevos códigos de recuperación" },
   "Habilite MFA antes de gerar códigos.": { es: "Habilita MFA antes de generar códigos." },
   "Sessões ativas": { es: "Sesiones activas" },
 
@@ -5594,8 +5952,14 @@ export const DICIONARIO: Traducoes = {
     es: "La verificación en dos pasos de tu cuenta, los códigos de recuperación y las sesiones abiertas.",
   },
   // ─── Configurações: Funis (etapas + mapeamento do assistente) ───
-  "Você ainda não tem nenhum funil. Enquanto for assim, o agente atende normalmente, mas não tem para onde levar o card de ninguém — não há etapas para onde mover. Criar o funil é feito por quem instalou o sistema, direto no banco; depois ele aparece aqui para você escolher a etapa de cada passo.": {
-    es: "Todavía no tienes ningún embudo. Mientras tanto, el agente atiende con normalidad, pero no puede mover la tarjeta de nadie porque no hay etapas. El embudo lo crea quien instaló el sistema, directamente en la base de datos. Después aparecerá aquí para que elijas la etapa de cada paso.",
+  "Você ainda não tem nenhum funil. Enquanto for assim, o agente atende normalmente, mas não tem para onde levar o card de ninguém — não há etapas para onde mover.": {
+    es: "Todavía no tienes ningún embudo. Mientras tanto, el agente atiende con normalidad, pero no puede mover la tarjeta de nadie porque no hay etapas.",
+  },
+  "Crie o primeiro na tela Funis": {
+    es: "Crea el primero en la pantalla Embudos",
+  },
+  ": ele já nasce com etapas, e depois aparece aqui para você escolher a etapa de cada passo.": {
+    es: ": ya nace con etapas, y después aparece aquí para que elijas la etapa de cada paso.",
   },
   "Custom fields: JSON inválido. Esperado um array.": {
     es: "Custom fields: JSON inválido. Se esperaba un array.",
@@ -5605,6 +5969,17 @@ export const DICIONARIO: Traducoes = {
   "Motivos de perda (separados por vírgula)": { es: "Motivos de pérdida (separados por comas)" },
   "Ex:": { es: "Ej.:" },
   "Salvar vocabulário e campos": { es: "Guardar vocabulario y campos" },
+  // #2995 — o recorte de encerrados antigos do quadro, na tela do funil.
+  "Esconder do quadro os negócios encerrados há mais de": {
+    es: "Ocultar del tablero los negocios cerrados hace más de",
+  },
+  "Dias de encerrado para esconder do quadro": { es: "Días de cerrado para ocultar del tablero" },
+  "Escolha de 1 a 3650 dias para esconder os negócios encerrados do quadro.": {
+    es: "Elige entre 1 y 3650 días para ocultar del tablero los negocios cerrados.",
+  },
+  "Negócios abertos nunca são escondidos, e negócios encerrados sem data de encerramento ficam no quadro. Nada é apagado ou arquivado: desligar a opção traz todos de volta.": {
+    es: "Los negocios abiertos nunca se ocultan, y los negocios cerrados sin fecha de cierre permanecen en el tablero. Nada se borra ni se archiva: al desactivar la opción vuelven todos.",
+  },
   "As etapas que serviriam para este passo já estão sendo usadas por outros passos. Libere uma delas para poder escolhê-la aqui.": {
     es: "Las etapas que servirían para este paso ya las usan otros pasos. Libera una para poder elegirla aquí.",
   },
@@ -5652,6 +6027,17 @@ export const DICIONARIO: Traducoes = {
     es: "Solo una etapa puede ser la de pérdida. Marcar esta desmarca",
   },
   "saiu do quadro.": { es: "salió del tablero." },
+  // #3603 — a linha read-only do funil. «Fluxos de follow-up» é o nome que a
+  // tela de Follow-ups usa; «seguimiento» é como o espanhol do produto a chama.
+  "Fluxos de follow-up armados nesta etapa:": {
+    es: "Flujos de seguimiento armados en esta etapa:",
+  },
+  "Nenhum fluxo de follow-up armado nesta etapa.": {
+    es: "Ningún flujo de seguimiento armado en esta etapa.",
+  },
+  "não dispara: nenhum agente com follow-up ligado arma este fluxo": {
+    es: "no se dispara: ningún agente con seguimiento activado arma este flujo",
+  },
   "entrou no fim do funil.": { es: "entró al final del embudo." },
   "Etapas deste funil": { es: "Etapas de este embudo" },
   "Estas são as colunas do seu quadro, na ordem em que o cliente avança. Você pode renomear, criar, reordenar e arquivar.": {
@@ -5820,6 +6206,8 @@ export const DICIONARIO: Traducoes = {
   "Buscar conversas": { es: "Buscar conversaciones" },
   "Filtrar por número de WhatsApp": { es: "Filtrar por número de WhatsApp" },
   "Filtrar por tag": { es: "Filtrar por etiqueta" },
+  "Filtrar por atendente": { es: "Filtrar por agente" },
+  "Atendente removido": { es: "Agente eliminado" },
   Anonimizado: { es: "Anonimizado" },
   "Entrou por": { es: "Entró por" },
   "Posição": { es: "Posición" },
@@ -5889,6 +6277,8 @@ export const DICIONARIO: Traducoes = {
   "O WhatsApp recusou a alteração da mensagem.": { es: "WhatsApp rechazó el cambio del mensaje." },
   "O WhatsApp alterou a mensagem, mas o CRM não conseguiu atualizar o histórico.": { es: "WhatsApp modificó el mensaje, pero el CRM no pudo actualizar el historial." },
   "Esta mensagem foi apagada": { es: "Este mensaje fue eliminado" },
+  "Esta mensagem foi apagada pelo contato": { es: "Este mensaje fue eliminado por el contacto" },
+  "Esta mensagem foi apagada pelo atendente": { es: "Este mensaje fue eliminado por el agente" },
   "Visível só aqui no CRM": { es: "Visible solo aquí en el CRM" },
   editada: { es: "editado" },
   "O autor editou esta mensagem": { es: "El autor editó este mensaje" },
@@ -5919,6 +6309,31 @@ export const DICIONARIO: Traducoes = {
     es: "Archivar cierra esta atención y guarda la conversación en el historial. Si el cliente vuelve a escribir, la conversación regresa. ¿Archivar?",
   },
   "Arquivando...": { es: "Archivando..." },
+
+  // ─── Guias curtas dos botões da barra de ações do cabeçalho (#3003) ───
+  //
+  // O rótulo diz o GESTO; a guia diz a CONSEQUÊNCIA — é a pergunta "o que
+  // acontece se eu clicar aqui?", que chega antes do clique. Mesmo vocabulário
+  // já usado acima nesta seção (`atención automática`, `atención se cierra`).
+  "Solta esta conversa: ela fica sem dono e o atendimento automático volta a responder.": {
+    es: "Suelta esta conversación: queda sin responsable y la atención automática vuelve a responder.",
+  },
+  "Solta esta conversa: ela fica sem dono e volta para a fila, esperando um atendente.": {
+    es: "Suelta esta conversación: queda sin responsable y vuelve a la cola, esperando a un asesor.",
+  },
+  "Passa esta conversa para outro atendente. Se houver outro número conectado, dá para continuar o atendimento por ele.": {
+    es: "Pasa esta conversación a otro asesor. Si hay otro número conectado, puedes continuar la atención por él.",
+  },
+  "Encerra o atendimento. Depois você pode reabrir a conversa.": {
+    es: "Cierra la atención. Después puedes reabrir la conversación.",
+  },
+  "Reabre o atendimento desta conversa, que estava encerrada.": {
+    es: "Reabre la atención de esta conversación, que estaba cerrada.",
+  },
+  "Guarda a conversa na aba Arquivadas. Se ainda estiver aberta, o atendimento é encerrado.": {
+    es: "Guarda la conversación en la pestaña Archivadas. Si todavía está abierta, la atención se cierra.",
+  },
+  "Abre a ficha completa deste contato.": { es: "Abre la ficha completa de este contacto." },
   Automático: { es: "Automático" },
   Alguém: { es: "Alguien" },
   "Nota interna · só o time vê": { es: "Nota interna · solo la ve el equipo" },
@@ -5966,6 +6381,10 @@ export const DICIONARIO: Traducoes = {
   // ─── Inbox: tags de contato/conversa ───
   "Sem tags no contato.": { es: "Sin etiquetas en el contacto." },
   "Adicionar tag ao contato": { es: "Agregar etiqueta al contacto" },
+  // ─── #2979: o MESMO editor no funil, onde a etiqueta é do NEGÓCIO ───
+  "Sem tags no negócio.": { es: "Sin etiquetas en el negocio." },
+  "Adicionar tag ao negócio": { es: "Agregar etiqueta al negocio" },
+  "Tags do negócio": { es: "Etiquetas del negocio" },
   "Remover tag": { es: "Quitar etiqueta" },
   "Tags da conversa": { es: "Etiquetas de la conversación" },
 
@@ -6032,6 +6451,9 @@ export const DICIONARIO: Traducoes = {
   Anexar: { es: "Adjuntar" },
   "Fotos e vídeos": { es: "Fotos y videos" },
   Documento: { es: "Documento" },
+  // Cartão do documento sem nome original (#2613): a extensão identificada como
+  // extensão. `{ext}` é PDF/XLSX/…, e o espanhol usa a mesma palavra.
+  "Documento {ext}": { es: "Documento {ext}" },
   "Enviar anexo": { es: "Enviar adjunto" },
   "Legenda (opcional)": { es: "Descripción (opcional)" },
   Legenda: { es: "Descripción" },
@@ -6062,11 +6484,18 @@ export const DICIONARIO: Traducoes = {
   Imagem: { es: "Imagen" },
   Figurinha: { es: "Sticker" },
   Vídeo: { es: "Video" },
+  // Rótulo da prévia de uma reação sem corpo (#2742): a palavra é a mesma no
+  // balão e na lista de conversas, e por isso mora junto do vocabulário de mídia.
+  "Localização compartilhada": { es: "Ubicación compartida" },
+  "Reação": { es: "Reacción" },
   "Pausar áudio": { es: "Pausar audio" },
   "Reproduzir áudio": { es: "Reproducir audio" },
   "Progresso do áudio": { es: "Progreso del audio" },
   "Velocidade de reprodução": { es: "Velocidad de reproducción" },
   "Ampliar imagem": { es: "Ampliar imagen" },
+  // Segundo estágio do zoom do lightbox (#4149): a mesma imagem ampliada, um
+  // clique a mais. O rótulo diz o que o clique FAZ — voltar ao tamanho original.
+  "Reduzir imagem": { es: "Reducir imagen" },
   "Imagem recebida": { es: "Imagen recibida" },
   // Transcrição do áudio no balão (#2133): rótulo e estado de carregamento.
   Transcrição: { es: "Transcripción" },
@@ -6918,6 +7347,31 @@ export const DICIONARIO: Traducoes = {
     es: "Customer 360 — busca, filtra y gestiona contactos.",
   },
   "Importar CSV": { es: "Importar CSV" },
+  // ── Sincronizar agenda do celular (#2736) ─────────────────────────────────
+  "Sincronizar agenda": { es: "Sincronizar agenda" },
+  "Sincronizar agenda do celular": { es: "Sincronizar la agenda del celular" },
+  "Sincronizar de novo": { es: "Sincronizar de nuevo" },
+  "contato(s) sincronizado(s)": { es: "contacto(s) sincronizado(s)" },
+  "contato(s) já existente(s) — nada duplicado": { es: "contacto(s) ya existente(s) — nada duplicado" },
+  "contato(s) com erro na gravação": { es: "contacto(s) con error al guardar" },
+  "lido(s) no aparelho": { es: "leído(s) en el aparato" },
+  "ignorado(s)": { es: "ignorado(s)" },
+  "Não foi possível ler a agenda do celular.": { es: "No fue posible leer la agenda del celular." },
+  "Não foi possível carregar seus números conectados.": { es: "No fue posible cargar tus números conectados." },
+  "Nenhum número conectado. Conecte um número em Conexões para sincronizar a agenda.": {
+    es: "Ningún número conectado. Conecta un número en Conexiones para sincronizar la agenda.",
+  },
+  "Importa para o CRM os contatos salvos na agenda do aparelho conectado. Números que já estão no CRM não viram duplicata. Se o aparelho tiver mais contatos que o teto de uma sincronização, clique de novo para continuar de onde parou.": {
+    es: "Importa al CRM los contactos guardados en la agenda del aparato conectado. Los números que ya están en el CRM no se duplican. Si el aparato tiene más contactos que el tope de una sincronización, haz clic de nuevo para continuar donde ibas.",
+  },
+  "A sincronização bateu no teto de uma passada. Clique em Continuar de onde parou para seguir do próximo contato — o que já entrou não duplica.": {
+    es: "La sincronización llegó al tope de una pasada. Haz clic en Continuar donde ibas para seguir desde el próximo contacto: lo que ya entró no se duplica.",
+  },
+  "Continuar de onde parou": { es: "Continuar donde ibas" },
+  "Isto traz todos os contatos salvos no celular, inclusive os pessoais. Só mande campanha a quem autorizou receber.": {
+    es: "Esto trae todos los contactos guardados en el celular, incluidos los personales. Solo envía campañas a quien autorizó recibirlas.",
+  },
+  "Agenda do celular": { es: "Agenda del celular" },
   // ── Juntar contatos duplicados ──────────────────────────────────────────
   "Duplicados": { es: "Duplicados" },
   "Contatos duplicados": { es: "Contactos duplicados" },
@@ -6996,6 +7450,19 @@ export const DICIONARIO: Traducoes = {
   },
   "caracteres mínimos": { es: "caracteres mínimos" },
   "Para confirmar, digite": { es: "Para confirmar, escribe" },
+  "O pedido já foi encerrado — o aviso do art. 12.º só sai de pedido aberto.": {
+    es: "El pedido ya fue cerrado: el aviso del art. 12 solo sale para un pedido abierto.",
+  },
+  "O titular não tem e-mail para receber o aviso.": {
+    es: "El titular no tiene correo para recibir el aviso.",
+  },
+  "E-mail não configurado na instalação.": { es: "Correo no configurado en la instalación." },
+  "Não foi possível enviar o aviso ao titular.": {
+    es: "No fue posible enviar el aviso al titular.",
+  },
+  "O aviso do art. 12.º vale só para organizações fora do Brasil.": {
+    es: "El aviso del art. 12 solo vale para organizaciones fuera de Brasil.",
+  },
   "abaixo.": { es: "abajo." },
   "Confirmação": { es: "Confirmación" },
   "Anonimizando…": { es: "Anonimizando…" },
@@ -7009,7 +7476,15 @@ export const DICIONARIO: Traducoes = {
   "Editar contato": { es: "Editar contacto" },
   "Atualize os dados deste contato.": { es: "Actualiza los datos de este contacto." },
   "Telefone (E.164)": { es: "Teléfono (E.164)" },
+  // O campo aceita o formato nacional na organização brasileira (#3301): o
+  // rótulo diz qual é a régua do Brasil, e não "E.164", que só vale lá fora.
+  "Telefone (DDD + número)": { es: "Teléfono (código de área + número)" },
   "Data de nascimento": { es: "Fecha de nacimiento" },
+  // Autocompletar de etiquetas na ficha do contato (issue #2732).
+  "Nenhuma etiqueta neste contato.": { es: "Ninguna etiqueta en este contacto." },
+  "Digite para buscar etiquetas…": { es: "Escribe para buscar etiquetas…" },
+  "Sugestões de etiquetas": { es: "Sugerencias de etiquetas" },
+  "Criar etiqueta": { es: "Crear etiqueta" },
   "contato(s) importado(s)": { es: "contacto(s) importado(s)" },
   "linha(s) com problema": { es: "fila(s) con problema" },
   "Não foi possível importar o arquivo.": { es: "No se pudo importar el archivo." },
@@ -7051,6 +7526,7 @@ export const DICIONARIO: Traducoes = {
     es: "No hay contactos con ese nombre o teléfono.",
   },
   "Contato criado": { es: "Contacto creado" },
+  "Salvar e iniciar conversa": { es: "Guardar e iniciar conversación" },
   "Não foi possível carregar as sugestões agora.": { es: "No se pudieron cargar las sugerencias en este momento." },
   "Não foi possível registrar a decisão.": { es: "No se pudo registrar la decisión." },
   "O assistente ouviu isto na conversa": { es: "El asistente escuchó esto en la conversación" },
@@ -7066,6 +7542,11 @@ export const DICIONARIO: Traducoes = {
   "Importado (CSV)": { es: "Importado (CSV)" },
   "Anúncio da Meta": { es: "Anuncio de Meta" },
   "Anúncio do Google": { es: "Anuncio de Google" },
+  // ─── Inbox: o anúncio que trouxe a pessoa (bolha e painel) ───
+  "Ver anúncio": { es: "Ver anuncio" },
+  "Anúncio de origem": { es: "Anuncio de origen" },
+  "Clicou em {data}": { es: "Hizo clic el {data}" },
+  "Voltou por outro anúncio": { es: "Volvió por otro anuncio" },
 
   // ─── Settings: painel de atualização — histórico multi-versão (merge upstream) ───
   "Da versão": { es: "De la versión" },
@@ -7521,6 +8002,8 @@ export const DICIONARIO: Traducoes = {
   "sem responsável.": { es: "sin responsable." },
   "atribuído.": { es: "asignado." },
   "atribuídos.": { es: "asignados." },
+  "marcado como perdido.": { es: "marcado como perdido." },
+  "marcados como perdidos.": { es: "marcados como perdidos." },
   "selecionado": { es: "seleccionado" },
   "selecionados": { es: "seleccionados" },
   "Mover para…": { es: "Mover a…" },
@@ -7550,6 +8033,19 @@ export const DICIONARIO: Traducoes = {
   "Abrir esta conversa no Inbox": { es: "Abrir esta conversación en Inbox" },
   "conversa sem mensagens": { es: "conversación sin mensajes" },
   "Valor inválido": { es: "Valor inválido" },
+  // O VALOR RECORRENTE do negócio (#3602): setup + mensalidade no mesmo card.
+  // "sem prazo" é o estado de omitir a duração — não é 12 meses, é contrato
+  // aberto, e o texto tem de dizer isso sem parecer erro.
+  "Valor recorrente (mensal)": { es: "Valor recurrente (mensual)" },
+  "Duração (meses)": { es: "Duración (meses)" },
+  "sem prazo": { es: "sin plazo" },
+  "Duração inválida": { es: "Duración inválida" },
+  "Informe a mensalidade para usar a duração": {
+    es: "Informa la mensualidad para usar la duración",
+  },
+  "Sem valor único": { es: "Sin valor único" },
+  // O sufixo da mensalidade colado ao valor ("R$ 500/mês"), nas telas de leitura.
+  "/mês": { es: "/mes" },
   "Lead atualizado": { es: "Lead actualizado" },
   "Editar lead": { es: "Editar lead" },
   "Atualize os campos. Mover de etapa ou marcar ganho/perdido tem opções próprias.": {
@@ -7563,6 +8059,7 @@ export const DICIONARIO: Traducoes = {
   "Ações do lead": { es: "Acciones del lead" },
   "Marcar como ganho": { es: "Marcar como ganado" },
   "Marcar como perdido": { es: "Marcar como perdido" },
+  "Marcar como perdido…": { es: "Marcar como perdido…" },
   "Probabilidade recalculada automaticamente": { es: "Probabilidad recalculada automáticamente" },
   "Dados do negócio": { es: "Datos del negocio" },
   "Carregando a linha do tempo…": { es: "Cargando la línea de tiempo…" },
@@ -7577,8 +8074,8 @@ export const DICIONARIO: Traducoes = {
   // Sem esta linha, "Outro" com funil configurado é beco sem saída: a tela
   // oferece a opção, recusa todo texto que não seja um motivo já cadastrado, e
   // não diz ONDE se cadastra um motivo novo.
-  "Para usar um motivo que não está aqui, cadastre em Configurações › Funis.": {
-    es: "Para usar un motivo que no está aquí, agrégalo en Configuración › Embudos.",
+  "Para usar um motivo que não está aqui, cadastre em CRM › Ver tudo em CRM › Etapas do funil.": {
+    es: "Para usar un motivo que no está aquí, agrégalo en CRM › Ver todo en CRM › Etapas del embudo.",
   },
   "Ex: Cliente desistiu por X motivo": { es: "Ej: El cliente desistió por X motivo" },
   "Confirmar": { es: "Confirmar" },
@@ -7665,6 +8162,13 @@ export const DICIONARIO: Traducoes = {
   "Senha": { es: "Contraseña" },
   "Confirmar senha": { es: "Confirmar contraseña" },
   "Código inválido. Tente novamente.": { es: "Código inválido. Intenta de nuevo." },
+  // O aviso das telas de autenticação quando a resposta não chega no teto de
+  // espera (components/auth/teto-da-espera.tsx). Não afirma que falhou: a
+  // ação pode ter acontecido do outro lado.
+  "Não recebemos a resposta do servidor. Recarregue a página para tentar de novo.": {
+    es: "No recibimos la respuesta del servidor. Recarga la página para intentarlo de nuevo.",
+  },
+  "Recarregar a página": { es: "Recargar la página" },
   "Verificando...": { es: "Verificando..." },
   "Verificar": { es: "Verificar" },
   "Dados inválidos. Confira os campos.": { es: "Datos inválidos. Revisa los campos." },
@@ -7955,6 +8459,9 @@ export const DICIONARIO: Traducoes = {
   "Senha deve ter pelo menos uma letra": { es: "La contraseña debe tener al menos una letra" },
   "Senha deve ter pelo menos um número": { es: "La contraseña debe tener al menos un número" },
   "Senha deve ter pelo menos um símbolo": { es: "La contraseña debe tener al menos un símbolo" },
+  "Senha longa demais: o limite é de 72 bytes": {
+    es: "La contraseña es demasiado larga: el límite es de 72 bytes",
+  },
   "As senhas não coincidem": { es: "Las contraseñas no coinciden" },
 
   // ═══ Agenda, Desempenho, Radar e Respostas rápidas ═══
@@ -7971,6 +8478,12 @@ export const DICIONARIO: Traducoes = {
   "Período anterior": { es: "Período anterior" },
   "Próximo período": { es: "Período siguiente" },
   "Tipo de agendamento": { es: "Tipo de cita" },
+  // #3766 — o título livre do compromisso.
+  "Título do compromisso": { es: "Título de la cita" },
+  "OS 1234 · Atendimento fulano": { es: "OS 1234 · Atención a fulano" },
+  "Aparece na agenda e também para o cliente, no lembrete e no convite. Em branco, usa o nome do tipo de agendamento.": {
+    es: "Aparece en la agenda y también para el cliente, en el recordatorio y en la invitación. En blanco, usa el nombre del tipo de cita.",
+  },
   "Por que está cancelando?": { es: "¿Por qué estás cancelando?" },
   "O paciente pediu para remarcar por telefone": { es: "El paciente pidió reprogramar por teléfono" },
   "Sincronizar com o Google ainda não está disponível": { es: "Sincronizar con Google todavía no está disponible" },
@@ -8184,6 +8697,9 @@ export const DICIONARIO: Traducoes = {
   "Sua performance": { es: "Tu rendimiento" },
   "Sem atividade no período (ganhos/perdidos, conversas ou respostas).": { es: "Sin actividad en el período (ganados/perdidos, conversaciones o respuestas)." },
   "1ª resposta (média)": { es: "1ª respuesta (promedio)" },
+  // #3212 — a mediana entra AO LADO da média na mesma coluna: o texto antigo
+  // fica (nada é renomeado) e a chave nova declara as DUAS leituras.
+  "1ª resposta (média / mediana)": { es: "1ª respuesta (promedio / mediana)" },
   "Por canal": { es: "Por canal" },
   "Sem atividade no período.": { es: "Sin actividad en el período." },
   "Erro ao carregar os canais.": { es: "Error al cargar los canales." },
@@ -8407,6 +8923,7 @@ export const DICIONARIO: Traducoes = {
   "Status, carga e capacidade de cada atendente — e a jornada semanal que decide os horários oferecidos na Agenda. Sem ela ninguém consegue marcar.": { es: "Estado, carga y capacidad de cada asesor, además de la jornada semanal que define los horarios que se ofrecen en la Agenda. Sin ella, nadie puede agendar citas." },
   "Só gerentes e administradores editam os horários de atendimento da equipe. Para publicar os seus, peça a um gerente que abra esta aba e use o botão &ldquo;Editar horário&rdquo; ao lado do seu nome.": { es: "Solo los gerentes y administradores pueden editar los horarios de atención del equipo. Para publicar los tuyos, pide a un gerente que abra esta pestaña y use el botón “Editar horario” junto a tu nombre." },
   " — não publicado": { es: " — no publicado" },
+  "A lista de membros e os papéis ficam com gerentes e administradores. Para mudar o seu papel ou chamar alguém para a equipe, fale com quem administra a empresa.": { es: "La lista de miembros y los roles quedan a cargo de gerentes y administradores. Para cambiar tu rol o sumar a alguien al equipo, habla con quien administra la empresa." },
   "Escolha um fluxo publicado": { es: "Elige un flujo publicado" },
   "Nenhum fluxo ativo. Publique um follow-up em Follow-ups para usá-lo aqui.": { es: "Ningún flujo activo. Publica un seguimiento en Seguimientos para usarlo aquí." },
   "Só entram fluxos publicados e ativos.": { es: "Solo se muestran los flujos publicados y activos." },
@@ -8638,6 +9155,12 @@ export const DICIONARIO: Traducoes = {
   "Campo 'agent_id' deve ser UUID válido.": { es: "El campo 'agent_id' debe ser un UUID válido." },
   "Campo 'file' ausente ou inválido.": { es: "Campo 'file' ausente o inválido." },
   "Campo 'file' (multipart) obrigatório.": { es: "Campo 'file' (multipart) obligatorio." },
+  "Campo 'nota_de_voz' inválido.": { es: "Campo 'nota_de_voz' inválido." },
+  "Formato não suportado: use ?formato=aac.": { es: "Formato no admitido: use ?formato=aac." },
+  "Muitas conversões de áudio seguidas. Tente em um minuto.": { es: "Demasiadas conversiones de audio seguidas. Inténtelo en un minuto." },
+  "Muitos áudios sendo preparados agora. Tente em alguns segundos.": { es: "Se están preparando muchos audios ahora. Inténtelo en unos segundos." },
+  "Formato de áudio não suportado.": { es: "Formato de audio no admitido." },
+  "Não foi possível preparar o áudio para este aparelho.": { es: "No fue posible preparar el audio para este dispositivo." },
   "Campo 'name' inválido (2-120 chars).": { es: "Campo 'name' inválido (2-120 caracteres)." },
   "Canal não encontrado.": { es: "Canal no encontrado." },
   "Caso não encontrado.": { es: "Caso no encontrado." },
@@ -8791,6 +9314,12 @@ export const DICIONARIO: Traducoes = {
   "Funil não encontrado.": { es: "Embudo no encontrado." },
   "Informe o novo horário.": { es: "Indica el nuevo horario." },
   "Já existe um fluxo com este nome.": { es: "Ya existe un flujo con este nombre." },
+  // Criar/renomear agente com nome que a organização já usa (#3952). `409
+  // agent_name_taken`; a mesma frase é a do campo de nome na tela.
+  "Já existe um agente com esse nome.": { es: "Ya existe un agente con este nombre." },
+  "O rascunho foi salvo; o nome do agente não mudou.": { es: "El borrador se guardó; el nombre del agente no cambió." },
+  "Já existe um contato com este CPF.": { es: "Ya existe un contacto con este CPF." },
+  "Já existe um contato com este e-mail.": { es: "Ya existe un contacto con este correo electrónico." },
   "Já existe um contato com este telefone.": { es: "Ya existe un contacto con este teléfono." },
   "Janela inválida.": { es: "Ventana inválida." },
   "Janela inválida: 'from' deve ser anterior a 'to'.": { es: "Ventana inválida: 'from' debe ser anterior a 'to'." },
@@ -9354,6 +9883,9 @@ export const DICIONARIO: Traducoes = {
   "Novo produto": { es: "Nuevo producto" },
   "Importar planilha": { es: "Importar hoja de cálculo" },
   "Baixar planilha modelo": { es: "Descargar plantilla" },
+  "Na coluna foto, cole o link da imagem (JPG ou PNG, até 5 MB). Para até 5 fotos, separe os links com | — a primeira é a capa.": {
+    es: "En la columna foto, pega el enlace de la imagen (JPG o PNG, hasta 5 MB). Para hasta 5 fotos, separa los enlaces con | — la primera es la portada.",
+  },
   "Produto cadastrado": { es: "Producto registrado" },
   "Produto desativado": { es: "Producto desactivado" },
   "Produto reativado": { es: "Producto reactivado" },
@@ -9390,10 +9922,21 @@ export const DICIONARIO: Traducoes = {
   "Código": { es: "Código" },
   "Preço de venda": { es: "Precio de venta" },
   "(opcional)": { es: "(opcional)" },
+  // ─── app/app/products/_client.tsx — descrição do produto no cadastro e na planilha ───
+  "sem descrição": { es: "sin descripción" },
+  "É o que o atendente de IA conta ao cliente: para que serve, medidas, materiais, diferenciais. Ele repete o que estiver aqui — e não inventa o que faltar.": {
+    es: "Es lo que el asistente de IA le cuenta al cliente: para qué sirve, medidas, materiales, diferenciales. Repite lo que esté aquí y no inventa lo que falte.",
+  },
+  "Descrição escrita pela planilha em {quantidade} produto(s).": {
+    es: "Descripción escrita por la planilla en {quantidade} producto(s).",
+  },
   "Serve para o atendente saber até onde pode negociar. Não aparece para o cliente.": {
     es: "Sirve para que el asistente sepa hasta dónde puede negociar. No se muestra al cliente.",
   },
   "Controlar estoque deste produto": { es: "Controlar el inventario de este producto" },
+  'quantidade inválida ("{valor}") — use um inteiro de 0 a 2147483647': {
+    es: 'cantidad no válida ("{valor}") — usa un entero de 0 a 2147483647',
+  },
   "Quantidade": { es: "Cantidad" },
   "Sem controle de estoque, este produto sempre aparece como disponível para o atendente — é o certo para item sob encomenda ou fracionado.": {
     es: "Sin control de inventario, este producto siempre aparece como disponible para el asistente. Es lo indicado para artículos por encargo o fraccionados.",
@@ -9501,6 +10044,28 @@ export const DICIONARIO: Traducoes = {
     es: ". Mayúsculas y minúsculas no cambian el código — escríbelo igual que en el catálogo para actualizar el producto.",
   },
   "nenhuma coluna": { es: "ninguna columna" },
+  // Foto por URL na planilha (#3587). A frase é a chave INTEIRA com o valor
+  // como placeholder: traduzida aos pedaços, cada trecho novo é mais uma chave
+  // que pode faltar.
+  'foto não reconhecida ("{url}") — use o endereço completo, começando com http:// ou https://': {
+    es: 'foto no reconocida ("{url}") — usa la dirección completa, empezando por http:// o https://',
+  },
+  "a linha traz {quantidade} fotos — o produto aceita até {limite}. Deixe as {limite} primeiras na coluna.": {
+    es: "la fila trae {quantidade} fotos — el producto acepta hasta {limite}. Deja las {limite} primeras en la columna.",
+  },
+  "a foto aponta para um endereço que o servidor não pode acessar: {url}": {
+    es: "la foto apunta a una dirección que el servidor no puede alcanzar: {url}",
+  },
+  "não consegui baixar a foto: {url}": { es: "no pude descargar la foto: {url}" },
+  "não consegui baixar a foto (HTTP {status}): {url}": {
+    es: "no pude descargar la foto (HTTP {status}): {url}",
+  },
+  "a foto passa de 5 MB: {url}": { es: "la foto supera los 5 MB: {url}" },
+  "o endereço não devolveu uma foto JPG ou PNG: {url}": {
+    es: "la dirección no devolvió una foto JPG o PNG: {url}",
+  },
+  "o link redireciona vezes demais: {url}": { es: "el enlace redirige demasiadas veces: {url}" },
+  "não consegui guardar a foto: {url}": { es: "no pude guardar la foto: {url}" },
 
   // ─── Análise → Meta Ads e Configurações → Meta Ads (0214) ───
   //
@@ -9668,6 +10233,8 @@ export const DICIONARIO: Traducoes = {
   "Nenhuma pendência. Ou tudo que veio de anúncio foi reportado, ou ainda não fechou nenhuma venda com origem em anúncio.":
     { es: "No hay pendientes. Todo lo que llegó de anuncios ya se reportó, o todavía no se ha cerrado ninguna venta que venga de un anuncio." },
   "Negócio": { es: "Negocio" },
+  "Escopo do campo": { es: "Ámbito del campo" },
+  "Este campo pertence a:": { es: "Este campo pertenece a:" },
   "O que houve": { es: "Qué pasó" },
   "(sem título)": { es: "(sin título)" },
 
@@ -9736,6 +10303,16 @@ export const DICIONARIO: Traducoes = {
 
   // ─── Tarefas (extraídas do PR #418) ───
   "Tarefas": { es: "Tareas" },
+  "Tarefas desta demanda": { es: "Tareas de esta demanda" },
+  "Nenhuma tarefa nesta demanda. Anote o próximo passo combinado, com prazo e responsável.": {
+    es: "Ninguna tarea en esta demanda. Anota el próximo paso acordado, con plazo y responsable.",
+  },
+  "O negócio, o contato ou a demanda vinculada não existe.": {
+    es: "El negocio, el contacto o la demanda vinculada no existe.",
+  },
+  "Esta demanda já foi encerrada. Crie a tarefa numa demanda em andamento.": {
+    es: "Esta demanda ya fue cerrada. Crea la tarea en una demanda en curso.",
+  },
   "O que ficou combinado, com prazo. Tarefa presa a um negócio aparece na linha do tempo dele.": {
     es: "Lo que quedó acordado, con plazo. Una tarea vinculada a un negocio aparece en su línea de tiempo.",
   },
@@ -10028,6 +10605,7 @@ export const DICIONARIO: Traducoes = {
   "está de pé quando a parada começar a valer, 72 horas depois de você armá-la.": { es: "está activo cuando la parada entre en vigor, 72 horas después de que la actives." },
   "falha ao ler": { es: "error al leer" },
   "filtros inválidos": { es: "filtros inválidos" },
+  "contact_id inválido.": { es: "contact_id inválido." },
   "pointer_id inválido.": { es: "pointer_id inválido." },
   "priority inválido (0..1000).": { es: "priority inválido (0..1000)." },
   "status inválido.": { es: "status inválido." },
@@ -10104,6 +10682,16 @@ export const DICIONARIO: Traducoes = {
       es: "Este embudo no tiene etapa abierta para recibir el nuevo intento.",
     },
   "Escolha o funil de destino": { es: "Elige el embudo de destino" },
+  // A etapa de entrada (issue #3643): o segundo seletor do diálogo, cujo padrão
+  // continua sendo a primeira etapa aberta — a decisão do servidor.
+  "Etapa de entrada": { es: "Etapa de entrada" },
+  "Primeira etapa aberta (padrão)": { es: "Primera etapa abierta (predeterminada)" },
+  "Sem escolha, o negócio entra na primeira etapa aberta do funil.": {
+    es: "Sin elegir, el negocio entra en la primera etapa abierta del embudo.",
+  },
+  "Este funil não tem etapa aberta para receber o negócio. Escolha outro funil.": {
+    es: "Este embudo no tiene una etapa abierta para recibir el negocio. Elige otro embudo.",
+  },
   "Este é o único funil. Crie outro funil para poder levar o negócio até ele.": {
     es: "Este es el único embudo. Crea otro embudo para poder llevar el negocio hasta él.",
   },
@@ -10202,6 +10790,15 @@ export const DICIONARIO: Traducoes = {
   },
   "Este número foi excluído da Central de Conexões.": {
     es: "Este número fue eliminado de la Central de Conexiones.",
+  },
+  "Envio automático bloqueado pelo modo de teste do canal.": {
+    es: "Envío automático bloqueado por el modo de prueba del canal.",
+  },
+  "Não foi possível verificar o acesso da IA. Nenhuma mensagem foi enviada.": {
+    es: "No fue posible verificar el acceso de la IA. No se envió ningún mensaje.",
+  },
+  "Envio automático bloqueado: a organização está suspensa.": {
+    es: "Envío automático bloqueado: la organización está suspendida.",
   },
   "Contato sem telefone para envio WhatsApp.": {
     es: "El contacto no tiene teléfono para enviarle mensajes por WhatsApp.",
@@ -10440,8 +11037,30 @@ export const DICIONARIO: Traducoes = {
   "Procura um produto no catálogo da loja e devolve o preço exato e o que está disponível, para o assistente responder com o valor cadastrado em vez de estimar.": {
     es: "Busca un producto en el catálogo de la tienda y devuelve su precio exacto y la disponibilidad, para que el asistente responda con el valor registrado en vez de estimarlo.",
   },
-  "Quando o cliente diz o e-mail, o nome ou o telefone dele na conversa, guarda essa informação para uma pessoa conferir antes de entrar na ficha.": {
-    es: "Cuando el cliente da su correo electrónico, nombre o teléfono en la conversación, guarda esa información para que una persona la revise antes de pasarla a la ficha.",
+  "Quando o cliente diz o e-mail, o nome ou o telefone dele na conversa, guarda essa informação para uma pessoa conferir antes de entrar na ficha — exceto o telefone de um cadastro sem número, quando a empresa liga a opção em Configurações › Distribuição de atendimento: aí ele entra na hora, em formato E.164, sem sobrescrever quem já tem número.": {
+    es: "Cuando el cliente da su correo electrónico, nombre o teléfono en la conversación, guarda esa información para que una persona la revise antes de pasarla a la ficha — salvo el teléfono de una ficha sin número, cuando la empresa activa la opción en Configuración › Distribución de atención: ahí entra al instante, en formato E.164, sin sobrescribir a quien ya tiene número.",
+  },
+  // #2593, item 1 do CR — a opção por organização em Configurações ›
+  // Distribuição de atendimento, e o interruptor que a liga.
+  "Telefone informado pelo cliente entra sozinho na ficha sem número": {
+    es: "El teléfono que informa el cliente entra solo en la ficha sin número",
+  },
+  "Quando o cliente diz o telefone numa conversa e a ficha do contato está SEM número, o número é gravado na hora, em formato internacional (E.164), sem esperar alguém confirmar — e aparece na linha do tempo do contato quando ele tem um negócio aberto. Nunca troca o número de quem já tem um: isso continua exigindo uma pessoa, como o e-mail, o nome e a data de nascimento. Vem desligada.": {
+    es: "Cuando el cliente dice su teléfono en una conversación y la ficha del contacto está SIN número, el número se guarda al instante, en formato internacional (E.164), sin esperar a que alguien confirme — y aparece en la línea de tiempo del contacto cuando tiene un negocio abierto. Nunca cambia el número de quien ya tiene uno: eso sigue necesitando a una persona, igual que el correo, el nombre y la fecha de nacimiento. Viene desactivada.",
+  },
+  "Ligado: o telefone de um cadastro sem número entra sozinho, e fica registrado na linha do tempo quando o contato tem um negócio aberto.": {
+    es: "Activado: el teléfono de una ficha sin número entra solo y queda registrado en la línea de tiempo cuando el contacto tiene un negocio abierto.",
+  },
+  "Desligado: todo telefone informado vira proposta, como o resto do dado ouvido na conversa.": {
+    es: "Desactivado: todo teléfono informado se convierte en propuesta, como el resto del dato escuchado en la conversación.",
+  },
+  "Só um administrador da organização pode mudar esta opção.": {
+    es: "Solo un administrador de la organización puede cambiar esta opción.",
+  },
+  "Opção salva.": { es: "Opción guardada." },
+  // O rótulo da atividade `contact_field_auto_applied` na linha do tempo.
+  "Telefone informado pelo cliente aplicado automaticamente": {
+    es: "Teléfono informado por el cliente aplicado automáticamente",
   },
   "Registra uma nova oportunidade de venda no funil, para que o interesse demonstrado pelo cliente não se perca.": {
     es: "Registra una nueva oportunidad de venta en el embudo para que no se pierda el interés que mostró el cliente.",
@@ -11232,6 +11851,19 @@ export const DICIONARIO: Traducoes = {
   "registro(s).": { es: "registro(s)." },
   "registro(s) e em": { es: "registro(s) y en" },
   "regra(s) de agente.": { es: "regla(s) de agente." },
+  // ── O AVISO DE JUNÇÃO (issue #2801) ────────────────────────────────────────
+  //
+  // Renomear para um nome que já EXISTE junta as duas etiquetas numa só, e a
+  // operação respondia idêntica a um renome simples. São duas frases, e as
+  // duas são novas: o toast que substitui o de sucesso quando o banco devolve
+  // `juntou: true`, e o aviso ANTES do clique, quando o nome digitado já é uma
+  // etiqueta da organização. `destino` (o nome digitado) entra FORA do `t()`,
+  // como em toda frase montada em runtime.
+  "Etiqueta juntada em": { es: "Etiqueta unificada en" },
+  "as duas etiquetas viraram uma só.": { es: "las dos etiquetas se unificaron en una sola." },
+  "Este nome já existe no vocabulário — confirmar vai juntar as duas etiquetas numa só.": {
+    es: "Este nombre ya existe en el vocabulario: confirmar unificará las dos etiquetas en una sola.",
+  },
   // As frases de recusa do servidor. Três delas não tinham entrada: o argumento
   // de `t()` ali é uma expressão `??`, que o guarda também não resolve.
   "Confira a etiqueta e o novo nome.": { es: "Revisa la etiqueta y el nombre nuevo." },
@@ -11488,6 +12120,8 @@ export const DICIONARIO: Traducoes = {
     { es: "La conversación tocó el tema de reembolsos" },
   "Uma pessoa da equipe escalou um atendimento":
     { es: "Alguien del equipo escaló una atención" },
+  "Um fluxo automático coletou dados e passou a conversa para verificação humana":
+    { es: "Un flujo automático recopiló datos y pasó la conversación a verificación humana" },
   "A mensagem ficou na fila porque o canal está fora do ar":
     { es: "El mensaje quedó en la cola porque el canal está fuera de servicio" },
   "O canal recusou a mensagem de aviso":
@@ -11510,8 +12144,8 @@ export const DICIONARIO: Traducoes = {
   Assunto: { es: "Asunto" },
   Abrir: { es: "Abrir" },
   "A IA prometeu algo e travou": { es: "La IA prometió algo y se trabó" },
-  "(resumo escrito pela IA a partir da conversa)":
-    { es: "(resumen escrito por la IA a partir de la conversación)" },
+  "(montado automaticamente; confira na conversa)":
+    { es: "(armado automáticamente; revisa la conversación)" },
   "Responder aqui não chega ao cliente — abra o link para responder.":
     { es: "Las respuestas aquí no le llegan al cliente. Abre el enlace para responder." },
   "Dúvida": { es: "Duda" },
@@ -11605,6 +12239,7 @@ export const DICIONARIO: Traducoes = {
     { es: "Casos sin aviso" },
   "Comece pelo código do país. Um celular do Brasil fica assim: +55, DDD e o número.":
     { es: "Empieza por el código del país. Un celular de Brasil se escribe así: +55, código de área y número." },
+  "Comece pelo código do país, por exemplo {exemplo}.": { es: "Empieza por el código del país, por ejemplo {exemplo}." },
   "Como a conexão não existe mais, o aviso foi desligado sozinho. Escolha outra conexão abaixo e ligue de novo.":
     { es: "Como la conexión ya no existe, el aviso se desactivó solo. Elige otra conexión abajo y actívalo de nuevo." },
   "Como chamar esse número (opcional)":
@@ -11719,6 +12354,25 @@ export const DICIONARIO: Traducoes = {
     { es: "Intentando enviar" },
   "Este número mandou uma mensagem agora há pouco. O WhatsApp exige um intervalo entre elas — tente de novo em alguns segundos.":
     { es: "Este número envió un mensaje hace un momento. WhatsApp exige un intervalo entre mensajes. Intenta de nuevo en unos segundos." },
+  // A REMOÇÃO do destinatário (issue #3338). Acrescentadas no fim do bloco,
+  // nunca reordenando o arquivo. ("Manter" já existe, no bloco das telas de
+  // configuração — a mesma palavra, e uma segunda entrada seria uma tradução a
+  // mais para divergir.)
+  "Remover destinatário": { es: "Eliminar destinatario" },
+  "Remover o destinatário dos avisos?": { es: "¿Eliminar el destinatario de los avisos?" },
+  "A configuração de avisos é apagada e este número volta a ser um número comum: o que ele mandar passa a virar atendimento no Inbox. O histórico de entregas desta tela continua aqui.":
+    { es: "Se borra la configuración de avisos y este número vuelve a ser un número común: lo que envíe pasará a convertirse en una atención en el Inbox. El historial de envíos de esta pantalla sigue aquí." },
+  "Também param de sair, até você cadastrar um número de novo: os avisos da Agenda que usam o mesmo número dos casos e as automações com a ação \"Mensagem para a equipe\".":
+    { es: "También dejan de enviarse, hasta que registres un número de nuevo: los avisos de la Agenda que usan el mismo número de los casos y las automatizaciones con la acción «Mensaje para el equipo»." },
+  "Diferente de desligar os avisos: aqui o número sai da configuração e volta a entrar no Inbox.":
+    { es: "A diferencia de desactivar los avisos: aquí el número sale de la configuración y vuelve a entrar en el Inbox." },
+  "Removendo…": { es: "Eliminando…" },
+  "Destinatário removido.": { es: "Destinatario eliminado." },
+  // As duas frases da ROTA (`app/api` fica fora da varredura do guarda de
+  // espanhol): entram por DISCIPLINA, como as vizinhas.
+  "Não foi possível remover o destinatário.": { es: "No se pudo eliminar el destinatario." },
+  "Não foi possível remover o destinatário. Tente de novo.":
+    { es: "No se pudo eliminar el destinatario. Inténtalo de nuevo." },
   // O CORPO do aviso de passagem na Central. Ele é traduzido no SERVIDOR, no
   // instante do insert, e não por `t()` na tela — porque na tela ele é DADO (o
   // que a Central mostra é o corpo como ele veio, e há um teste que guarda
@@ -11899,17 +12553,17 @@ export const DICIONARIO: Traducoes = {
   "Atendentes podem mexer na agenda dos colegas": {
     es: "Los asesores pueden modificar la agenda de sus colegas",
   },
-  "Com isto ligado, qualquer atendente cancela e remarca o compromisso de qualquer colega — é o comportamento de sempre. Desligado, cada atendente mexe só no compromisso de que é o responsável; gerentes e administradores seguem mexendo em tudo.": {
-    es: "Con esta opción activada, cualquier asesor puede cancelar y reprogramar las citas de cualquier colega, como siempre ha sido. Si la desactivas, cada asesor solo puede modificar las citas de las que es responsable. Los gerentes y administradores pueden seguir modificándolo todo.",
+  "Com isto ligado, qualquer atendente vê, cancela e remarca o compromisso de qualquer colega, e vê e mexe nas tarefas da equipe — é o comportamento de sempre. Desligado, cada atendente mexe só no compromisso de que é o responsável; gerentes e administradores seguem mexendo em tudo.": {
+    es: "Con esta opción activada, cualquier asesor puede ver, cancelar y reprogramar las citas de cualquier colega, y ver y modificar las tareas del equipo, como siempre ha sido. Si la desactivas, cada asesor solo puede modificar las citas de las que es responsable. Los gerentes y administradores pueden seguir modificándolo todo.",
   },
-  "Ligado: qualquer atendente mexe na agenda de qualquer colega.": {
-    es: "Activado: cualquier asesor puede modificar la agenda de cualquier colega.",
+  "Ligado: qualquer atendente mexe na agenda e nas tarefas de qualquer colega.": {
+    es: "Activado: cualquier asesor puede modificar la agenda y las tareas de cualquier colega.",
   },
-  "Desligado: cada atendente mexe só na própria agenda. Gerentes e administradores continuam mexendo em tudo.": {
-    es: "Desactivado: cada asesor solo puede modificar su propia agenda. Los gerentes y administradores pueden seguir modificándolo todo.",
+  "Desligado: cada atendente mexe só na própria agenda, e a agenda e as tarefas seguem o que ele enxerga. Gerentes e administradores continuam mexendo em tudo.": {
+    es: "Desactivado: cada asesor solo puede modificar su propia agenda, y la agenda y las tareas siguen lo que él ve. Los gerentes y administradores pueden seguir modificándolo todo.",
   },
-  "Isto não muda o que cada pessoa vê na agenda, só quem pode alterar o compromisso de quem.": {
-    es: "Esto no cambia lo que cada persona ve en la agenda, solo define quién puede modificar las citas de quién.",
+  "Desligado, a agenda e as tarefas também seguem “O que cada atendente enxerga”: em “Só os seus” ou “Os seus, mais os que ainda não têm dono”, o atendente vê e mexe só nos próprios compromissos e nas próprias tarefas, mais as que ele criou (e, no segundo modo, o que ainda não tem dono). Em “Todos veem tudo”, ele continua vendo tudo.": {
+    es: "Desactivado, la agenda y las tareas también siguen “Qué ve cada asesor”: en “Solo los tuyos” o en “Los tuyos, más los que todavía no tienen dueño”, el asesor ve y modifica solo sus propias citas y tareas, más las que él creó (y, en el segundo modo, lo que aún no tiene dueño). En “Todos ven todo”, sigue viéndolo todo.",
   },
   "Só um gerente ou administrador pode mudar essa regra.": {
     es: "Solo un gerente o administrador puede cambiar esta regla.",
@@ -11980,6 +12634,9 @@ export const DICIONARIO: Traducoes = {
   "Arraste para ajustar a largura": { es: "Arrastra para ajustar el ancho" },
   "Ajustar altura da linha": { es: "Ajustar alto de la fila" },
   "Arraste para ajustar a altura": { es: "Arrastra para ajustar el alto" },
+  "Arraste pela alça, ou use as setas, para mudar a ordem em que os campos aparecem no card.": {
+    es: "Arrastra desde el asa, o usa las flechas, para cambiar el orden en que los campos aparecen en la tarjeta.",
+  },
   "Limites de leitura": { es: "Límites de lectura" },
   "Telefone do cliente": { es: "Teléfono del cliente" },
   "E-mail do cliente": { es: "Correo del cliente" },
@@ -12314,6 +12971,24 @@ export const DICIONARIO: Traducoes = {
   },
   "Nome da campanha": { es: "Nombre de la campaña" },
   "Nova campanha": { es: "Nueva campaña" },
+  "Este modelo não está na lista de modelos do número. Sincronize em Conexões, na aba Modelos.": {
+    es: "Esta plantilla no está en la lista de plantillas del número. Sincroniza en Conexiones, en la pestaña Modelos.",
+  },
+  "O modelo mudou na plataforma depois de configurado. Configure o envio de novo.": {
+    es: "La plantilla cambió en la plataforma después de configurarse. Configura el envío de nuevo.",
+  },
+  "O acesso ao WhatsApp Oficial expirou ou foi revogado. Reconecte o número em Conexões.": {
+    es: "El acceso al WhatsApp Oficial expiró o fue revocado. Vuelve a conectar el número en Conexiones.",
+  },
+  "Falta permissão para este envio no WhatsApp Oficial. Revise as permissões do número em Conexões.": {
+    es: "Falta permiso para este envío en el WhatsApp Oficial. Revisa los permisos del número en Conexiones.",
+  },
+  "A conexão com o WhatsApp Oficial atingiu o limite de pedidos por agora. Tente de novo mais tarde.": {
+    es: "La conexión con el WhatsApp Oficial alcanzó el límite de solicitudes por ahora. Inténtalo de nuevo más tarde.",
+  },
+  "Não conseguimos montar os valores do modelo para este envio. Nada foi enviado.": {
+    es: "No pudimos armar los valores de la plantilla para este envío. No se envió nada.",
+  },
   "Sem telefone no cadastro": { es: "Sin teléfono en el registro" },
   "Telefone fora do formato de envio": { es: "Teléfono con formato no válido para envío" },
   "Pediu para não receber mensagens": { es: "Pidió no recibir mensajes" },
@@ -12378,6 +13053,13 @@ export const DICIONARIO: Traducoes = {
   "Funil do número (padrão)": { es: "Embudo del número (predeterminado)" },
   "Na etapa": { es: "En la etapa" },
   "Primeira etapa do funil": { es: "Primera etapa del embudo" },
+  "Etapa removida": { es: "Etapa eliminada" },
+  "Novas conversas do Inbox entram em…": { es: "Las conversaciones nuevas del Inbox entran en…" },
+  "Etapa de entrada das conversas do Inbox": { es: "Etapa de entrada de las conversaciones del Inbox" },
+  "Primeira etapa do funil (padrão)": { es: "Primera etapa del embudo (predeterminada)" },
+  "A conversa nova do Inbox vira card nesta etapa. Sem escolha, ela nasce na primeira etapa do funil — o comportamento de sempre.": { es: "La conversación nueva del Inbox se convierte en tarjeta en esta etapa. Sin elección, nace en la primera etapa del embudo, como siempre." },
+  "Nenhuma etapa escolhida: as conversas novas estão entrando na primeira etapa do funil.": { es: "Ninguna etapa elegida: las conversaciones nuevas están entrando en la primera etapa del embudo." },
+  "A etapa escolhida não está mais disponível (arquivada, apagada ou fechada): as conversas novas estão entrando na primeira etapa do funil. Escolha outra para voltar a decidir.": { es: "La etapa elegida ya no está disponible (archivada, eliminada o cerrada): las conversaciones nuevas están entrando en la primera etapa del embudo. Elige otra para volver a decidir." },
   "Qualquer etapa": { es: "Cualquier etapa" },
   "Qualquer um": { es: "Cualquiera" },
   "Quem atende a resposta": { es: "Quién atiende la respuesta" },
@@ -12534,9 +13216,10 @@ export const DICIONARIO: Traducoes = {
   "Linhas no corpo": { es: "Líneas en el cuerpo" },
   "atualizada — já vale para os agentes.": { es: "actualizada: ya vale para los agentes." },
   "Editar skill": { es: "Editar skill" },
-  "Salvar cria uma versão nova (a antiga fica no histórico). O corpo só entra na conversa quando uma das palavras-chave aparece na mensagem do cliente.": {
-    es: "Guardar crea una versión nueva (la anterior queda en el historial). El cuerpo solo entra en la conversación cuando una de las palabras clave aparece en el mensaje del cliente.",
+  "Salvar cria uma versão nova (a antiga fica no histórico). O corpo só entra na conversa quando uma das palavras-chave aparece na mensagem do cliente, ou quando a conversa ou o contato tem uma das etiquetas de ativação.": {
+    es: "Guardar crea una versión nueva (la anterior queda en el historial). El cuerpo solo entra en la conversación cuando una de las palabras clave aparece en el mensaje del cliente, o cuando la conversación o el contacto tiene una de las etiquetas de activación.",
   },
+  "Etiquetas de ativação": { es: "Etiquetas de activación" },
   "Não foi possível carregar a skill.": { es: "No se pudo cargar la skill." },
   "Skill de pacote: descrição, palavras-chave e corpo são editáveis. Ao salvar, a versão nova herda os arquivos do pacote — nada se perde.": {
     es: "Skill de paquete: la descripción, las palabras clave y el cuerpo se pueden editar. Al guardar, la versión nueva hereda los archivos del paquete: nada se pierde.",
@@ -12554,6 +13237,11 @@ export const DICIONARIO: Traducoes = {
   "A skill é carregada quando o cliente escreve uma destas palavras.": {
     es: "La skill se carga cuando el cliente escribe una de estas palabras.",
   },
+  "Etiquetas que ativam (opcional)": { es: "Etiquetas que activan (opcional)" },
+  "odonto, clínica": { es: "odonto, clínica" },
+  "Se a conversa ou o contato tiver uma destas etiquetas, a skill entra mesmo sem a palavra-chave.": {
+    es: "Si la conversación o el contacto tiene una de estas etiquetas, la skill entra aunque falte la palabra clave.",
+  },
   "Corpo (o procedimento que o agente segue)": { es: "Cuerpo (el procedimiento que sigue el agente)" },
   linhas: { es: "líneas" },
   "em uso": { es: "en uso" },
@@ -12569,13 +13257,41 @@ export const DICIONARIO: Traducoes = {
   "Adicione uma Pergunta para cada dado, com uma chave curta (ex.: cidade), o tipo e se é obrigatória. O tipo CPF confere o dígito verificador.": { es: "Agrega una Pregunta para cada dato, con una clave corta (ej.: ciudad), el tipo y si es obligatoria. El tipo CPF valida el dígito verificador." },
   "Ligue as caixas em linha, do Início ao Fim. No Fim, escolha o que acontece ao concluir: nada, orientar a IA, chamar uma skill ou começar outro roteiro.": { es: "Conecta las cajas en línea, del Inicio al Fin. En el Fin, elige qué pasa al concluir: nada, orientar a la IA, llamar una skill o empezar otro guion." },
   "O roteiro para quando uma pessoa assume a conversa, quando o cliente pede para parar, e depois do prazo sem resposta (72 horas, se você não mudar).": { es: "El guion se detiene cuando una persona asume la conversación, cuando el cliente pide parar y después del plazo sin respuesta (72 horas, si no lo cambias)." },
+  "As respostas ficam nos campos do cliente e aparecem na ficha dele e na conversa. Quando você marca a pergunta para o negócio, o valor vai para o card do negócio aberto — e a pergunta é refeita a cada novo negócio. O que o cliente já respondeu não é perguntado de novo.": { es: "Las respuestas quedan en los campos del cliente y aparecen en su ficha y en la conversación. Cuando marcas la pregunta para el negocio, el valor va a la ficha del negocio abierto — y la pregunta se vuelve a hacer en cada negocio nuevo. Lo que el cliente ya respondió no se vuelve a preguntar." },
+  "Onde a resposta é guardada": { es: "Dónde se guarda la respuesta" },
+  "Card do negócio (cada negócio responde por si)": { es: "Ficha del negocio (cada negocio responde por su cuenta)" },
+  "No card, o valor é deste negócio: é o que a tela, os campos obrigatórios da etapa e as automações por data leem — e um negócio novo pergunta de novo.": { es: "En la ficha, el valor es de este negocio: es lo que leen la pantalla, los campos obligatorios de la etapa y las automatizaciones por fecha — y un negocio nuevo vuelve a preguntar." },
   "Escolha um fluxo": { es: "Elige un flujo" },
   "Você ainda não tem skills instaladas. Instale em IA → Skills.": { es: "Todavía no tienes skills instaladas. Instálalas en IA → Skills." },
   "Escolha uma skill": { es: "Elige una skill" },
   "Nasce como rascunho. Você cadastra as perguntas e a finalização no editor em seguida.": { es: "Se crea como borrador. Después registras las preguntas y el cierre en el editor." },
+  "no card do negócio": { es: "en la ficha del negocio" },
+  "Negócio desta execução": { es: "Negocio de esta ejecución" },
+  "Escolha o negócio": { es: "Elige el negocio" },
+  "Confirmar negócio": { es: "Confirmar negocio" },
+  "Respostas no negócio": { es: "Respuestas en el negocio" },
+  "Este contato tem mais de um negócio aberto: até alguém escolher, as respostas de negócio não são gravadas.": { es: "Este contacto tiene más de un negocio abierto: hasta que alguien elija, las respuestas de negocio no se guardan." },
+  "Este contato não tem negócio aberto: as respostas de negócio ficam pendentes até abrir um.": { es: "Este contacto no tiene ningún negocio abierto: las respuestas de negocio quedan pendientes hasta que se abra uno." },
   // ─── C-076: Comandos pelo celular (#on/#off) ───
   "Comandos pelo celular": { es: "Comandos desde el celular" },
   "Aceitar #on/#off enviados pelo celular": { es: "Aceptar #on/#off enviados desde el celular" },
+  "Frase do aviso de passagem": { es: "Frase del aviso de traspaso" },
+  "É o que o cliente lê quando o agente passa a conversa para uma pessoa. Deixe vazio para usar a frase padrão.": {
+    es: "Es lo que el cliente lee cuando el agente pasa la conversación a una persona. Déjalo vacío para usar la frase predeterminada.",
+  },
+  "Ex.: Já chamei alguém do time — já te respondemos.": { es: "Ej.: Ya avisé a alguien del equipo — enseguida te respondemos." },
+  "A frase passa do limite de 320 caracteres.": { es: "La frase supera el límite de 320 caracteres." },
+  "A frase precisa ter entre 3 e 320 caracteres, com pelo menos uma letra ou número.": {
+    es: "La frase debe tener entre 3 y 320 caracteres, con al menos una letra o un número.",
+  },
+  "Frase própria removida — o cliente volta a ler o aviso padrão.": {
+    es: "Frase propia eliminada — el cliente vuelve a leer el aviso predeterminado.",
+  },
+  "Frase do aviso salva — vale no próximo aviso de passagem.": {
+    es: "Frase del aviso guardada — se aplica en el próximo aviso de traspaso.",
+  },
+  "Salvar frase": { es: "Guardar frase" },
+  "Vazio = frase padrão do produto.": { es: "Vacío = frase predeterminada del producto." },
   "Ligado, QUALQUER mensagem enviada pelo WhatsApp do celular pausa a IA nesta conversa até alguém mandar #on — a pausa não vence sozinha. #off pausa sem precisar responder o cliente. Desligado, #on e #off são texto comum, e responder pelo celular pausa a IA só por um tempo.":
     {
       es: "Activado, CUALQUIER mensaje enviado desde el WhatsApp del celular pausa la IA en esta conversación hasta que alguien envíe #on — la pausa no vence sola. #off pausa sin necesidad de responder al cliente. Desactivado, #on y #off son texto normal, y responder desde el celular pausa la IA solo por un tiempo.",
@@ -12637,12 +13353,10 @@ export const DICIONARIO: Traducoes = {
   // ─── Cadastrar um campo do formulário a partir da captação ───
   "Cadastrar como campo do lead": { es: "Registrar como campo del lead" },
   "Texto longo": { es: "Texto largo" },
-  "Link": { es: "Enlace" },
-  "Sim/Não": { es: "Sí/No" },
   "Não foi possível ler o funil desta fonte.": { es: "No se pudo leer el embudo de esta fuente." },
   "Não foi possível cadastrar o campo. Só quem administra o funil pode fazer isso.": { es: "No se pudo registrar el campo. Solo quien administra el embudo puede hacerlo." },
   "Campo cadastrado. Ele já aparece no card do lead e pode ser usado nas mensagens.": { es: "Campo registrado. Ya aparece en la tarjeta del lead y se puede usar en los mensajes." },
-  "Este nome de campo não pode ser cadastrado aqui. Cadastre em Configurações › Funis.": { es: "Este nombre de campo no se puede registrar aquí. Regístralo en Configuración › Embudos." },
+  "Este nome de campo não pode ser cadastrado aqui. Cadastre em CRM › Ver tudo em CRM › Etapas do funil.": { es: "Este nombre de campo no se puede registrar aquí. Regístralo en CRM › Ver todo en CRM › Etapas del embudo." },
   "Esse campo já está cadastrado.": { es: "Ese campo ya está registrado." },
   "O funil já tem o máximo de campos.": { es: "El embudo ya tiene el máximo de campos." },
   "Dê um rótulo ao campo.": { es: "Ponle una etiqueta al campo." },
@@ -12732,6 +13446,8 @@ export const DICIONARIO: Traducoes = {
   // #2498 — busca dentro do seletor de etiquetas do Inbox.
   "Buscar etiqueta": { es: "Buscar etiquetas" },
   "Nenhuma etiqueta com esse texto": { es: "Ninguna etiqueta con ese texto" },
+  // #1336 — estado (a) do vocabulário do Inbox: ainda não sei, não é "zero".
+  "Carregando etiquetas…": { es: "Cargando etiquetas…" },
   // #2498 — destino opcional da ação add_tag, no editor de automações.
   "Destino da etiqueta": { es: "Destino de la etiqueta" },
   "Card (comportamento atual)": { es: "Card (comportamiento actual)" },
@@ -12759,6 +13475,236 @@ export const DICIONARIO: Traducoes = {
   "Nenhum negócio com este campo de data neste período.": {
     es: "Ningún negocio con este campo de fecha en este período.",
   },
+  // #2728 — o editor de campos do funil monta a condição de exibição.
+  "Mostrar só quando:": { es: "Mostrar solo cuando:" },
+  "Sempre mostrar": { es: "Mostrar siempre" },
+  "Campo da condição": { es: "Campo de la condición" },
+  "Operador da condição": { es: "Operador de la condición" },
+  "Valor da condição": { es: "Valor de la condición" },
+  "é igual a": { es: "es igual a" },
+  "é maior que": { es: "es mayor que" },
+  "Escondido, o campo não aparece no formulário nem é validado como obrigatório, e o valor já gravado continua no registro.": {
+    es: "Oculto, el campo no aparece en el formulario ni se valida como obligatorio, y el valor ya guardado sigue en el registro.",
+  },
+  // #4041 — a LISTA de condições do "mostrar quando" (OU/E).
+  "+ condição": { es: "+ condición" },
+  "Modo da condição": { es: "Modo de la condición" },
+  "qualquer uma das condições": { es: "cualquiera de las condiciones" },
+  "todas as condições": { es: "todas las condiciones" },
+  // #2730 — validação de formato em campo de texto: a frase do CAMPO na tela,
+  // na API e no erro de ensino da IA. `padrao`/`mensagem_padrao` são dado do
+  // dono do funil; estas duas abaixo são as da CASA, para quando ele não deu a
+  // dele (ou quando a regex dele nem compila).
+  "Valor fora do formato esperado para este campo.": {
+    es: "Valor fuera del formato esperado para este campo.",
+  },
+  "Padrão inválido configurado neste campo: a gravação está bloqueada até a correção.": {
+    es: "Patrón inválido configurado en este campo: la escritura queda bloqueada hasta corregirlo.",
+  },
+
+  // ─── Campo de lista pesquisável #2521 (searchable_select) ───
+  "Digite para buscar…": { es: "Escriba para buscar…" },
+  "Este campo aceita um valor novo, fora da lista.": {
+    es: "Este campo acepta un valor nuevo, fuera de la lista.",
+  },
+  "Permitir valor novo": { es: "Permitir valor nuevo" },
+  "Permitir valor novo (fora da lista)": { es: "Permitir valor nuevo (fuera de la lista)" },
+  "Importar opções (CSV)": { es: "Importar opciones (CSV)" },
+  "value,label,apelidos — uma opção por linha": {
+    es: "value,label,alias — una opción por línea",
+  },
+  "Importar opções do campo": { es: "Importar opciones del campo" },
+  "opções importadas.": { es: "opciones importadas." },
+  "já existiam.": { es: "ya existían." },
+  "Nenhuma opção nova para importar.": { es: "Ninguna opción nueva para importar." },
+  // ─── Configurações › Funis com listas longas: as opções RECOLHIDAS (#3176) ───
+  //    A lista de um campo de lista deixou de ser montada inteira na abertura da
+  //    tela; o resumo fala a contagem e a lista abre sob demanda.
+  "opções": { es: "opciones" },
+  "apelidos": { es: "alias" },
+  "Ver opções": { es: "Ver opciones" },
+  "Ver e editar a lista do campo": { es: "Ver y editar la lista del campo" },
+  "Recolher a lista do campo": { es: "Contraer la lista del campo" },
+  // (`Importar CSV` já tem entrada acima — não duplicar aqui: o dicionário é um
+  //  objeto literal, e chave repetida é erro de typecheck.)
+  "Buscar opções": { es: "Buscar opciones" },
+  "Nenhuma opção casa com a busca.": { es: "Ninguna opción coincide con la búsqueda." },
+  "Mostrar mais opções": { es: "Mostrar más opciones" },
+  "Editar vocabulário e campos deste funil": { es: "Editar vocabulario y campos de este embudo" },
+  "Esse valor não está na lista. Escolha uma das opções.": {
+    es: "Ese valor no está en la lista. Elija una de las opciones.",
+  },
+  // #2813 — o painel "Iniciar conversa" do Inbox.
+  "Nova conversa": { es: "Nueva conversación" },
+  "Diga para quem e o que dizer. O canal de saída é você quem escolhe quando há mais de um número.": {
+    es: "Di para quién y qué decir. El canal de salida lo eliges tú cuando hay más de un número.",
+  },
+  "Telefone ou nome do contato": { es: "Teléfono o nombre del contacto" },
+  "Contato existente": { es: "Contacto existente" },
+  "Como o contato aparece no CRM": { es: "Cómo aparece el contacto en el CRM" },
+  "Primeira mensagem": { es: "Primer mensaje" },
+  "O que dizer ao contato (opcional)": { es: "Qué decirle al contacto (opcional)" },
+  "Usar modelo de mensagem": { es: "Usar plantilla de mensaje" },
+  "A conversa abre atribuída a você: a IA não assume este atendimento.": {
+    es: "La conversación se abre asignada a ti: la IA no asume esta atención.",
+  },
+  "Criar conversa": { es: "Crear conversación" },
+  "Nenhum contato encontrado": { es: "Ningún contacto encontrado" },
+  "A conversa abriu, mas a primeira mensagem não pôde ser enviada.": {
+    es: "La conversación se abrió, pero el primer mensaje no se pudo enviar.",
+  },
+  // Textos que as telas escreviam crus, fora de t(), e que por isso saíam iguais em todo idioma. Os rótulos do
+  // vocabulário do funil eram inglês em toda língua (Lead, Deal, Won, Lost): a chave é o próprio inglês, para o
+  // português seguir mostrando o mesmo; o atalho de exemplo das respostas rápidas era « oi »; o título de excluir um
+  // fluxo leva o nome entre as aspas do idioma.
+  Deal: { es: "Negocio" },
+  Won: { es: "Ganado" },
+  Lost: { es: "Perdido" },
+  oi: { es: "hola" },
+  "Excluir “{nome}”?": { es: "¿Eliminar “{nome}”?" },
+  // #3006 — "usar como exemplo para a IA": a conversa marcada vira material do
+  // agente (opt-in de LGPD). O selo fica curto de propósito: ele divide a faixa
+  // com as etiquetas do contato, e o verbo inteiro mora no `title` do controle.
+  "Usar como exemplo para a IA": { es: "Usar como ejemplo para la IA" },
+  "Deixar de usar como exemplo": { es: "Dejar de usar como ejemplo" },
+  "Exemplo para a IA": { es: "Ejemplo para la IA" },
+  "Conversa marcada como exemplo para a IA.": { es: "Conversación marcada como ejemplo para la IA." },
+  "A conversa deixou de ser exemplo para a IA.": { es: "La conversación dejó de ser ejemplo para la IA." },
+  "O contato pediu para não receber mensagens (opt-out): o envio pelo automático fica bloqueado. Nada a enviar.": { es: "El contacto pidió no recibir mensajes (opt-out): el envío por el automático queda bloqueado. Nada que enviar." },
+  "Este contato foi anonimizado (LGPD) — é proibido enviar mensagens a ele.": { es: "Este contacto fue anonimizado (LGPD) — está prohibido enviarle mensajes." },
+  "Não há base legal (LGPD) registrada para o primeiro contato com este lead. O time precisa regularizar o cadastro antes de abordar.": { es: "No hay base legal (LGPD) registrada para el primer contacto con este lead. El equipo debe regularizar el registro antes de abordarlo." },
+  "A resposta prometia um preço ou condição fora da tabela aprovada. Ajuste a tabela de promessas ou gere de novo sem a promessa.": { es: "La respuesta prometía un precio o condición fuera de la tabla aprobada. Ajusta la tabla de promesas o genera de nuevo sin la promesa." },
+  "A resposta continha uma promessa que o sistema não registrou (ex.: um retorno combinado). Marque o retorno ou gere de novo sem prometer.": { es: "La respuesta contenía una promesa que el sistema no registró (p. ej., un retorno acordado). Marca el retorno o genera de nuevo sin prometer." },
+  "A resposta prometeu voltar a falar com o cliente, mas não deixou o retorno marcado no CRM. Agende o retorno ou gere de novo sem a promessa.": { es: "La respuesta prometió volver a hablar con el cliente, pero no dejó el retorno marcado en el CRM. Agenda el retorno o genera de nuevo sin la promesa." },
+  "A resposta usava um termo interno que não pode chegar ao cliente. Gere de novo — se repetir, ajuste o texto do agente.": { es: "La respuesta usaba un término interno que no puede llegar al cliente. Genera de nuevo — si se repite, ajusta el texto del agente." },
+  "A resposta fazia uma afirmação clínica, e a camada de afirmações clínicas está ligada nesta organização. Gere de novo sem o trecho.": { es: "La respuesta hacía una afirmación clínica, y la capa de afirmaciones clínicas está activada en esta organización. Genera de nuevo sin el fragmento." },
+  "A resposta ia depender de horário, mas o agente não tem ferramenta de agenda ligada. Ligue a agenda no agente ou gere de novo sem horário.": { es: "La respuesta iba a depender de un horario, pero el agente no tiene la herramienta de agenda activada. Actívala en el agente o genera de nuevo sin horario." },
+  "A primeira mensagem a um contato novo precisa se apresentar como assistente virtual. Ajuste o modelo de apresentação e gere de novo.": { es: "El primer mensaje a un contacto nuevo debe presentarse como asistente virtual. Ajusta la plantilla de presentación y genera de nuevo." },
+  "A janela de 24 horas com este contato fechou: o canal recusa texto livre. Responda com um modelo aprovado ou aguarde o contato escrever de novo.": { es: "La ventana de 24 horas con este contacto se cerró: el canal rechaza texto libre. Responde con una plantilla aprobada o espera a que el contacto escriba de nuevo." },
+  "A resposta afirmava um fato que o material de referência CONTRADIZ. Nada foi enviado — confira a base de conhecimento e gere de novo.": { es: "La respuesta afirmaba un hecho que el material de referencia CONTRADICE. Nada fue enviado — revisa la base de conocimiento y genera de nuevo." },
+  "A resposta afirmava um fato sem apoio no material de referência. Nada foi enviado — confira a base de conhecimento e gere de novo.": { es: "La respuesta afirmaba un hecho sin respaldo en el material de referencia. Nada fue enviado — revisa la base de conocimiento y genera de nuevo." },
+  "A resposta ia mostrar um produto que não foi encontrado no cadastro. Confira o produto e gere de novo.": { es: "La respuesta iba a mostrar un producto que no se encontró en el registro. Revisa el producto y genera de nuevo." },
+  "A sugestão tentou usar uma ação que a prévia não reconhece. Gere de novo; se repetir, revise as ferramentas ligadas no agente.": { es: "La sugerencia intentó usar una acción que la previsualización no reconoce. Genera de nuevo; si se repite, revisa las herramientas activadas en el agente." },
+  "A geração da sugestão falhou, ou o contexto da conversa não pôde ser montado. Tente de novo; se repetir, o motivo ficou registrado no servidor.": { es: "La generación de la sugerencia falló, o no se pudo armar el contexto de la conversación. Inténtalo de nuevo; si se repite, el motivo quedó registrado en el servidor." },
+  "Lista de uma escolha": { es: "Lista de una elección" },
+  "Lista de várias escolhas": { es: "Lista de varias opciones" },
+  "Lista pesquisável": { es: "Lista con búsqueda" },
+  "Sim ou não": { es: "Sí o no" },
+  "Link (URL)": { es: "Enlace (URL)" },
+  "O agente terminou sem propor uma resposta. Pode ter sido uma decisão (por exemplo, diante de uma mensagem automática) ou a geração ter parado antes da resposta. Se esperava uma, gere de novo; senão, não há nada a enviar.": { es: "El agente terminó sin proponer una respuesta. Pudo ser una decisión (por ejemplo, ante un mensaje automático) o que la generación se detuviera antes de la respuesta. Si esperabas una, genera de nuevo; si no, no hay nada que enviar." },
+
+  // ═══ Meta de vendas e progresso no Desempenho (#3025, fatia 1) ═══
+  //
+  // A tela que passou a ter DENOMINADOR: antes só existia o realizado, e sem
+  // alvo não há percentual. As frases do painel compõem números por expressão
+  // (`{3} de {10}`), então cada conectivo é uma chave curta — mesma forma do
+  // cabeçalho do card de funil logo acima de onde este painel entra.
+  "Meta de vendas": { es: "Meta de ventas" },
+  "Meta do mês": { es: "Meta del mes" },
+  "Vendas ganhas": { es: "Ventas ganadas" },
+  "da meta": { es: "de la meta" },
+  "Faltam": { es: "Faltan" },
+  "para a meta": { es: "para la meta" },
+  "Meta atingida.": { es: "Meta alcanzada." },
+  "Nenhuma meta cadastrada para este mês.": { es: "Ninguna meta registrada para este mes." },
+  "Defina a meta em Configurações › Meta de vendas para ver aqui o quanto já foi feito e o quanto falta.": {
+    es: "Define la meta en Configuración › Meta de ventas para ver aquí cuánto se ha hecho ya y cuánto falta.",
+  },
+  "Definir a meta": { es: "Definir la meta" },
+  "Só quem administra a empresa define a meta.": {
+    es: "Solo quien administra la empresa define la meta.",
+  },
+  "Não consegui carregar a meta do mês — isto é uma falha de leitura, não a ausência de meta.": {
+    es: "No pude cargar la meta del mes: esto es un fallo de lectura, no la ausencia de meta.",
+  },
+  "Carregando a meta do mês": { es: "Cargando la meta del mes" },
+  "A empresa ainda não definiu a meta deste mês. Quem administra pode cadastrá-la em Configurações › Meta de vendas — a partir daí esta tela mostra o quanto já foi feito e o quanto falta.": {
+    es: "La empresa todavía no definió la meta de este mes. Quien administra puede registrarla en Configuración › Meta de ventas; a partir de ahí, esta pantalla muestra cuánto se ha hecho ya y cuánto falta.",
+  },
+  "Quanto a empresa quer vender neste mês. O Desempenho passa a mostrar o quanto já foi feito contra esse número — o realizado, o percentual e o quanto falta.": {
+    es: "Cuánto quiere vender la empresa este mes. Rendimiento pasa a mostrar cuánto se ha hecho ya frente a ese número: lo realizado, el porcentaje y cuánto falta.",
+  },
+  "Nesta primeira versão a meta é da EMPRESA inteira, para a quantidade de vendas ganhas: o que conta é o negócio fechado como ganho dentro do mês. Meta por vendedor, por período maior e por funil ficam para as próximas fatias.": {
+    es: "En esta primera versión la meta es de TODA la empresa, para la cantidad de ventas ganadas: lo que cuenta es el negocio cerrado como ganado dentro del mes. La meta por vendedor, por período mayor y por embudo quedan para las próximas entregas.",
+  },
+  // A descrição da porta no catálogo (`lib/navigation/catalogo.ts`) também é
+  // TELA — aparece no hub de Configurações e na busca do menu. A guarda
+  // `tests/unit/i18n-catalogo-do-menu.test.ts` cobra o espanhol de todo texto do
+  // menu, e foi ela que pegou esta linha faltando.
+  "Quanto a empresa quer vender no mês, para o Desempenho medir o progresso.": {
+    es: "Cuánto quiere vender la empresa en el mes, para que Rendimiento mida el progreso.",
+  },
+  "A meta vale para o mês escolhido, do dia 1º ao último.": {
+    es: "La meta vale para el mes elegido, del día 1 al último.",
+  },
+  "Vendas ganhas no mês": { es: "Ventas ganadas en el mes" },
+  "Ainda não há meta para este mês.": { es: "Todavía no hay meta para este mes." },
+  "Salvar de novo corrige a meta deste mês — nada é duplicado.": {
+    es: "Guardar de nuevo corrige la meta de este mes: nada se duplica.",
+  },
+  "Salvar meta": { es: "Guardar meta" },
+  "Informe um mês e uma quantidade de vendas maior que zero.": {
+    es: "Indica un mes y una cantidad de ventas mayor que cero.",
+  },
+  "Meta salva.": { es: "Meta guardada." },
+  "Não consegui salvar a meta agora.": { es: "No pude guardar la meta ahora." },
+  "Confira os campos: o mês e a quantidade precisam estar preenchidos.": {
+    es: "Revisa los campos: el mes y la cantidad deben estar completos.",
+  },
+  "Só quem administra a empresa pode definir a meta.": {
+    es: "Solo quien administra la empresa puede definir la meta.",
+  },
+  "Não consegui gravar a meta agora. Tente de novo em instantes.": {
+    es: "No pude guardar la meta ahora. Inténtalo de nuevo en unos instantes.",
+  },
+
+
+  // Teto de upload que vale também para envio sem tamanho (lib/api/corpo-com-teto.ts).
+  "O envio passa do tamanho máximo aceito.": { es: "El envío supera el tamaño máximo aceptado." },
+  "O tamanho declarado do envio é inválido.": { es: "El tamaño declarado del envío no es válido." },
+  "O arquivo passa de 20 MB.": { es: "El archivo supera los 20 MB." },
+  // Integração upstream v1.108: frases que chegaram sem espanhol.
+  "Manter": { es: "Mantener" },
+  "1 dia": { es: "1 día" },
+  "1 hora": { es: "1 hora" },
+  "Funil selecionado": { es: "Embudo seleccionado" },
+  "Etapa selecionada": { es: "Etapa seleccionada" },
+  "Arrastar para reordenar": { es: "Arrastrar para reordenar" },
+  "Mover para cima": { es: "Mover hacia arriba" },
+  "Mover para baixo": { es: "Mover hacia abajo" },
+  "Todos os funis": { es: "Todos los embudos" },
+  "Suspensa por falta de pagamento": { es: "Suspendida por falta de pago" },
+  "Remover etiqueta": { es: "Quitar etiqueta" },
+  "Adicionar etiqueta": { es: "Agregar etiqueta" },
+  "Iniciar follow-up": { es: "Iniciar seguimiento" },
+  "A pessoa desligou as mensagens de marketing desta empresa no WhatsApp. Não tente de novo.": { es: "La persona desactivó los mensajes de marketing de esta empresa en WhatsApp. No lo intentes de nuevo." },
+  "O WhatsApp limitou quantas promoções esta pessoa recebe. Dá para tentar de novo depois de 24 horas.": { es: "WhatsApp limitó cuántas promociones recibe esta persona. Puedes intentarlo de nuevo después de 24 horas." },
+  "Não foi possível entregar: o número não tem WhatsApp ou o aplicativo está desatualizado.": { es: "No se pudo entregar: el número no tiene WhatsApp o la aplicación está desactualizada." },
+  "A pessoa faz parte de um teste do WhatsApp que não recebe esta mensagem. Não foi cobrado.": { es: "La persona forma parte de una prueba de WhatsApp que no recibe este mensaje. No se cobró." },
+  "O destinatário é o próprio número que envia.": { es: "El destinatario es el mismo número que envía." },
+  "Passaram mais de 24 horas da última mensagem do cliente: fora da janela, só modelo aprovado.": { es: "Pasaron más de 24 horas desde el último mensaje del cliente: fuera de la ventana, solo plantilla aprobada." },
+  "Muitas mensagens seguidas para a mesma pessoa. Espere alguns minutos.": { es: "Demasiados mensajes seguidos a la misma persona. Espera unos minutos." },
+  "O número atingiu o limite de envio por segundo. Tente de novo em instantes.": { es: "El número alcanzó el límite de envío por segundo. Inténtalo de nuevo en unos instantes." },
+  "O modelo foi pausado pela plataforma por baixa qualidade.": { es: "La plataforma pausó la plantilla por baja calidad." },
+  "O modelo foi desativado pela plataforma.": { es: "La plataforma desactivó la plantilla." },
+  "Os valores enviados não batem com as variáveis do modelo.": { es: "Los valores enviados no coinciden con las variables de la plantilla." },
+  "O modelo não existe neste número com este idioma.": { es: "La plantilla no existe en este número con este idioma." },
+  "O texto do modelo com os valores ficou longo demais.": { es: "El texto de la plantilla con los valores quedó demasiado largo." },
+  "O conteúdo viola a política de modelos da plataforma.": { es: "El contenido infringe la política de plantillas de la plataforma." },
+  "O formato de um valor não confere com o modelo (por exemplo, falta o link da imagem do cabeçalho).": { es: "El formato de un valor no coincide con la plantilla (por ejemplo, falta el enlace de la imagen del encabezado)." },
+  "O número foi restringido pela plataforma por denúncias de spam.": { es: "La plataforma restringió el número por denuncias de spam." },
+  "A conta do número está bloqueada na plataforma.": { es: "La cuenta del número está bloqueada en la plataforma." },
+  "A conta do número está bloqueada temporariamente por violar as políticas.": { es: "La cuenta del número está bloqueada temporalmente por infringir las políticas." },
+  "Há um problema com o pagamento da conta na plataforma.": { es: "Hay un problema con el pago de la cuenta en la plataforma." },
+  "Mensagens de marketing estão desativadas para esta conta na API.": { es: "Los mensajes de marketing están desactivados para esta cuenta en la API." },
+  "O modelo foi recategorizado pela plataforma.": { es: "La plataforma recategorizó la plantilla." },
+  "Faltam valores para as variáveis do modelo. Nada foi enviado.": { es: "Faltan valores para las variables de la plantilla. No se envió nada." },
+  "O cabeçalho do modelo não confere (tipo de mídia ou link). Nada foi enviado.": { es: "El encabezado de la plantilla no coincide (tipo de medio o enlace). No se envió nada." },
+  "O valor de um botão não confere com o modelo. Nada foi enviado.": { es: "El valor de un botón no coincide con la plantilla. No se envió nada." },
+  "O envio precisa de um modelo aprovado.": { es: "El envío necesita una plantilla aprobada." },
+  "Acabou a cota mensal de mensagens do provedor do número. Cadastre um meio de pagamento lá.": { es: "Se agotó la cuota mensual de mensajes del proveedor del número. Registra un medio de pago allí." },
+  "O modelo não está aprovado na plataforma neste momento.": { es: "La plantilla no está aprobada en la plataforma en este momento." },
+  "Falta o valor de uma variável do modelo para este contato.": { es: "Falta el valor de una variable de la plantilla para este contacto." },
 };
 
 /**

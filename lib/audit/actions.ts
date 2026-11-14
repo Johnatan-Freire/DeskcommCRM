@@ -56,6 +56,9 @@ export const AUDIT_ACTIONS = [
   "lead.imported",
   "contact.created",
   "contact.updated",
+  // A varredura que copia o nome salvo na agenda do celular para a ficha.
+  // Uma linha por empresa, em cada rodada que preencheu alguém dela — não uma por contato.
+  "contact.address_book_name_filled",
   "contacts.imported",
   "contact.anonymized",
   "contact.merge_pending",
@@ -134,6 +137,10 @@ export const AUDIT_ACTIONS = [
   "message.received",
   "message.edited",
   "message.revoked",
+  // A revogação chegou pelo CANAL — o autor apagou no aplicativo, e não pela
+  // tela do CRM (cuja ação é `message.revoked`). É a única trilha de quem apaga
+  // sem passar por tela nenhuma (#3277).
+  "message.revoked_in_channel",
   "message.hidden_in_crm",
   "message.restored_in_crm",
   // Uma rodada do cron `recover-stuck-messages` que de fato marcou mensagem
@@ -143,6 +150,10 @@ export const AUDIT_ACTIONS = [
   "phone_number.created",
   "phone_number.updated",
   "ai.handoff_triggered",
+  // A pausa da IA por atendimento manual NÃO foi gravada (0 linhas / erro): a
+  // conversa pode ter ficado sem pausa e a IA falar por cima do atendente. O
+  // `metadata.motivo` nomeia corrida, conversa inexistente ou falha de escrita.
+  "ai.pausa_nao_gravada",
   "ai.reactivated_by_agent",
   "conversation.usable_for_rag_toggled",
   "rag.conversations_batch_run",
@@ -159,6 +170,7 @@ export const AUDIT_ACTIONS = [
   "lgpd.redact_failed",
   "lgpd.tenant_redacted",
   "lgpd.consent_changed",
+  "lgpd.art12_notice_sent",
   "lgpd.manually_approved",
   "webhook.hmac_invalid",
   // Uma rodada do cron `webhook-replay` que reprocessou ou desistiu de algum
@@ -260,10 +272,14 @@ export const AUDIT_ACTIONS = [
   // trilha dizer nos dois sentidos, como `archived`/`reactivated`.
   "channel.disabled",
   "channel.enabled",
-  // A janela de manutenção (#2388): criar e cancelar são mutações da tela e
-  // auditam como toda mutação. A pausa e a retomada que a janela aplica saem
-  // como `channel.disabled`/`channel.enabled`, com `origem: schedule`.
+  // Rótulo interno do canal (channel_sessions.display_name); nada vai ao
+  // provedor. Emitida por app/api/v1/channel-sessions/[id]/name.
+  "channel.renamed",
+  // A janela de manutenção (#2388): criar, editar e cancelar são mutações da
+  // tela e auditam como toda mutação. A pausa e a retomada que a janela aplica
+  // saem como `channel.disabled`/`channel.enabled`, com `origem: schedule`.
   "channel.schedule_created",
+  "channel.schedule_updated",
   "channel.schedule_cancelled",
   // Chamada de voz WhatsApp (WaCalls, spec 18) — pareamento do segundo
   // dispositivo vinculado, opt-in por org. Admin only.
@@ -344,6 +360,9 @@ export const AUDIT_ACTIONS = [
   // Avisos temporários dos agentes de IA (0658).
   "ai.aviso_temporario_criado",
   "ai.aviso_temporario_alterado",
+  "ai.material_do_agente_criado",
+  "ai.material_do_agente_alterado",
+  "ai.material_do_agente_removido",
   // Pré-matrícula (0659): a equipe dá andamento ao pedido registrado pela IA.
   "pre_matricula.alterada",
   // Feriados do atendimento humano (0660).
@@ -362,6 +381,7 @@ export const AUDIT_ACTIONS = [
   "followup_enrollment.resumed",
   "followup_enrollment.snoozed",
   "followup_enrollment.step_skipped",
+  "followup_enrollment.negocio_escolhido",
   "template.created",
   "template.updated",
   "template.deleted",
@@ -390,6 +410,11 @@ export const AUDIT_ACTIONS = [
   // respondendo) porque juntar os dois apagaria justamente quem agiu.
   "ai.case_noted_by_agent",
   "ai.case_closed_by_agent",
+  // (#3810) A pessoa encerrou o caso SEM avisar o cliente — o desfecho que não
+  // manda mensagem nenhuma (status `cancelled`). Separado de `ai.case_replied`
+  // porque nada foi respondido: quem lê a auditoria não pode concluir que o
+  // cliente recebeu alguma coisa.
+  "ai.case_closed_without_reply",
   "pipeline.agent_mapping_updated",
   "pipeline.stage_created",
   "pipeline.stage_updated",
@@ -693,6 +718,13 @@ export const AUDIT_ACTIONS = [
   "crm_task.created",
   "crm_task.updated",
   "crm_task.deleted",
+  // A meta mensal da empresa (migration 0756, #3025): o número pelo qual a
+  // empresa cobra o próprio time. Quem mudou o alvo, de quanto para quanto e
+  // quando é a disputa clássica do fim do mês — o metadata leva `alvo` e
+  // `alvo_anterior` justamente para a resposta ser "de 40 para 25", e não só
+  // "existe um 25".
+  "crm_meta.created",
+  "crm_meta.updated",
   "organization.switched",
   // Chamada originada via /api/v1/calls (módulo VoIP, migration 0347).
   // Só o CREATE é auditado aqui — status/transcript são atualizados pelo
@@ -921,6 +953,53 @@ export const AUDIT_ACTIONS = [
   // auditável é a saída de dados — QUANTAS linhas saíram, não o que elas dizem
   // (o corpo da mensagem não vai para log nem para metadata, LGPD).
   "conversation.exported",
+  // #2593: o TELEFONE de uma ficha SEM número foi GRAVADO na hora, sem decisão
+  // humana, quando o agente ouviu o número na conversa — `proporDadoDoContato`
+  // só toma este caminho com `phone_number` vazio e valor em E.164, e a trava
+  // é o `phone_number is null` no UPDATE. Distinguir de `field_proposed` é o
+  // que permite responder "quantos números entraram sozinhos, e de quem".
+  "contact.field_auto_applied",
+
+  // #2593, item 1 do CR: um administrador ligou ou desligou a escrita
+  // automática do telefone de ficha vazia (`organizations.settings.crm
+  // .telefone_de_ficha_vazia`). Precisa de código próprio porque é a DECISÃO
+  // que passa a permitir escrita sem decisão humana: quem auditar a ficha de um
+  // cliente precisa encontrar o ato administrativo que abriu a porta, e não só
+  // as gravações que ela deixou passar.
+  "crm.telefone_de_ficha_vazia_alterado",
+  "crm.nome_informado_alterado",
+  // O admin ligou/desligou o aviso das transferências para atendimento humano
+  // (#3784) — o mesmo número e o mesmo teto diário do Aviso de caso.
+  "crm.aviso_de_transferencia_alterado",
+  // A tela de Contatos devolvendo a base em CSV/vCard (#2759) — portabilidade,
+  // LGPD art. 18, V. Audita o GESTO com o total de linhas e os filtros que
+  // valiam, nunca o termo de busca.
+  "contacts.exported",
+  // "Sincronizar agenda do celular" (#2736): o gesto de IMPORTAR em bloco a
+  // agenda do aparelho pareado — mesmo porquê do `contacts.imported` de planilha
+  // ("quem trouxe esta base, e quando"), agora com o número de qual conexão veio.
+  "contacts.synced_from_phone",
+  // Reenvio de mensagem que falhou, na mesma linha (POST /api/v1/messages/{id}/retry).
+  "message.retried",
+  // A REMOÇÃO do destinatário dos avisos de caso (issue #3338) —
+  // `DELETE /api/v1/ai/cases/alerta`. Código próprio, e não
+  // `ai.case_alert_settings_changed` com um campo no metadata: a pergunta que
+  // se faz depois é outra ("quem LIBEROU o número de avisos, e quando", que é o
+  // que explica um número voltar a virar atendimento), e o painel de auditoria
+  // filtra por `action`, nunca por metadata. O número entra MASCARADO, pela
+  // mesma razão do `ai.case_alert_settings_changed`: `api_audit_log` é
+  // append-only e a cascata de LGPD não o alcança.
+  "ai.case_alert_settings_removed",
+  // A cadência do lembrete de caso parado (migration 0766): ligado, intervalo e
+  // teto, escolhidos na Central por quem administra. Audita porque desligar
+  // cala a cobrança da organização inteira, e "quem desligou, e quando" só tem
+  // resposta na trilha — a coluna guarda só o valor de agora.
+  "ai.lembrete_de_caso_configurado",
+  // A trava de número novo (go-live) solta na atualização do número que o
+  // controle de ritmo já considera formado (migration 0793, PR #2327, doc 109).
+  // Uma linha por número, com o motivo; e uma por instalação marcando a rodada.
+  "channel.go_live_liberado_na_atualizacao",
+  "channel.go_live_transicao_da_atualizacao",
 ] as const;
 
 /** Um código de auditoria. Derivado de `AUDIT_ACTIONS` — não redigite a lista. */

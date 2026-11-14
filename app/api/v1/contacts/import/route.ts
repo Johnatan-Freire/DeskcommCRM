@@ -22,6 +22,7 @@ import { randomUUID } from "node:crypto";
 import { type NextRequest } from "next/server";
 
 import { ok, fail } from "@/lib/api/wrappers";
+import { lerCorpoComTeto } from "@/lib/api/corpo-com-teto";
 import { requireRole } from "@/lib/auth/require-role";
 import { audit } from "@/lib/audit";
 import { camposCpfParaGravar } from "@/lib/contacts/cpf";
@@ -75,9 +76,17 @@ export async function POST(req: NextRequest): Promise<Response> {
   const doc = perfil.documento;
   const schemaDoPais = contactCreateSchemaDoPais(perfil);
 
+  // 64 KB de folga para o envelope multipart; o file.size abaixo é o check do CSV.
+  const corpo = await lerCorpoComTeto(req, CSV_MAX_BYTES + 64 * 1024, {
+    requestId,
+    idioma: user.idioma,
+    acimaDoTeto: t("Arquivo maior que ") + `${Math.floor(CSV_MAX_BYTES / 1024 / 1024)}MB.`,
+  });
+  if (!corpo.ok) return corpo.response;
+
   let file: File;
   try {
-    const form = await req.formData();
+    const form = await corpo.corpo.formData();
     const f = form.get("file");
     if (!(f instanceof File)) throw new Error("sem arquivo");
     file = f;
@@ -182,7 +191,7 @@ export async function POST(req: NextRequest): Promise<Response> {
 
   // ─── Pré-filtro de duplicados contra o banco (uma query por identificador) ──
   //
-  // Os índices únicos são parciais (excluem mesclados/anonimizados), então a
+  // Os índices únicos são parciais (excluem mesclados), então a
   // busca espelha o WHERE do índice — filtrar pelo que o índice não cobre
   // produziria "duplicado" imaginário.
   const phones = candidatos
@@ -199,6 +208,7 @@ export async function POST(req: NextRequest): Promise<Response> {
       .from("contacts")
       .select("phone_number")
       .eq("organization_id", orgId)
+      .is("is_merged_into", null)
       .not("phone_number", "is", null)
       .in("phone_number", lookup);
     for (const r of data ?? []) {
@@ -212,6 +222,7 @@ export async function POST(req: NextRequest): Promise<Response> {
       .from("contacts")
       .select("email_normalized")
       .eq("organization_id", orgId)
+      .is("is_merged_into", null)
       .in("email_normalized", emails.map((e) => e.toLowerCase()));
     for (const r of data ?? []) existentes.add(`email:${(r as { email_normalized: string }).email_normalized}`);
   }

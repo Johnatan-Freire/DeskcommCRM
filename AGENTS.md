@@ -67,8 +67,8 @@ flowchart LR
 ```
 
 Superfícies **não-cookie** (cada uma com guard próprio, nunca o cookie de sessão):
-`app/api/v1/cron/` (Bearer `INTERNAL_CRON_SECRET`, fail-closed), `app/api/internal/`
-(`x-internal-secret`), `app/api/mcp/` (Bearer `dsk_...` contra `api_tokens`), `app/api/v1/webhooks/`
+`app/api/v1/cron/` (Bearer `INTERNAL_CRON_SECRET`, fail-closed),
+`app/api/mcp/` (Bearer `dsk_...` contra `api_tokens`), `app/api/v1/webhooks/`
 (HMAC + path token), e **parte de `app/api/v1/`** — rotas que aceitam cookie OU bearer pelo helper
 `lib/api/auth-dual.ts`. Esta última cresce rota por rota (decisão do dono em 17/09/2026: converter
 o que cada integração precisar), então o inventário é um comando e não uma lista:
@@ -83,7 +83,7 @@ disparar. Entrada do turno em `lib/agent-engine/agent/inbound-turn.ts`; diagrama
 | Path | O quê |
 |---|---|
 | `app/api/v1/` | Route handlers REST (versionado por path) — **reconte, não cite**: `git ls-files 'app/api/v1/**/route.ts' \| wc -l` (e `git ls-files 'app/api/**/route.ts' \| wc -l` para o total de `app/api/**`) |
-| `app/api/internal/`, `app/api/mcp/`, `app/api/v1/cron/` | superfícies não-cookie (secret/bearer próprio) |
+| `app/api/mcp/`, `app/api/v1/cron/` | superfícies não-cookie (secret/bearer próprio) |
 | `app/app/` | UI autenticada do tenant · `app/admin/` UI de plataforma |
 | `app/actions/` | Server Actions (auth, onboarding, team, settings) |
 | `lib/agent-engine/`, `lib/ai/` | runtime do agente, guardrails, RAG, dispatcher |
@@ -220,7 +220,8 @@ if (!authz.ok) return authz.response;
 ```
 
 **Erros** — `fail(code, message, status)` com código de `lib/api/errors.ts`. Nunca `throw` cru na
-borda. Cada response leva `X-Request-Id`, correlacionado com o audit log.
+borda. Toda resposta de `ok()`/`fail()` leva o `X-Request-Id`, e é o mesmo do registro e da auditoria;
+as rotas que montam resposta à mão estão sendo migradas (issue #4107).
 
 **Nomes e dados** — arquivos e símbolos em PT-BR são a norma (mantenha o idioma do arquivo que
 editar). JSON da API em **snake_case**; dinheiro em `_cents` + `currency`; datas ISO-8601 UTC;
@@ -420,7 +421,7 @@ itens envelhecem em ritmos diferentes, e o cabeçalho passava a mentir por todos
   inclusive. O número e a contagem que ficavam aqui eram de uma fotografia de agosto.
 - Rate limit HTTP: `lib/auth/rate-limit.ts` cobre **login, signup, recuperação de senha e
   aceite de convite** (contando por IP **e** por identificador hasheado); `checkRateLimit` cobre
-  o webhook de captação e o dispatcher de IA. **Crons seguem sem.** O MCP conta em dois pontos:
+  o webhook de captação e outros pontos de `app/` e `lib/` (a régua abaixo lista). **Crons seguem sem.** O MCP conta em dois pontos:
   a recusa de token, antes da autenticação (`lib/mcp/auth.ts`, #1449), e o teto de chamadas de
   token válido — por token, por organização e de escrita, Spec 11 §7 (`lib/mcp/rate-limit.ts`,
   #1446). Meça antes de agir:

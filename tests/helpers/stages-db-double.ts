@@ -41,6 +41,25 @@ export interface StageRow {
   expected_duration_hours: number | null;
 }
 
+/**
+ * Grafo publicável de follow-up (#3603) — o mínimo que passa no `flowGraphSchema`.
+ * `gatilho: false` tira o nó de gatilho (o motor não arma); `pedeIA: true` põe uma
+ * mensagem de IA (o motor só arma se algum agente publicado com follow-up ligado
+ * tiver o fluxo).
+ */
+export function grafoDeFluxo({ gatilho = true, pedeIA = false }: { gatilho?: boolean; pedeIA?: boolean } = {}) {
+  const pos = { x: 0, y: 0 };
+  const nodes: Array<Record<string, unknown>> = [];
+  if (gatilho) nodes.push({ id: "inicio", type: "trigger", label: "Início", position: pos, config: {} });
+  nodes.push(
+    pedeIA
+      ? { id: "toque", type: "action", label: "Toque", position: pos, config: { mode: "ai_message", prompt_hint: "Retome a proposta" } }
+      : { id: "toque", type: "action", label: "Toque", position: pos, config: { mode: "text", body: "Oi!" } },
+  );
+  nodes.push({ id: "fim", type: "end", label: "Fim", position: pos, config: { outcome: "converted" } });
+  return { nodes, edges: [] };
+}
+
 export function etapa(over: Partial<StageRow> & { id: string; name: string }): StageRow {
   return {
     slug: over.id,
@@ -69,6 +88,48 @@ export interface LeadRow {
    */
   stage_changed_at?: string | null;
   created_at?: string;
+  /**
+   * #2995 — as três colunas do RECORTE DE ENCERRADOS ANTIGOS do quadro, que a
+   * rota do board lê de uma vez com o `select("*")`: `status` e `closed_at`
+   * decidem o recorte e `position_in_stage` é a ordem da leitura. Opcionais
+   * porque a maioria dos testes não fala de negócio encerrado — e declaradas
+   * aqui, e não num `as` no arquivo de teste, para o caso que monta um ganho
+   * velho continuar medindo o handler em vez do dublê.
+   */
+  status?: "open" | "won" | "lost" | "archived";
+  closed_at?: string | null;
+  position_in_stage?: number;
+  /**
+   * #2995 — as duas colunas de ATIVIDADE, que o recorte NÃO pode usar: o corte é
+   * por data de encerramento. O caso do ganho de dois dias com atividade de
+   * meses atrás só mede o corte certo se as duas existirem para serem
+   * ignoradas — por isso moram aqui, e não num `as` no teste.
+   */
+  last_activity_at?: string | null;
+  updated_at?: string | null;
+  /**
+   * As colunas que o PREENCHIMENTO de modelo de mensagem lê (#3605):
+   * `custom_fields` é de onde sai o valor de `{{campo}}`, e `pipeline_id` é o
+   * que diz QUAL lista traduz o código gravado em rótulo. `title`/valor/moeda
+   * entram junto porque é o mesmo `select` do negócio. Opcionais: a maioria dos
+   * testes do quadro não fala de mensagem.
+   */
+  title?: string;
+  value_cents?: number;
+  currency?: string;
+  custom_fields?: Record<string, unknown> | null;
+  /**
+   * Fatia 1 do #3945 — as colunas do DONO e da recorrência, que o card desenha e
+   * a rota do quadro entrega no `select("*")`. Declaradas aqui (e não num `as`
+   * no teste) para o caso do payload medir o handler: sem elas, o dublê apagaria
+   * justamente os campos cuja entrega o teste prova.
+   */
+  owner_kind?: "user" | "ai" | null;
+  owner_user_id?: string | null;
+  owner_agent_id?: string | null;
+  recurring_value_cents?: number | null;
+  recurring_period?: string | null;
+  tags?: string[];
 }
 
 export function negocio(id: string, stageId: string, over: Partial<LeadRow> = {}): LeadRow {
@@ -138,14 +199,36 @@ export interface DbOpts {
    * precisa declarar que ele existe e de quem é.
    */
   contacts?: Array<Record<string, unknown>>;
+  /**
+   * Conversas — a última mensagem do card sai delas (fatia 1 do #3945): a rota
+   * do quadro lê `last_message_preview`/`last_message_at` por contato. Sem esta
+   * fonte, o caso do card mediria um quadro em que ninguém nunca escreveu.
+   */
+  conversations?: Array<Record<string, unknown>>;
   /** Erro do banco na n-ésima escrita (1-based), como o PostgREST devolveria. */
   writeError?: (n: number, table: string) => { code: string; message: string } | null;
+  /**
+   * Fluxos de follow-up da org (issue #3603) — é deles que sai a lista read-only
+   * de «quais fluxos disparam ao entrar nesta etapa». O `trigger_config` vai
+   * cru, como no banco: quem decide se ele arma alguma coisa é o código da rota,
+   * não o dublê.
+   */
+  pointers?: Array<Record<string, unknown>>;
+  /** `followup_flow_versions` — o grafo da versão ativa decide se há nó de gatilho e se o fluxo pede IA. */
+  flowVersions?: Array<Record<string, unknown>>;
+  /** `ai_agent_versions` — o `followup` da versão publicada diz quais fluxos o agente arma. */
+  agentVersions?: Array<Record<string, unknown>>;
   /**
    * O `max_rows` do PostgREST (1000 em `supabase/config.toml`): corta TODA
    * leitura nesse tamanho, sem erro, por maior que seja o `.limit`/`.range`.
    * Ausente = sem corte, que é o que os testes que não falam de volume querem.
    */
   maxRows?: number;
+  /**
+   * A sessão do cookie (#2995). Ausente = a sessão de sempre (`USER_ID`);
+   * `null` = sem sessão, que é o 401 do quadro.
+   */
+  user?: { id: string } | null;
 }
 
 type Linha = Record<string, unknown>;
@@ -160,10 +243,27 @@ export interface Registro {
    * dublê — e dois dublês da mesma tabela divergem no primeiro ajuste, que é
    * exatamente o defeito que a extração da regra existe para evitar.
    */
-  client: { from: (table: string) => unknown; rpc: (nome: string, args: unknown) => Promise<unknown> };
+  client: {
+    from: (table: string) => unknown;
+    rpc: (nome: string, args: unknown) => Promise<unknown>;
+    /**
+     * Sessão do cookie (#2995): a rota do QUADRO confere `supabase.auth.getUser()`
+     * antes de ler qualquer coisa. Sem este ramo, o teste do quadro morreria num
+     * TypeError do dublê (`auth` não existe) e mediria o dublê, não o handler.
+     */
+    auth: { getUser: () => Promise<{ data: { user: { id: string } | null }; error: null }> };
+  };
   escritas: Escrita[];
   eventos: string[];
   rpcs: Array<{ nome: string; args: unknown }>;
+  /**
+   * As tabelas LIDAS, na ordem — uma entrada por consulta emitida.
+   *
+   * Existe para medir N+1: a lista de fluxos por etapa (#3603) tem de custar UMA
+   * consulta por requisição, não uma por etapa. Contar `createClient().from`
+   * fora daqui mediria o dublê, não o handler.
+   */
+  leituras: string[];
   /** As tabelas DEPOIS das escritas — é aqui que se confere que os negócios andaram. */
   tabelas: {
     crm_pipelines: Linha[];
@@ -173,6 +273,10 @@ export interface Registro {
     webhook_sources: Linha[];
     automation_rules: Linha[];
     contacts: Linha[];
+    conversations: Linha[];
+    followup_flow_pointers: Linha[];
+    followup_flow_versions: Linha[];
+    ai_agent_versions: Linha[];
   };
 }
 
@@ -183,6 +287,7 @@ export function makeDb(opts: DbOpts = {}): Registro {
     escritas: [],
     eventos: [],
     rpcs: [],
+    leituras: [],
     tabelas: {
       crm_pipelines: (opts.pipelines ?? [
         { id: PIPE, name: "Pedidos", organization_id: opts.pipelineOrg ?? ORG_ID },
@@ -193,6 +298,10 @@ export function makeDb(opts: DbOpts = {}): Registro {
       webhook_sources: (opts.webhookSources ?? []) as Linha[],
       automation_rules: (opts.automationRules ?? []) as Linha[],
       contacts: (opts.contacts ?? []) as Linha[],
+      conversations: (opts.conversations ?? []) as Linha[],
+      followup_flow_pointers: (opts.pointers ?? []) as Linha[],
+      followup_flow_versions: (opts.flowVersions ?? []) as Linha[],
+      ai_agent_versions: (opts.agentVersions ?? []) as Linha[],
     },
   };
   const tables = registro.tabelas as unknown as Record<string, Linha[] | undefined>;
@@ -208,12 +317,21 @@ export function makeDb(opts: DbOpts = {}): Registro {
      * Postgres é ISO-8601 em UTC, e ISO ordena lexicograficamente.
      */
     const intervalos: Array<{ coluna: string; op: "gte" | "lte"; valor: string }> = [];
+    /**
+     * Os `.not(...)` encadeados — o caso real é o `next_action IS NOT NULL` da
+     * leitura de `lead_state` no quadro. Ausente do dublê até a fatia 1 do
+     * #3945: sem ela, medir o payload com lead que TEM contato estourava no
+     * dublê antes de chegar ao card.
+     */
+    const exclusoes: Array<{ coluna: string; op: "is" | "eq"; valor: unknown }> = [];
     const pertinencias: Array<[string, unknown[]]> = [];
     const negacoes: Array<[string, unknown]> = [];
     let patch: Record<string, unknown> | null = null;
     let nova: Record<string, unknown> | Record<string, unknown>[] | null = null;
     let colunas: string[] | null = null;
-    let ordem: string | null = null;
+    // Várias chamadas de `.order()` compõem a ordem, como no PostgREST: a primeira
+    // decide, as seguintes desempatam.
+    const ordens: string[] = [];
     let contar = false;
     let head = false;
     let apagar = false;
@@ -243,7 +361,19 @@ export function makeDb(opts: DbOpts = {}): Registro {
      */
     const lidos = () => {
       let rows = [...casam()];
-      if (ordem) rows.sort((a, b) => Number(a[ordem!]) - Number(b[ordem!]));
+      if (ordens.length > 0)
+        rows.sort((a, b) => {
+          for (const col of ordens) {
+            const x = a[col];
+            const y = b[col];
+            if (x === y) continue;
+            const nx = Number(x);
+            const ny = Number(y);
+            if (!Number.isNaN(nx) && !Number.isNaN(ny)) return nx - ny;
+            return String(x) < String(y) ? -1 : 1;
+          }
+          return 0;
+        });
       if (teto !== null) rows = rows.slice(desde, desde + teto);
       if (opts.maxRows !== undefined) rows = rows.slice(0, opts.maxRows);
       // `select("*")` (usado por `app/api/v1/leads/_handler.ts`) é o CURINGA do
@@ -315,6 +445,7 @@ export function makeDb(opts: DbOpts = {}): Registro {
       // é assim que o PostgREST responde, e a diferença não é acadêmica: o dublê
       // devolvendo `data: null` para `select(..., { count })` fez a emissão de
       // atividades do arquivamento sumir com a suíte verde.
+      registro.leituras.push(table);
       if (head) return { data: null, error: null, count: casam().length };
       if (contar) return { data: lidos(), error: null, count: casam().length };
       return { data: lidos(), error: null, count: null };
@@ -365,6 +496,14 @@ export function makeDb(opts: DbOpts = {}): Registro {
         negacoes.push([c, v]);
         return b;
       },
+      /** `.not(col, "is"|"eq", v)` — a negação do `.is`/`.eq`, como no PostgREST. */
+      not: (c: string, op: string, v: unknown) => {
+        if (op !== "is" && op !== "eq") {
+          throw new Error(`dublê: .not(${c}, "${op}", ...) não suportado`);
+        }
+        exclusoes.push({ coluna: c, op, valor: v });
+        return b;
+      },
       limit: (n: number) => {
         teto = n;
         return b;
@@ -384,7 +523,7 @@ export function makeDb(opts: DbOpts = {}): Registro {
         return b;
       },
       order: (col: string) => {
-        ordem = col;
+        ordens.push(col);
         return b;
       },
       maybeSingle: async () => {
@@ -412,7 +551,14 @@ export function makeDb(opts: DbOpts = {}): Registro {
     return { data: null, error: null };
   };
 
-  registro.client = { from: builder, rpc } as unknown as Registro["client"];
+  // A sessão do cookie (#2995): `getUser()` é a primeira coisa que a rota do
+  // quadro faz, e o dublê responde a sessão declarada — ou nenhuma.
+  const sessao = opts.user === undefined ? { id: USER_ID } : opts.user;
+  const auth = {
+    getUser: async () => ({ data: { user: sessao }, error: null }),
+  };
+
+  registro.client = { from: builder, rpc, auth } as unknown as Registro["client"];
   vi.mocked(createClient).mockResolvedValue(registro.client as never);
   return registro;
 }

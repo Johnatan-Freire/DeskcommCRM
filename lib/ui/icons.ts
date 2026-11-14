@@ -46,6 +46,9 @@ export {
   Dot,
   // actions
   ArrowBendUpLeft,
+  // encaminhar (#2835): a seta espelhada do "Responder" — mesma família,
+  // mesmo peso, para os dois gestos da bolha lerem como par.
+  ArrowBendUpRight,
   List,
   Bell,
   BellSlash,
@@ -105,6 +108,7 @@ export {
   MusicNote,
   Note,
   FileText,
+  FilmStrip,
   Lock,
   LockOpen,
   Receipt,
@@ -119,6 +123,8 @@ export {
   DotsThree,
   CaretDown,
   CaretUp,
+  // reordenar por arrastar e soltar (#3244/#4043): a alça das listas reordenáveis
+  DotsSixVertical as DragHandle,
   CaretDoubleLeft,
   CaretDoubleRight,
   CaretLeft,

@@ -12,10 +12,16 @@ import { AUTORIZADO, CORTE_DE_PAUSA, ESPERA_DA_PAUSA_MS, explicarCorte, followup
  * em OpenClaw/Hermes que transforma continuação fria em retomada natural.
  *
  * Reusa runAgentTurn (F2-09) por inteiro — sessão fresca, loop de tools, checkpoint,
- * veto. A ÚNICA diferença é a abertura: o bloco temporal entra no SUFIXO (messages),
+ * veto. A diferença no PROMPT é a abertura: o bloco temporal entra no SUFIXO (messages),
  * DEPOIS do prefixo cacheável (system do playbook + tools — F2-17), então não
  * invalida o cache org-wide. O delta é RELATIVO ao now do run (clock injetável),
  * nunca persistido estático.
+ *
+ * A outra diferença é o PONTO DE IA: a chamada principal de um job `followup_turn`
+ * sai como `followup_turn`, não `agent_turn` (o turno decide pelo `kind` do job, em
+ * `executarTurnoDoAgente`). É o que deixa o painel de provedores escolher um modelo
+ * só para o follow-up — sem escolha, vale o da versão publicada, como antes — e o
+ * que separa o custo dele em `llm_calls`.
  *
  * Ids de envio (conversa + número) vêm da ROW do lead no harness (fonte confiável),
  * NUNCA do payload do modelo — o cron só carrega o snapshot da promessa (F3-02).
@@ -33,6 +39,8 @@ import { contextoDoContato, renderizarTextoDeFollowup } from '@/lib/automation/t
 import { camadaLigada, lerCamadasDaOrg } from '../guardrails/camadas-da-org';
 import { classifyPromise } from '../guardrails/promise/semantic';
 import { scheduleCronJob } from '../cron/scheduler';
+import { janelaDeEnvioAberta, proximaAberturaDaJanela } from '../pacing/engine';
+import { loadChannelKnobs } from '../pacing/store';
 import {
   JobSettledError,
   ritualBlocks,
@@ -55,6 +63,7 @@ import {
   type EsperaParaPlanejar,
   type PropostaDeEsperaBruta,
 } from './followup-flow-classify';
+import { carregarBlocoDoNegocio } from './negocio-do-followup';
 
 const DAY_MS = 86_400_000;
 const HOUR_MS = 3_600_000;
@@ -211,6 +220,46 @@ function buildFollowupOpeningMessage(
     'Houve avanço REAL no funil neste turno? Marque-o com update_lead_state (só o próximo estágio válido).',
     'Aprendeu algo durável sobre o lead? Salve com save_lead_note (a headline entra no índice de memória).',
   ].join('\n');
+}
+
+/**
+ * Abertura do passo de IA de um FLUXO de follow-up. PURA, exportada para teste.
+ *
+ * Não reusa o cabeçalho de `buildFollowupOpeningMessage` ("você havia combinado
+ * retornar a este lead") porque, num fluxo, ele é FALSO na maioria dos casos: o
+ * passo sai porque a EQUIPE armou o fluxo (card entrou numa etapa, silêncio,
+ * acionamento manual), não por uma promessa do agente. Medido: num fluxo de
+ * boas-vindas por etapa, com o contato sem conversa nenhuma, o modelo leu a
+ * promessa inventada e escreveu "aquela obra que conversamos".
+ *
+ * A ordem: o ritual (histórico, estado), o NEGÓCIO e só então a orientação do
+ * passo — a instrução do dono do fluxo é a última palavra.
+ */
+export function buildFlowStepOpeningMessage(
+  temporalBlock: string,
+  ritual: string[],
+  negocioBlock: string,
+  promptHint: string | undefined,
+): string {
+  const partes = [
+    'Passo de um fluxo de follow-up: a equipe configurou esta mensagem para sair agora. Não presuma',
+    'conversa nem combinado que não estejam no histórico abaixo — se o histórico está vazio, este é o primeiro contato.',
+    '',
+    '## Contexto temporal do follow-up',
+    temporalBlock,
+    '',
+    ...ritual,
+    '',
+  ];
+  if (negocioBlock !== '') partes.push(negocioBlock, '');
+  partes.push(
+    'Escreva a mensagem usando a tool send_message — NUNCA escreva a resposta como texto direto',
+    '(texto fora de tool é descartado pelo runtime). Use get_lead_context se precisar reler o contexto.',
+    'Houve avanço REAL no funil neste turno? Marque-o com update_lead_state (só o próximo estágio válido).',
+    'Aprendeu algo durável sobre o lead? Salve com save_lead_note (a headline entra no índice de memória).',
+  );
+  if (promptHint) partes.push('', '## Orientação do passo do fluxo', promptHint);
+  return partes.join('\n');
 }
 
 /** Última mensagem inbound do contexto (a "última coisa que o lead disse" — Z). */
@@ -676,14 +725,49 @@ async function runFlowDrivenTurn(
       }
       return;
     }
+    // #3103 — A JANELA ANTI-BAN DO CANAL, ANTES DO TURNO DA IA. `runAgentTurn`
+    // também adia fora da janela, mas só reagenda o job e lança
+    // `JobSettledError`: o enrollment não fica sabendo, o motor lê a espera
+    // como worker morto e o dead-man (~11h) mata a inscrição com
+    // `action_turn_never_completed` antes da abertura. Medido em produção:
+    // passo de IA enfileirado 21h com janela 9h–18h morria às 8h30. O adiamento
+    // volta para o enrollment como o do texto fixo acima e o da janela própria.
+    const aberturaAntiBan = await aberturaDaJanelaDeDisparo(pool, target, clock(), runLog);
+    if (aberturaAntiBan !== null) {
+      await rescheduleReentry(pool, {
+        tenantId: target.tenantId,
+        leadId: target.leadId,
+        jobId: job.id,
+        at: aberturaAntiBan,
+        payload: job.payload,
+      });
+      runLog.info('passo de IA do fluxo adiado pela janela anti-ban de envio', {
+        next_run_at: aberturaAntiBan.toISOString(),
+      });
+      await complete(pool, {
+        jobId: job.id,
+        jobClaim: claimOfJob(job),
+        organizationId: target.tenantId,
+        enrollmentId,
+        nodeId,
+        result: { kind: 'deferred', until: aberturaAntiBan, reason: 'outside_window' },
+      });
+      return;
+    }
+    // O card do negócio entra no turno (ver `negocio-do-followup.ts`). Lido
+    // ANTES do turno porque `buildOpening` é síncrono; falha vira bloco vazio.
+    const negocioBlock = await carregarBlocoDoNegocio(pool, target.tenantId, target.leadId, runLog);
     await runAgentTurn(deps, job, pool, ctx, {
       channelSessionId: target.channelSessionId,
       conversationId: target.conversationId,
       buildOpening: ({ previous, leadState, context, notesIndexBlock, projeta }) => {
         const temporalBlock = buildTemporalBlock({ now: clock(), lastInbound: lastInboundOf(context) });
-        const opening = buildFollowupOpeningMessage(temporalBlock, previous, leadState, context, notesIndexBlock, projeta);
-        if (!input.promptHint) return opening;
-        return `${opening}\n\n## Orientação do passo do fluxo\n${input.promptHint}`;
+        return buildFlowStepOpeningMessage(
+          temporalBlock,
+          ritualBlocks(previous, leadState, context, notesIndexBlock, projeta),
+          negocioBlock,
+          input.promptHint,
+        );
       },
     });
     const result = await resultadoDoEnvioDoFollowup(pool,job.organization_id,job.id);
@@ -997,6 +1081,23 @@ async function sendFixedOutbound(
     case 'unavailable':
       throw new Error(`envio fixo: canal indisponível (${outcome.reason}) — run re-tentado pela fila`);
   }
+}
+
+/**
+ * Próxima abertura da janela de DISPARO do canal quando ela está fechada agora;
+ * `null` quando o envio pode sair. É a mesma régua de `runAgentTurn` para a
+ * retomada (`janelaDeEnvioAberta(agora, knobs, false)`), lida antes do turno
+ * para que o adiamento volte ao enrollment (#3103).
+ */
+async function aberturaDaJanelaDeDisparo(
+  pool: pg.Pool,
+  target: ReentrySendTarget,
+  agora: Date,
+  log: Parameters<typeof loadChannelKnobs>[3],
+): Promise<Date | null> {
+  const { knobs } = await loadChannelKnobs(pool, target.tenantId, target.channelSessionId, log);
+  if (janelaDeEnvioAberta(agora, knobs, false)) return null;
+  return proximaAberturaDaJanela(agora, knobs, false);
 }
 
 /**

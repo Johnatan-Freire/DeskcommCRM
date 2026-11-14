@@ -41,8 +41,15 @@ import { PROVEDORES } from "@/lib/ai/pontos/provedores";
 import { ModelPicker, useModelMeta } from "./ModelPicker";
 import { CHAVE_DA_INSTALACAO, CredentialPicker, STATUS_LABEL, findCredential } from "./CredentialPicker";
 import { rotuloDoEstadoDoCanal } from "@/lib/channels/estado";
+import { decidirAvisoDoModoDeTeste } from "@/lib/ai/elegibilidade/aviso-do-modo-de-teste";
+import { AvisoDoModoDeTeste } from "./AvisoDoModoDeTeste";
 import { bloqueioDePublicacao } from "@/lib/ai/agents/bloqueio-de-publicacao";
 import { mesmoRascunho } from "@/lib/ai/agents/mesmo-rascunho";
+import {
+  CODIGO_NOME_DE_AGENTE_EM_USO,
+  NOME_DE_AGENTE_EM_USO,
+  RASCUNHO_SALVO_NOME_NAO_MUDOU,
+} from "@/lib/ai/agents/nome-repetido";
 import { ToolPicker } from "./ToolPicker";
 import { TriggerEditor, type TriggerValue } from "./TriggerEditor";
 import { HandoffKeywordsInput } from "./HandoffKeywordsInput";
@@ -58,6 +65,7 @@ import { BasesDoAgente, type MaterialDoAcervo } from "./BasesDoAgente";
 import { FunisDoAgente, type CoberturaPorFunil } from "./FunisDoAgente";
 import { PublishConfirmDialog } from "./PublishConfirmDialog";
 import { ComandosDoCelular } from "./ComandosDoCelular";
+import { FraseDoAviso } from "./FraseDoAviso";
 import {
   saveAgentDraftAction,
   publishAgentAction,
@@ -96,6 +104,13 @@ export type { ChannelSessionLite };
  */
 const ID_DO_MOTIVO_DO_PUBLICAR = "motivo-do-publicar";
 
+/**
+ * O id que liga o CAMPO de nome à frase que o servidor devolveu quando o nome já
+ * existia na organização (#3952). O `aria-describedby` do input aponta para cá:
+ * quem chega pelo leitor de tela ouve o motivo junto do campo.
+ */
+const ID_DO_ERRO_DO_NOME = "erro-do-nome";
+
 interface BaseProps {
   credentials: CredentialRow[];
   /**
@@ -116,7 +131,7 @@ interface BaseProps {
    */
   provedorPadrao?: string;
   channelSessions: ChannelSessionLite[];
-  routerMembership?: { routerId: string; routerName: string } | null;
+  routerMembership?: { routerId: string; routerName: string; channelSessionId: string; channelStatus: string | null } | null;
   readOnly?: boolean;
   organizationTimezone?: string;
 }
@@ -371,6 +386,35 @@ function toVersionPayload(s: FormState) {
   };
 }
 
+/**
+ * O que o payload da tela vira DEPOIS que o servidor o aceita.
+ *
+ * `mesmoRascunho` responde "salvar mudaria alguma coisa?" comparando os dois
+ * payloads — mas o servidor NÃO grava o payload cru: `versionShapeSchema` faz
+ * `.trim()` no prompt e completa o `trigger_config` com
+ * `include_tags`/`exclude_tags`/`include_pipeline_ids`/`exclude_pipeline_ids`
+ * (`.default([])`). Comparar o formulário com o que está no banco sem passar os
+ * dois pela MESMA régua acusava alteração para sempre, e Publicar ficava apagado
+ * com "Salve o rascunho antes de publicar" mesmo depois de salvar — o defeito da
+ * #3951, que só "sumia" ao recarregar a página porque aí o formulário passava a
+ * ser hidratado do que estava gravado, e os dois lados ficavam iguais por
+ * construção.
+ *
+ * `safeParse` e não `parse`: o formulário no meio da digitação é inválido de
+ * propósito (nome vazio, modelo ainda não escolhido), e derrubar o render por
+ * isso seria trocar um defeito por outro. Sem parse, compara-se o cru — que é o
+ * que a tela sempre fez.
+ */
+function payloadQueSeraGravado(s: FormState) {
+  const cru = { cadastro: toCadastroPayload(s), versao: toVersionPayload(s) };
+  const versao = versionCreateSchema.safeParse(cru.versao);
+  const cadastro = agentMcpPatchSchema.safeParse(cru.cadastro);
+  return {
+    cadastro: cadastro.success ? cadastro.data : cru.cadastro,
+    versao: versao.success ? versao.data : cru.versao,
+  };
+}
+
 export function AgentForm(props: Props) {
   const t = useT();
   const funis = props.funis ?? [];
@@ -403,6 +447,20 @@ export function AgentForm(props: Props) {
   const [papel, setPapel] = React.useState<"conversa" | "operacao" | "seguranca">("conversa");
 
   /**
+   * A recusa do SERVIDOR que mora num CAMPO — hoje, só "esse nome já existe"
+   * (#3952).
+   *
+   * Fica fora de `validation` de propósito: aquela é a régua do cliente, que
+   * roda a cada tecla e descreve o que a pessoa ainda precisa preencher. Esta é
+   * a resposta de quem foi ao banco, e um toast no canto não serve — o erro é do
+   * campo de nome, e é ali que a pessoa olha. Some assim que ela digita (o
+   * primeiro caractere muda o nome que o banco recusou) e NÃO sobrevive a um
+   * reload: recarregar já mostra o formulário limpo, sem prometer um conflito
+   * que talvez não exista mais.
+   */
+  const [erroDoServidorNoNome, setErroDoServidorNoNome] = React.useState<string | null>(null);
+
+  /**
    * A pergunta é "salvar mudaria alguma coisa?", e não "os dois objetos são
    * idênticos". Por isso a comparação é feita sobre o que SERIA GRAVADO, de
    * forma canônica (ver `lib/ai/agents/mesmo-rascunho.ts`): campo que o servidor
@@ -410,10 +468,70 @@ export function AgentForm(props: Props) {
    * para sempre, e o botão "Publicar" cinza com "Salve o rascunho antes de
    * publicar" — medido numa instalação em produção, com o agente preso na versão
    * anterior até alguém publicar por fora da tela.
+   *
+   * ⚠️ Os DOIS lados passam por `payloadQueSeraGravado`: comparar o formulário
+   * com o que está gravado sem a mesma normalização é o que mantinha o botão
+   * apagado depois de salvar (#3951).
    */
+  const referenciaDoServidor = React.useMemo(
+    () => payloadQueSeraGravado(baseline),
+    [baseline],
+  );
+
+  /**
+   * O rascunho que ESTA sessão acabou de gravar.
+   *
+   * `props.draft` é uma prop do server component: ela só muda quando a página é
+   * buscada de novo. Logo depois do salvamento — e ANTES de o refresh chegar —
+   * a tela não tinha rascunho nenhum para publicar, e o botão ficava apagado com
+   * "Sem rascunho para publicar" mesmo com a versão já gravada no banco. A ação
+   * devolve `version_id`/`version_number`, então a tela não precisa esperar: ela
+   * sabe o que acabou de salvar.
+   *
+   * Este estado só é preenchido com `res.ok` — falha no salvamento não pode
+   * acender Publicar nem limpar a marca de alteração pendente.
+   */
+  const [salvo, setSalvo] = React.useState<{
+    agentId: string;
+    versionId: string;
+    versionNumber: number;
+    formulario: FormState;
+    payload: ReturnType<typeof payloadQueSeraGravado>;
+  } | null>(null);
+
+  const idDesteAgente = props.mode === "edit" ? props.agent.id : "";
+  /**
+   * Vale enquanto a prop do servidor fala do MESMO rascunho que acabamos de
+   * gravar (ou de nenhum, antes do refresh chegar). Um rascunho com outro id é
+   * de outra sessão/edição, e aí quem manda é o servidor.
+   *
+   * Sem rascunho na prop, o recém-salvo só vale enquanto NÃO for ele o publicado:
+   * o refresh depois do publish também chega com `draft=null`, e o formulário não
+   * é remontado — sem essa guarda o botão seguia aceso oferecendo "Publicar vN"
+   * para a versão que acabou de ser publicada.
+   *
+   * O rascunho que já existia é PATCHado no lugar (`saveAgentDraftAction`), então
+   * `props.draft.id` continua sendo o mesmo depois de salvar — comparar contra a
+   * prop velha acusaria alteração pendente sobre o conteúdo de antes.
+   */
+  const salvoDaqui =
+    salvo &&
+    salvo.agentId === idDesteAgente &&
+    (props.mode !== "edit" ||
+      (props.draft ? props.draft.id === salvo.versionId : props.published?.id !== salvo.versionId))
+      ? salvo
+      : null;
+
+  /** O rascunho que o botão Publicar publica: o do servidor ou o recém-salvo. */
+  const rascunhoParaPublicar =
+    (props.mode === "edit" ? props.draft : null) ??
+    (salvoDaqui
+      ? { id: salvoDaqui.versionId, version_number: salvoDaqui.versionNumber }
+      : null);
+
   const dirty = !mesmoRascunho(
-    { cadastro: toCadastroPayload(form), versao: toVersionPayload(form) },
-    { cadastro: toCadastroPayload(baseline), versao: toVersionPayload(baseline) },
+    payloadQueSeraGravado(form),
+    salvoDaqui?.payload ?? referenciaDoServidor,
   );
 
   function patch(p: Partial<FormState>) {
@@ -428,6 +546,17 @@ export function AgentForm(props: Props) {
   const cred = findCredential(props.credentials, form.credential_id);
   const credSt = cred ? credentialStatus(cred) : null;
   const channelSession = props.channelSessions.find((c) => c.id === form.channel_session_id);
+  /**
+   * O canal escolhido está em modo de teste e não responde ninguém? A tela dizia
+   * só o nome, o telefone e o estado da conexão; o canal nasce com a lista de
+   * teste vazia e a IA ficava muda sem ninguém entender por quê (#3976).
+   *
+   * O aviso é do CANAL ESCOLHIDO, não do agente: ele desaparece ao trocar para um
+   * número aberto, e volta se o número voltar. `readOnly` é o mesmo papel que
+   * trava a edição — quem não é administrador recebe o motivo sem o link que
+   * levaria a um 403 no painel de acesso.
+   */
+  const avisoDoCanal = decidirAvisoDoModoDeTeste({ acesso: channelSession?.acessoDaAi ?? null });
   const modelMeta = useModelMeta(form.provider, form.model);
 
   // ---------------------------------------------------------------------
@@ -506,9 +635,9 @@ export function AgentForm(props: Props) {
    * chave que tinha acabado de escolher.
    */
   const publishBlockReason = React.useMemo(() => {
-    if (!isEdit) return t("Salve o agent antes de publicar.");
+    if (!isEdit) return t("Salve o agente antes de publicar.");
     const motivo = bloqueioDePublicacao({
-      temRascunhoVigente: !!props.draft,
+      temRascunhoVigente: !!rascunhoParaPublicar,
       formularioValido: isValid,
       alteracoesNaoSalvas: dirty,
       provedor: form.provider,
@@ -520,6 +649,9 @@ export function AgentForm(props: Props) {
         estadoDaCredencialDaOrg: credSt,
       },
       numero: { estado: channelSession?.status ?? null },
+      roteador: props.routerMembership
+        ? { estadoDoCanal: props.routerMembership.channelStatus }
+        : null,
     });
     if (!motivo) return null;
     switch (motivo.codigo) {
@@ -542,7 +674,7 @@ export function AgentForm(props: Props) {
       case "numero_desconectado":
         return `${t("Número WhatsApp não está conectado (status:")} ${motivo.estado}).`;
     }
-  }, [isEdit, props, isValid, dirty, credSt, form.provider, form.credential_id, channelSession, t]);
+  }, [isEdit, props, isValid, dirty, credSt, form.provider, form.credential_id, channelSession, rascunhoParaPublicar, t]);
 
   // ---------------------------------------------------------------------
   // Handlers
@@ -573,9 +705,28 @@ export function AgentForm(props: Props) {
           cadastro.data,
         );
         if (!res.ok) {
+          // Nome repetido na organização (#3952): a frase vai para o CAMPO de
+          // nome, que é onde a pessoa olha e onde o conserto acontece — o toast
+          // do canto some sozinho e não diz qual campo mudar.
+          // A frase é montada AQUI, com `t()`: a `message` da Action é pt e
+          // quem usa es/en leria português no campo.
+          if (res.error === CODIGO_NOME_DE_AGENTE_EM_USO) {
+            setErroDoServidorNoNome(`${t(NOME_DE_AGENTE_EM_USO)} ${t(RASCUNHO_SALVO_NOME_NAO_MUDOU)}`);
+            return;
+          }
           toast.error(res.message ?? `${t("Erro")}: ${res.error}`);
           return;
         }
+        // A tela passa a saber, sem esperar o refresh, que o rascunho está
+        // salvo: Publicar acende e Salvar apaga agora (#3951). Só chega aqui com
+        // `res.ok` — falha não acende nada.
+        setSalvo({
+          agentId: props.agent.id,
+          versionId: res.data!.version_id,
+          versionNumber: res.data!.version_number,
+          formulario: form,
+          payload: payloadQueSeraGravado(form),
+        });
         toast.success(`${t("Rascunho")} v${res.data!.version_number} ${t("salvo.")}`);
         router.refresh();
       } else {
@@ -592,10 +743,15 @@ export function AgentForm(props: Props) {
         }
         const res = await createMcpAgentAction(validated.data);
         if (!res.ok) {
+          // Mesmo tratamento do salvar: recusa de nome mora no campo (#3952).
+          if (res.error === CODIGO_NOME_DE_AGENTE_EM_USO) {
+            setErroDoServidorNoNome(t(NOME_DE_AGENTE_EM_USO));
+            return;
+          }
           toast.error(res.message ?? `${t("Erro")}: ${res.error}`);
           return;
         }
-        toast.success(t("Agent criado."));
+        toast.success(t("Agente criado."));
         router.push(`/app/ai/agents/${res.data!.agent_id}`);
       }
     } finally {
@@ -604,15 +760,16 @@ export function AgentForm(props: Props) {
   }
 
   async function handlePublish() {
-    if (!isEdit || !props.draft) return;
+    if (!isEdit || !rascunhoParaPublicar) return;
+    const alvo = rascunhoParaPublicar;
     setPublishing(true);
     try {
-      const res = await publishAgentAction(props.agent.id, props.draft.id);
+      const res = await publishAgentAction(props.agent.id, alvo.id);
       if (!res.ok) {
         toast.error(`${t("Falha ao publicar:")} ${res.error}`);
         return;
       }
-      toast.success(`v${props.draft.version_number} ${t("publicada e ativa.")}`);
+      toast.success(`v${alvo.version_number} ${t("publicada e ativa.")}`);
       setConfirmOpen(false);
       router.refresh();
     } finally {
@@ -621,7 +778,10 @@ export function AgentForm(props: Props) {
   }
 
   function handleReset() {
-    setForm(baseline);
+    // "Descartar" volta para o que está SALVO — que, logo depois de um
+    // salvamento e antes do refresh, é o rascunho desta sessão e não a prop
+    // antiga do servidor.
+    setForm(salvoDaqui?.formulario ?? baseline);
   }
 
   const disabled = readOnly || saving || publishing;
@@ -710,8 +870,8 @@ export function AgentForm(props: Props) {
               >
                 {publishing
                   ? t("Publicando…")
-                  : props.draft
-                    ? `${t("Publicar v")}${props.draft.version_number}`
+                  : rascunhoParaPublicar
+                    ? `${t("Publicar v")}${rascunhoParaPublicar.version_number}`
                     : t("Publicar")}
               </Button>
             </span>
@@ -821,13 +981,35 @@ export function AgentForm(props: Props) {
               <Input
                 id="name"
                 value={form.name}
-                onChange={(e) => patch({ name: e.target.value })}
+                onChange={(e) => {
+                  // Digitar é a resposta à recusa: o nome mudou, então a frase
+                  // "já existe" deixou de valer para o que está no campo.
+                  if (erroDoServidorNoNome) setErroDoServidorNoNome(null);
+                  patch({ name: e.target.value });
+                }}
                 disabled={disabled}
                 maxLength={120}
-                aria-invalid={!!validation.name}
+                aria-invalid={!!validation.name || !!erroDoServidorNoNome}
+                aria-describedby={erroDoServidorNoNome ? ID_DO_ERRO_DO_NOME : undefined}
               />
               {validation.name ? (
                 <p className="text-xs text-destructive">{validation.name}</p>
+              ) : null}
+              {/*
+                A recusa do SERVIDOR, embaixo do campo que a causou — e não no
+                toast do canto (#3952). `role="alert"` porque a frase aparece
+                depois de um envio: quem usa leitor de tela precisa ouvi-la sem
+                procurar na página.
+              */}
+              {erroDoServidorNoNome ? (
+                <p
+                  id={ID_DO_ERRO_DO_NOME}
+                  data-testid="erro-do-nome"
+                  role="alert"
+                  className="text-xs text-destructive"
+                >
+                  {erroDoServidorNoNome}
+                </p>
               ) : null}
             </div>
             <div className="space-y-1">
@@ -941,7 +1123,7 @@ export function AgentForm(props: Props) {
                   >
                     «{props.routerMembership.routerName}»
                   </Link>{" "}
-                  {t("— o campo de número abaixo não se aplica.")}
+                  {t("— a publicação usa o canal do roteador, sem número próprio neste especialista.")}
                 </p>
               </div>
             )}
@@ -977,13 +1159,14 @@ export function AgentForm(props: Props) {
                   ) : null}
                 </SelectContent>
               </Select>
+              <AvisoDoModoDeTeste aviso={avisoDoCanal} podeConfigurar={!readOnly} />
               {/*
                 NÃO é erro: é o estado normal de quem ainda não pareou o aparelho.
                 Antes, esta linha era vermelha e vinha de `validation`, que também
                 travava o botão de salvar — o dono de uma instalação nova escrevia
                 o prompt inteiro e não conseguia guardar nada.
               */}
-              {!form.channel_session_id ? (
+              {!form.channel_session_id && !props.routerMembership ? (
                 <p className="text-xs text-muted-foreground">
                   {props.channelSessions.length === 0 ? (
                     <>
@@ -1323,6 +1506,19 @@ export function AgentForm(props: Props) {
               disabled={disabled}
             />
           </Card>
+
+          {/* A FRASE que o cliente lê quando a conversa é passada para uma pessoa
+              (#3725; tela no #3816). Salva em `ai_agents.config.aviso_de_handoff`
+              — a chave que o `agentConfigPatchSchema` descartava, e por isso só se
+              configurava por SQL. Só em edição, como o cartão dos comandos do
+              celular: sem agente gravado não há id para o PATCH. */}
+          {isEdit && (
+            <FraseDoAviso
+              agentId={props.agent.id}
+              inicial={(props.agent.config ?? {}).aviso_de_handoff}
+              disabled={disabled}
+            />
+          )}
 
           {/* O OUTRO caminho para uma pessoa: o clima fechado
               (`ai.sentiment_alert`, em `workers/ai-sentiment-worker.ts`).

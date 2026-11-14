@@ -58,14 +58,37 @@ export function PipelinePageClient({
   funis: Array<{ id: string; name: string }>;
 }) {
   const t = useT();
-  const { data, isLoading, error, pulses, realtimeStatus, seguranca } = useBoard(pipelineId);
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const filters = useMemo(() => filtersFromParams(searchParams), [searchParams]);
+  const { data, isLoading, error, pulses, realtimeStatus, seguranca } = useBoard(
+    pipelineId,
+    searchParams.get("lead"),
+  );
+  /**
+   * ⚠️ O FILTRO PEDIDO VALE ANTES DE A URL CHEGAR NELE (upstream #3767).
+   *
+   * `router.replace` só muda o `useSearchParams` depois da ida ao servidor (o
+   * payload RSC). Lendo o filtro só da URL, o segundo clique feito nessa janela
+   * partia do filtro VELHO: desmarcar a etiqueta A e marcar a B virava "A e B",
+   * e o quadro ficava vazio. O filtro pedido vale até a URL mudar; quando ela
+   * muda (último pedido, ou navegação de fora), a URL manda.
+   */
+  const [pedido, setPedido] = useState<LeadFilters | null>(null);
+  const urlAtual = searchParams.toString();
+  const [urlAnterior, setUrlAnterior] = useState(urlAtual);
+  if (urlAtual !== urlAnterior) {
+    setUrlAnterior(urlAtual);
+    setPedido(null);
+  }
+  const filters = useMemo(
+    () => pedido ?? filtersFromParams(searchParams),
+    [pedido, searchParams],
+  );
   const setFilters = useCallback(
     (next: LeadFilters) => {
       const qs = filtersToParams(next);
+      setPedido(next);
       router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
     },
     [router, pathname],
@@ -263,6 +286,9 @@ export function PipelinePageClient({
           // #1751: o quadro é a lista que o diálogo confere ANTES de criar —
           // é ela que faz o aviso de negócio duplicado existir sem rede.
           leads={data.leads}
+          // #3038: os campos que a etapa exige são preenchidos no PRÓPRIO
+          // formulário — a lista sai do `settings` que o quadro já tem em mãos.
+          settings={data.pipeline.settings}
         />
       )}
       <FilterBar

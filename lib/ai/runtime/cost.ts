@@ -2,7 +2,7 @@
  * Cost computation for ai_agent_runs (S-13.08).
  *
  * Looks up the curated `ai_models` catalog (Spec 10 §2.2) and converts token
- * usage into cents, rounded up. Cached in-memory for 5 min — stale catalog data
+ * usage into cents, FRACIONADO (sem arredondar). Cached in-memory for 5 min — stale catalog data
  * never crashes; missing entries simply mean cost=0 for that run.
  *
  * IMPORTANT: distinct from `lib/ai/cost.ts` which still serves the legacy
@@ -51,7 +51,7 @@ export interface ComputeCostInput {
   outputTokens?: number;
 }
 
-/** Returns cost in cents (rounded up). 0 if model not in catalog. */
+/** Returns cost in cents (fracionado). 0 if model not in catalog. */
 export async function computeCostCents(input: ComputeCostInput): Promise<number> {
   const pricing = await loadPricing();
   const row = pricing.get(key(input.provider, input.model));
@@ -61,7 +61,14 @@ export async function computeCostCents(input: ComputeCostInput): Promise<number>
   const cents =
     ((input.inputTokens ?? 0) * inputRate) / 1_000_000 +
     ((input.outputTokens ?? 0) * outputRate) / 1_000_000;
-  return Math.ceil(cents);
+  // FRACIONADO, nunca `Math.ceil` por chamada — o mesmo contrato de
+  // `computeCost` (`lib/ai/cost.ts`), que já deixou de arredondar. O ceil
+  // "errava cobrando a mais" e, numa chamada de ~600 tokens num modelo barato
+  // (≈0,08¢), gravava 1¢: 12× o real em cada turno. Medido numa instalação
+  // real em 14 dias: 1.122¢ registrados contra ~103¢ de custo. E o teto de
+  // gasto (`cost_budget_cents`, em agent.ts) compara com ESTE número. A
+  // coluna `ai_agent_runs.cost_cents` é `numeric(10,4)`.
+  return cents;
 }
 
 /** Test-only: drop the in-memory pricing cache. */

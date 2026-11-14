@@ -28,6 +28,8 @@ import { z } from 'zod';
 import type pg from 'pg';
 
 import { expectativaDeAtendimento } from '@/lib/escalacao/disponibilidade';
+import { camposDoCardDoContatoNoBanco } from '@/lib/leads/campos-do-resumo-da-passagem';
+import { EVENTO_AVISO_HANDOFF, MARCA_EPISODIO_HANDOFF, MARCA_SOLICITACAO_HANDOFF } from '@/lib/escalacao/aviso-de-handoff';
 import {
   CHAVE_DO_HANDOFF_TECNICO,
   derivacaoPendenteDoGatilho,
@@ -192,6 +194,18 @@ export async function performHumanHandoff(
      * sem marca, o handoff continua `infinity`.
      */
     derivacaoPendente?: { messageId: string };
+    /**
+     * Os campos que um fluxo DETERMINÍSTICO coletou no turno (pergunta de um
+     * campo por turno), em pares rótulo/valor — nome, exame, data…
+     *
+     * Presente E `passagem` ausente = o handoff grava sozinho a linha de
+     * `passagens_de_atendimento` com motivo canônico `verificacao_manual`, e os
+     * campos chegam a quem assume SOB `fn_can_view_conversation` — nunca no
+     * corpo da Central, que a rota entrega a qualquer `agent`. Com `passagem`
+     * declarada (o caminho da ferramenta do modelo), este campo é ignorado: o
+     * briefing do chamador já carrega o que o turno tem.
+     */
+    camposColetados?: Readonly<Record<string, string>>;
     log: Logger;
   },
 ): Promise<void> {
@@ -222,7 +236,7 @@ export async function performHumanHandoff(
     : "{}";
 
   await guardServiceEffect();
-  await db.query(
+  const conversaSilenciada = await db.query<{ aviso_episodio: string }>(
     `update conversations
         set status = case when status = 'ai_handling' then 'pending' else status end,
             bot_silenced_until = $3,
@@ -232,13 +246,21 @@ export async function performHumanHandoff(
             -- das mensagens com que a reação compara (handoff-tecnico.ts).
             metadata = (coalesce(metadata, '{}'::jsonb) - $5::text)
                        || case when $6::jsonb = '{}'::jsonb then '{}'::jsonb
-                               else jsonb_set($6::jsonb, array[$5::text, 'marcado_em'], to_jsonb(now())) end,
+                               else jsonb_set($6::jsonb, array[$5::text, 'marcado_em'], to_jsonb(now())) end
+                       || jsonb_build_object($7::text,
+                            case when bot_silenced_until > now()
+                                      and metadata->>$7::text ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+                                 then metadata->>$7::text else gen_random_uuid()::text end),
             active_ai_agent_id = null,
             active_intent = null,
             active_agent_set_at = null
-      where organization_id = $1 and id = $2`,
-    [ids.tenantId, ids.conversationId, SILENCE_INFINITY, opts.reason, CHAVE_DO_HANDOFF_TECNICO, marcaDaDerivacao],
+      where organization_id = $1 and id = $2
+      returning metadata->>$7::text as aviso_episodio`,
+    [ids.tenantId, ids.conversationId, SILENCE_INFINITY, opts.reason, CHAVE_DO_HANDOFF_TECNICO, marcaDaDerivacao, MARCA_EPISODIO_HANDOFF],
   );
+  // O UPDATE trava a linha: chamadas concorrentes no mesmo silêncio reutilizam
+  // o UUID. Depois de devolver ao automático (silêncio limpo), nasce outro episódio.
+  const episodioDoAviso = conversaSilenciada.rows[0]?.aviso_episodio ?? null;
 
   // (c) Cancela os crons PENDENTES do lead (follow-ups agendados — F3-01/02). Idempotente,
   // via o cancel compartilhado (mesma garantia que o opt-out irrevogável usa — F4-07).
@@ -274,6 +296,38 @@ export async function performHumanHandoff(
     }
   }
 
+  // (c3) SEM passagem declarada, mas com DADOS COLETADOS: o fluxo
+  // determinístico que pergunta campo a campo encerra em handoff, e os campos
+  // perguntados precisam chegar a quem assume. Chegam na PASSAGEM — o lugar
+  // que a rota da Central lê sob `fn_can_view_conversation` —, e nunca no
+  // corpo do aviso, que a mesma rota entrega a QUALQUER `agent`. O motivo é o
+  // canônico `verificacao_manual`: o cliente não pediu uma pessoa, um fluxo
+  // coletou dados e precisa de verificação humana — o rótulo tem de dizer o
+  // que houve, porque é a primeira frase de quem abre a conversa.
+  if (opts.passagem === undefined && temCamposColetados(opts.camposColetados)) {
+    await guardServiceEffect();
+    const briefing = montarBriefingDaPassagem({
+      checkpoint: null,
+      camposColetados: opts.camposColetados,
+      motivo: { codigo: 'verificacao_manual' },
+    });
+    const gravou = await registrarPassagem(db, {
+      organizationId: ids.tenantId,
+      contactId: ids.leadId,
+      conversationId: ids.conversationId,
+      motor: 'engine',
+      origem: 'runtime_nativo',
+      motivoCodigo: 'verificacao_manual',
+      briefing,
+    });
+    // Mesma disciplina do (c2): a passagem já aconteceu, o erro vira log.
+    if (!gravou.gravada) {
+      opts.log.warn('passagem com dados coletados não registrada — o aviso sai, os campos não', {
+        erro: gravou.erro,
+      });
+    }
+  }
+
   // (d) O AVISO na Central. Dois consertos no mesmo statement:
   //
   //  1. **`ref_kind` é `conversation`, não `contact`.** O dedup por CONTATO
@@ -298,10 +352,34 @@ export async function performHumanHandoff(
           set body = coalesce(i.body, '') || chr(10) || chr(10) || $3, severity = 'critical'
          from alvo where i.id = alvo.id
        returning i.id
+     ), criado as (
+       insert into agent_inbox_items (organization_id, kind, severity, title, body, ref_kind, ref_id)
+       select $1, 'handoff', 'critical', $2, $3, 'conversation', $4
+        where not exists (select 1 from alvo)
+       returning id
+     ), evento as (
+       -- Central e solicitação saem no MESMO commit. Sem opt-in, só a Central.
+       insert into event_log (id, organization_id, event_type, entity_kind, entity_id, payload, metadata)
+       select $5::uuid, $1, $6, 'conversation', $4,
+              jsonb_build_object('central_id', central.id), '{"source":"human_handoff"}'::jsonb
+         from (select id from adendo union all select id from criado) central
+        where $5::uuid is not null
+          and exists (select 1 from config_aviso_de_caso where organization_id = $1 and ligado)
+          -- Opção própria das transferências (ligada por padrão): a mesma régua de
+          -- avisoDeTransferenciaLigado — só o booleano false desliga.
+          and exists (select 1 from organizations where id = $1
+                        and (settings->'crm'->'avisar_transferencia_no_whatsapp') is distinct from 'false'::jsonb)
+          and exists (select 1 from conversations where organization_id = $1 and id = $4
+                        and metadata->>$8::text = $5::text
+                        and metadata->>$7::text is distinct from $5::text)
+       on conflict (id) do nothing returning id
      )
-     insert into agent_inbox_items (organization_id, kind, severity, title, body, ref_kind, ref_id)
-     select $1, 'handoff', 'critical', $2, $3, 'conversation', $4
-      where not exists (select 1 from alvo)`,
+     -- A poda normal de event_log não pode permitir outro aviso no mesmo episódio.
+     update conversations set metadata = coalesce(metadata, '{}'::jsonb)
+       || jsonb_build_object($7::text, $5::text)
+      where organization_id = $1 and id = $4
+        and metadata->>$8::text = $5::text
+        and exists (select 1 from evento)`,
     [
       ids.tenantId,
       // No idioma da ORGANIZAÇÃO, como o corpo: o título da Central sai como foi
@@ -313,6 +391,10 @@ export async function performHumanHandoff(
         ),
       await corpoDaCentral(db, ids.tenantId, opts),
       ids.conversationId,
+      episodioDoAviso,
+      EVENTO_AVISO_HANDOFF,
+      MARCA_SOLICITACAO_HANDOFF,
+      MARCA_EPISODIO_HANDOFF,
     ],
   );
 
@@ -355,6 +437,17 @@ export async function performHumanHandoff(
     motivo_codigo: opts.passagem?.motivoCodigo ?? 'nao_declarado',
     origem: opts.passagem?.origem ?? 'nao_declarada',
   });
+}
+
+/**
+ * Há algum campo realmente preenchido? Um objeto `{ nome: "  " }` é coleta sem
+ * resultado — e sem resultado não há passagem a gravar: o caminho é o legado,
+ * byte a byte, que `tests/invariants/escalacao-ciclo-humano.test.ts` (arquivo
+ * congelado) chama com a assinatura antiga.
+ */
+function temCamposColetados(campos: Readonly<Record<string, string>> | undefined): boolean {
+  if (campos === undefined) return false;
+  return Object.values(campos).some((v) => typeof v === 'string' && v.trim() !== '');
 }
 
 /**
@@ -443,6 +536,7 @@ async function corpoDaCentral(
  * tentou, nem o que o cliente pediu com as palavras dele.
  */
 export const requestHumanHandoffInputSchema = z.strictObject({
+  motivo_codigo: z.enum(['requested_human', 'critical_stage']).optional(),
   reason: z.string().min(1).max(500).optional(),
   por_que: z.string().min(1).max(500).optional(),
   o_que_tentei: z
@@ -458,7 +552,8 @@ export const requestHumanHandoffInputSchema = z.strictObject({
 });
 
 const PAYLOAD_TEACHING =
-  'Campos aceitos: por_que (por que você está passando, em uma frase), o_que_tentei (lista curta ' +
+  'Campos aceitos: motivo_codigo (requested_human para pedido de uma pessoa; critical_stage para ' +
+  'uma etapa do atendimento que exige finalização humana), por_que (por que você está passando, em uma frase), o_que_tentei (lista curta ' +
   'do que você já tentou, com o desfecho de cada um), cliente_quer (o que a pessoa está pedindo, ' +
   'nas palavras dela). `reason` ainda é aceito como sinônimo de por_que. Nada além disso. Lead, ' +
   'organização e conversa vêm do runtime, nunca do payload da tool.';
@@ -517,6 +612,16 @@ export async function applyRequestHumanHandoff(
   // os dois está declarando o mesmo campo duas vezes.
   const declarado = parsed.data;
   const porQue = declarado.por_que ?? declarado.reason ?? null;
+  // Ausente = comportamento legado. O código classifica a passagem, sem
+  // escolher destino nem alterar a autoridade da ferramenta.
+  const motivoCodigo = declarado.motivo_codigo ?? 'requested_human';
+  // #4303 — OS CAMPOS DO CARD NO RESUMO. Aqui há TURNO, então o card é o do
+  // atendimento: o negócio ABERTO mais recente do contato (`ids.leadId` é
+  // `contacts.id` — ver `HandoffIds`), UM card só, nunca a soma de dois. O
+  // contato com dois cards abertos é caso real, e somar valores de duas vendas
+  // inventaria um total que ninguém digitou. Leitura que falha devolve `{}` —
+  // o resumo sai como o de hoje, nunca uma passagem a menos.
+  const camposDoCard = await camposDoCardDoContatoNoBanco(db, ids.tenantId, ids.leadId);
   const briefing = montarBriefingDaPassagem({
     checkpoint: opts.contextoDoTurno?.checkpoint ?? null,
     declaradoPeloModelo: {
@@ -529,7 +634,8 @@ export async function applyRequestHumanHandoff(
     ...(opts.contextoDoTurno?.declaracaoDoTurno !== undefined
       ? { declaracaoDoTurno: opts.contextoDoTurno.declaracaoDoTurno }
       : {}),
-    motivo: { codigo: 'requested_human', texto: porQue },
+    ...(Object.keys(camposDoCard).length > 0 ? { camposColetados: camposDoCard } : {}),
+    motivo: { codigo: motivoCodigo, texto: porQue },
   });
 
   // #2210: o handoff só carrega a marca quando a causa é a falta de texto —
@@ -543,9 +649,9 @@ export async function applyRequestHumanHandoff(
     : null;
 
   await performHumanHandoff(db, ids, {
-    reason: porQue ?? 'requested_human',
+    reason: porQue ?? motivoCodigo,
     conversationSummary: briefing.body,
-    passagem: { origem: 'ferramenta_do_modelo', motivoCodigo: 'requested_human', briefing },
+    passagem: { origem: 'ferramenta_do_modelo', motivoCodigo, briefing },
     ...(opts.avisoAoLead !== undefined ? { avisoAoLead: opts.avisoAoLead } : {}),
     ...(derivacaoPendente !== null ? { derivacaoPendente } : {}),
     log: opts.log,

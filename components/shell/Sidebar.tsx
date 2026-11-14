@@ -10,11 +10,13 @@ import { useAuth } from "@/hooks/auth/AuthProvider";
 import { ConnectionHealthDot } from "@/components/connections/ConnectionHealthDot";
 import { ContadorDeCasos } from "@/components/shell/ContadorDeCasos";
 import { ContadorDaFila } from "@/components/shell/ContadorDaFila";
+import { ContadorDeTarefas } from "@/components/shell/ContadorDeTarefas";
 import { VersionFooter } from "@/components/shell/VersionFooter";
 import { LogotipoDoProduto, SimboloDoProduto } from "@/components/branding/MarcaDoProduto";
 import { marcaEhADoProduto } from "@/lib/branding";
 import { useMarcaDaInstalacao } from "@/lib/branding/contexto";
 import { GRUPO_NO_RODAPE, sidebarGroups } from "@/lib/navigation/registry";
+import { usePrefetchPorIntencao } from "@/hooks/navigation/prefetchPorIntencao";
 
 const CHAVE_GRUPOS_FECHADOS = "sidebar-grupos-fechados";
 
@@ -43,6 +45,13 @@ export function SidebarContent({
   const pathname = usePathname();
   const [isPending, startTransition] = useTransition();
   const { user, activeOrg } = useAuth();
+  /**
+   * O menu não prefetcha sozinho (#3170): um render RSC por link do menu (19
+   * destinos × as duas instâncias, lateral e móvel), e eles disputam o servidor
+   * com o render que o clique pediu. O prefetch passa a ser
+   * por intenção (ponteiro/foco) — ver `hooks/navigation/prefetchPorIntencao.ts`.
+   */
+  const intencao = usePrefetchPorIntencao();
   const todos = sidebarGroups(
     user.is_platform_admin && !user.support,
     activeOrg?.role ?? null,
@@ -332,6 +341,7 @@ export function SidebarContent({
                       <li key={item.href}>
                         <Link
                           href={item.href}
+                          {...intencao(item.href)}
                           title={collapsed ? t(item.label) : undefined}
                           aria-current={isActive ? "page" : undefined}
                           onClick={onNavigate}
@@ -352,6 +362,9 @@ export function SidebarContent({
                           )}
                           {item.contador === "casos" && <ContadorDeCasos compacto={collapsed} />}
                           {item.contador === "fila" && <ContadorDaFila compacto={collapsed} />}
+                          {item.contador === "tarefas" && (
+                            <ContadorDeTarefas compacto={collapsed} />
+                          )}
                         </Link>
                       </li>
                     );
@@ -360,6 +373,7 @@ export function SidebarContent({
                     <li>
                       <Link
                         href={group.hub.href}
+                        {...intencao(group.hub.href)}
                         title={collapsed ? t(group.hub.label) : undefined}
                         aria-current={pathname === group.hub.href ? "page" : undefined}
                         onClick={onNavigate}
@@ -386,6 +400,7 @@ export function SidebarContent({
         {rodape && (
           <Link
             href={rodape.href}
+            {...intencao(rodape.href)}
             title={collapsed ? t(rodape.label) : undefined}
             aria-current={pathname.startsWith(rodape.href) ? "page" : undefined}
             onClick={onNavigate}
@@ -486,13 +501,18 @@ export function Sidebar({ collapsed }: { collapsed: boolean }) {
         // alcance. `dvh` acompanha a barra do navegador aparecendo e sumindo.
         // Princípio 2 de `docs/design-system/screen-flow/07-responsive-strategy.md`.
         //
+        // O topo e a altura descontam `--faixas-de-cima` (`FaixasDeCima`): as
+        // faixas grudam em `top-0` com z-50, e uma barra em `top-0` passaria
+        // por baixo delas ao rolar — e com `h-dvh` cheio o documento mediria a
+        // tela mais a faixa.
+        //
         // `shrink-0` porque item de flex encolhe por padrão, e uma barra de 60
         // espremida para caber é o mesmo defeito por outro caminho.
         //
         // `duration-base` em vez do `duration-200` literal: 200ms é o mesmo
         // número, mas vindo de `--duration-base`. A Lei de movimento fecha a
         // tabela de durações, e número solto é o que a faz apodrecer.
-        "sticky top-0 z-30 flex h-dvh shrink-0 flex-col border-r bg-card transition-[width] duration-base",
+        "sticky top-[var(--faixas-de-cima,0px)] z-30 flex h-[calc(100dvh-var(--faixas-de-cima,0px))] shrink-0 flex-col border-r bg-card transition-[width] duration-base",
         collapsed ? "w-16" : "w-60",
       )}
     >

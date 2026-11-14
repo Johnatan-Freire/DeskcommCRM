@@ -25,8 +25,10 @@ import {
 } from "@/lib/leads/next-action";
 import type { LeadCandidate } from "@/lib/leads/active-lead";
 import { anexarDadosDoContato, type LinhaDoContatoNoQuadro } from "@/lib/kanban/dados-do-contato";
+import { diasDeRecorte, recortaEncerradosAntigos } from "@/lib/kanban/recorte-de-encerrados";
 import { anexarTarefasAosNegocios, type LinhaDaTarefaNoQuadro } from "@/lib/kanban/tarefas-no-quadro";
 import { buscaEmLotes } from "@/lib/supabase/em-lotes";
+import { lerPaginado } from "@/lib/supabase/pagina";
 import { createClient } from "@/lib/supabase/server";
 import type { BoardData, Pipeline, Stage } from "@/lib/kanban/types";
 import type { Lead } from "@/lib/types/leads";
@@ -474,7 +476,7 @@ async function withTarefas(
   };
 }
 
-export async function GET(_req: NextRequest, ctx: RouteCtx): Promise<Response> {
+export async function GET(req: NextRequest, ctx: RouteCtx): Promise<Response> {
   const requestId = randomUUID();
   const { id: pipelineId } = await ctx.params;
 
@@ -489,35 +491,85 @@ export async function GET(_req: NextRequest, ctx: RouteCtx): Promise<Response> {
   const authUser = await loadAuthUser();
   const t = (texto: string) => traduzir(texto, authUser?.idioma ?? "pt-BR");
 
-  const [
-    { data: pipeline, error: pipelineErr },
-    { data: stages, error: stagesErr },
-    { data: leads, error: leadsErr },
-  ] = await Promise.all([
-    supabase.from("crm_pipelines").select("*").eq("id", pipelineId).maybeSingle(),
+  // O funil vem PRIMEIRO, sozinho: é desta linha — a única que a RLS do caller
+  // deixou passar — que sai a organização do quadro (#4321). Ela é a org da
+  // SESSÃO, nunca um id do corpo da requisição: um funil de outra organização
+  // nem chega a existir para quem pediu.
+  const { data: pipeline, error: pipelineErr } = await supabase
+    .from("crm_pipelines")
+    .select("*")
+    .eq("id", pipelineId)
+    .maybeSingle();
+  if (pipelineErr) return fail("internal_error", pipelineErr.message, 500, { requestId });
+  if (!pipeline) return fail("resource_not_found", t("Pipeline não encontrado."), 404, { requestId });
+
+  const organizationId = (pipeline as Pipeline).organization_id;
+
+  const [{ data: stages, error: stagesErr }, leituraDosLeads] = await Promise.all([
     supabase
       .from("crm_stages")
       .select("*")
       .eq("pipeline_id", pipelineId)
       .eq("is_archived", false)
       .order("position"),
-    supabase
-      .from("crm_leads")
-      .select("*")
-      .eq("pipeline_id", pipelineId)
-      .neq("status", "archived")
-      .order("position_in_stage"),
+    // ─── A LEITURA PAGINADA (#4321) ────────────────────────────────────────
+    // O PostgREST corta TODA resposta em `max_rows` (1000, `supabase/config.toml`)
+    // sem erro: sem `.range()` o quadro de um funil grande chegava com um pedaço
+    // arbitrário e a tela dizia que era o funil inteiro. `lerPaginado` lê por
+    // páginas e prova o fim pelo `count` exato da primeira — quando não consegue
+    // provar (mais páginas que o teto), devolve `truncado` e a resposta AVISA.
+    //
+    // O `organization_id` não é redundância com a RLS: é a PRIMEIRA coluna de
+    // `idx_crm_leads_org_pipeline_position_id` (`supabase/baseline.sql`). Sem
+    // ele o índice não serve e a consulta varre o funil inteiro filtrando a
+    // organização linha a linha.
+    lerPaginado<Lead>((inicio, fim, contar) =>
+      supabase
+        .from("crm_leads")
+        // Fork: `*`, como antes — a lista de colunas do upstream (#4321) nomeia
+        // colunas que este schema não tem. A paginação e o filtro por organização
+        // são o conserto; o recorte de colunas fica para quando o schema alinhar.
+        .select<string, Lead>("*", contar ? { count: "exact" } : undefined)
+        .eq("organization_id", organizationId)
+        .eq("pipeline_id", pipelineId)
+        .neq("status", "archived")
+        .order("position_in_stage")
+        .order("id")
+        .range(inicio, fim),
+    ),
   ]);
 
-  if (pipelineErr) return fail("internal_error", pipelineErr.message, 500, { requestId });
   if (stagesErr) return fail("internal_error", stagesErr.message, 500, { requestId });
-  if (leadsErr) return fail("internal_error", leadsErr.message, 500, { requestId });
-  if (!pipeline) return fail("resource_not_found", t("Pipeline não encontrado."), 404, { requestId });
+  if (leituraDosLeads.erro) {
+    return fail("internal_error", leituraDosLeads.erro, 500, { requestId });
+  }
+  const leads = leituraDosLeads.linhas;
+
+  // ─── O RECORTE DE ENCERRADOS ANTIGOS (#2995) ────────────────────────────
+  // A opção é POR FUNIL (`crm_pipelines.settings.ocultar_encerrados_dias`,
+  // lida do pipeline que a consulta acima já trouxe) e vem desligada: chave
+  // ausente devolve `null` e o quadro segue trazendo tudo, como sempre trouxe.
+  //
+  // Em MEMÓRIA, sobre a lista já lida: o quadro não pagina (ordena
+  // tudo por `position_in_stage` numa leitura só), então filtrar depois de ler
+  // não perde nada e evita uma segunda ida ao banco só para saber a opção antes
+  // de buscar. É pergunta de EXIBIÇÃO: a linha continua no banco com o
+  // histórico intacto, e desligar a opção a traz de volta inteira. Nada aqui
+  // apaga, arquiva ou mexe em `status`.
+  //
+  // O `?lead=` é o negócio que o link pediu (o dossiê abre por ele): fica mesmo
+  // antigo.
+  const leadsDoQuadro = recortaEncerradosAntigos(
+    (leads ?? []) as Lead[],
+    diasDeRecorte((pipeline as Pipeline).settings),
+    new Date(),
+    req.nextUrl.searchParams.get("lead"),
+  );
 
   const leadsWithOwner = await withOwnerAgents(
     supabase,
     (pipeline as Pipeline).organization_id,
-    (leads ?? []) as Lead[],
+    leadsDoQuadro,
   );
   if (leadsWithOwner.error) {
     return fail("internal_error", leadsWithOwner.error, 500, { requestId });
@@ -585,7 +637,15 @@ export async function GET(_req: NextRequest, ctx: RouteCtx): Promise<Response> {
     pipeline: pipeline as Pipeline,
     stages: (stages ?? []) as Stage[],
     leads: leadsComMarcadores.leads,
+    // O AVISO anda com o corpo (#4321): quando a leitura não conseguiu provar o
+    // fim, quem desenha o quadro precisa saber que está vendo um recorte — o
+    // resto do contrato fica igual. Ausente quando o fim foi provado, então o
+    // quadro pequeno responde byte a byte o que respondia antes.
+    ...(leituraDosLeads.truncado ? { truncado: true as const } : {}),
   };
 
-  return ok(board, { requestId });
+  return ok(board, {
+    requestId,
+    headers: leituraDosLeads.truncado ? { "X-Quadro-Truncado": "1" } : undefined,
+  });
 }

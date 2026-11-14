@@ -56,10 +56,12 @@ import {
   envioDeConversaLigado,
   FRASE_ENVIO_DESLIGADO,
 } from "@/lib/channels/envio-de-saida";
+import { previaDaMensagem } from "@/lib/messaging/previa-da-mensagem";
 import { nomeDoContato } from "@/lib/contacts/rotulo-do-contato";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { Message } from "@/lib/types/messaging";
 import { camposAoConfirmarEnvio, maiorAck } from "@/lib/messaging/progresso-da-entrega";
+import { assertUrlDeMidiaSegura } from "@/lib/messaging/media/url-de-midia-externa";
 
 type SB = SupabaseClient;
 
@@ -216,7 +218,7 @@ export function origemDaMensagem(actor: Actor): "user" | "ai" | "automation" | "
 }
 
 const MSG_COLS =
-  "id, organization_id, conversation_id, channel_session_id, contact_id, external_id, type, direction, status, ack, error_code, error_message, body, media_url, media_mime, media_size_bytes, media_storage_path, media_derived_text, media_derived_status, sent_via, sent_by_user_id, sent_on_behalf_of_user_id, sent_at, delivered_at, read_at, metadata, edited_at, revoked_at, reply_to_message_id, created_at";
+  "id, organization_id, conversation_id, channel_session_id, contact_id, external_id, type, direction, status, ack, error_code, error_message, body, media_url, media_mime, media_size_bytes, media_storage_path, media_derived_text, media_derived_status, sent_via, sent_by_user_id, sent_on_behalf_of_user_id, sent_at, delivered_at, read_at, metadata, edited_at, revoked_at, reply_to_message_id, created_at, updated_at";
 
 /**
  * `Actor.type` → o vocabulário de `messages.sent_via` (o CHECK da coluna:
@@ -277,15 +279,34 @@ function apiTokenIdDoActor(actor: Actor): string | undefined {
 interface MsgCursorPayload {
   sent_at: string;
   id: string;
+  /**
+   * O desempate do meio (ver a ordem em `listMessagesHandler`). Opcional porque
+   * um cursor emitido antes dele — numa aba aberta durante a atualização — não
+   * o traz, e tem de continuar paginando como antes em vez de virar 400.
+   */
+  created_at?: string;
 }
 
 function encodeMsgCursor(p: MsgCursorPayload): string {
   return Buffer.from(JSON.stringify(p), "utf8").toString("base64url");
 }
+/**
+ * Os valores do cursor entram por interpolação no `.or()` do PostgREST. Os
+ * filtros de organização e de conversa são parâmetros separados (somados com
+ * AND), então um cursor forjado não sai da conversa — mas vírgula ou parêntese
+ * ali reescreveria o filtro de dentro dela. Só passa o FORMATO que o servidor
+ * emite: UUID e instante ISO-8601.
+ */
+const UUID_DO_CURSOR = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const INSTANTE_DO_CURSOR = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,6})?(Z|[+-]\d{2}:\d{2})$/;
+
 function decodeMsgCursor(raw: string): MsgCursorPayload | null {
   try {
     const parsed = JSON.parse(Buffer.from(raw, "base64url").toString("utf8")) as MsgCursorPayload;
     if (typeof parsed.id !== "string" || typeof parsed.sent_at !== "string") return null;
+    if (parsed.created_at !== undefined && typeof parsed.created_at !== "string") return null;
+    if (!UUID_DO_CURSOR.test(parsed.id) || !INSTANTE_DO_CURSOR.test(parsed.sent_at)) return null;
+    if (parsed.created_at !== undefined && !INSTANTE_DO_CURSOR.test(parsed.created_at)) return null;
     return parsed;
   } catch {
     return null;
@@ -327,6 +348,16 @@ export async function listMessagesHandler(
     .eq("conversation_id", conversationId)
     .eq("organization_id", ctx.organization_id)
     .order("sent_at", { ascending: false })
+    // DESEMPATE PELA CHEGADA, não pelo id.
+    //
+    // `sent_at` vem do canal com precisão de SEGUNDO (a API oficial da Meta manda
+    // `timestamp` em segundos). Quem manda 3 fotos de uma vez gera 3 mensagens no
+    // mesmo `sent_at`, e o `id` é `uuid_generate_v4()` — sorteado. Desempatar por
+    // ele punha as fotos em ordem aleatória: medido numa instalação real em
+    // 09/11/2026, Foto 1-2-3 e PDF 1-2-3 apareceram 3-2-1. `created_at` é o
+    // instante (com microssegundos) em que cada uma foi gravada, na ordem em que
+    // o canal as entregou. O `id` fica por último, só para a ordem ser total.
+    .order("created_at", { ascending: false })
     .order("id", { ascending: false })
     .limit(q.limit + 1);
 
@@ -341,7 +372,14 @@ export async function listMessagesHandler(
         traduzir("Cursor inválido.", ctx.idioma ?? "pt-BR"),
       );
     }
-    query = query.or(`sent_at.lt.${c.sent_at},and(sent_at.eq.${c.sent_at},id.lt.${c.id})`);
+    query = query.or(
+      c.created_at
+        ? `sent_at.lt.${c.sent_at},` +
+            `and(sent_at.eq.${c.sent_at},created_at.lt.${c.created_at}),` +
+            `and(sent_at.eq.${c.sent_at},created_at.eq.${c.created_at},id.lt.${c.id})`
+        : // Cursor anterior ao desempate pela chegada: segue o critério antigo.
+          `sent_at.lt.${c.sent_at},and(sent_at.eq.${c.sent_at},id.lt.${c.id})`,
+    );
   }
 
   const { data, error } = await query;
@@ -357,7 +395,9 @@ export async function listMessagesHandler(
   // sai o cursor, porque a próxima página é a que vem ANTES no tempo.
   const oldest = page[page.length - 1];
   const cursor =
-    hasMore && oldest ? encodeMsgCursor({ sent_at: oldest.sent_at, id: oldest.id }) : null;
+    hasMore && oldest
+      ? encodeMsgCursor({ sent_at: oldest.sent_at, created_at: oldest.created_at, id: oldest.id })
+      : null;
 
   // A RESPOSTA continua cronológica (antigo → novo), igual a antes: o consumidor
   // renderiza de cima para baixo sem mudar nada. O que mudou foi QUAIS mensagens
@@ -369,15 +409,14 @@ export async function listMessagesHandler(
 // send
 // ---------------------------------------------------------------------------
 
-function previewFrom(input: {
+export function previewFrom(input: {
   body?: string;
   media_url?: string;
   media_storage_path?: string;
   type?: string;
 }): string {
-  if (input.body) return input.body.slice(0, 280);
-  if (input.media_url || input.media_storage_path) return `[${input.type ?? "media"}]`;
-  return "";
+  if (!input.body && !input.media_url && !input.media_storage_path) return "";
+  return previaDaMensagem(input.body ?? null, input.type ?? "media");
 }
 
 /**
@@ -522,6 +561,22 @@ export async function sendMessageHandler(
       ctx.requestId,
       "media_storage_path fora da conversa.",
     );
+  }
+
+  // Só `media_url` (sem `media_storage_path`) é baixada pelo gateway: é esse o
+  // envio que precisa da guarda anti-SSRF, e antes de a linha existir.
+  if (input.media_url && !input.media_storage_path) {
+    try {
+      await assertUrlDeMidiaSegura(input.media_url);
+    } catch (erro) {
+      throw new ApiError(
+        422,
+        "unsafe_media_url",
+        { motivo: erro instanceof Error ? erro.message : "unsafe_url" },
+        ctx.requestId,
+        "media_url recusada: o endereço não pode ser baixado pelo servidor.",
+      );
+    }
   }
 
   let outboundBody = input.body ?? null;

@@ -8,6 +8,7 @@ import { safeNext } from "@/lib/auth/safe-next";
 import { createClient } from "@/lib/supabase/server";
 import { audit } from "@/lib/audit";
 import { cookieSecure } from "@/lib/supabase/cookie-secure";
+import { mfaBloqueadoPorFalhas, registrarFalhaDeMfa } from "@/lib/auth/rate-limit";
 
 export type VerifyMfaResult =
   | { ok: false; error: "mfa_invalid" }
@@ -51,7 +52,7 @@ export async function verifyMfa(code: string, next?: string): Promise<VerifyMfaR
     const parsed = parseInt(raw, 10);
     if (!Number.isNaN(parsed)) attempts = parsed;
   }
-  if (attempts >= MAX_ATTEMPTS) {
+  if (attempts >= MAX_ATTEMPTS || (await mfaBloqueadoPorFalhas(user.id))) {
     return { ok: false, error: "mfa_locked", retry_in_seconds: ATTEMPT_TTL_SECONDS };
   }
 
@@ -74,6 +75,7 @@ export async function verifyMfa(code: string, next?: string): Promise<VerifyMfaR
   });
 
   if (verifyErr) {
+    await registrarFalhaDeMfa(user.id);
     const newAttempts = attempts + 1;
     store.set(ATTEMPT_COOKIE, String(newAttempts), {
       httpOnly: true,

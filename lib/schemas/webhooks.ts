@@ -36,6 +36,13 @@ export const ENTIDADE_ESPERADA_POR_GATILHO = {
   "message.received": "message",
   "lead.tag_added": "crm_lead",
   "contact.tag_added": "contact",
+  // O contato GANHOU telefone (#2812): a ficha que estava sem número passa a ter
+  // um. É o gatilho que faltava para a operação que só consegue chamar o cliente
+  // no WhatsApp depois que ele informa o número — sem ele, a única saída era o
+  // operador fazer à mão. A entidade é o CONTATO (é dele o dado que mudou), como
+  // os irmãos `contact.tag_added` e `contact.birthday`. O emissor vive em
+  // `app/api/v1/contacts/_handler.ts`, depois do UPDATE que grava o número.
+  "contact.phone_added": "contact",
   // O aniversário nasce do cron `contact-birthdays`, e não de uma ação de
   // alguém: a entidade que ele traz é o próprio contato que faz aniversário.
   "contact.birthday": "contact",
@@ -130,6 +137,16 @@ export const updateWebhookSourceSchema = createWebhookSourceSchema.partial().ext
   name: z.string().trim().min(1).max(120).optional(),
   is_active: z.boolean().optional(),
   authorize_ai_on_capture: z.boolean().optional(),
+  /**
+   * A opção do #2316: quando o `external_id` já existe, ATUALIZAR o card da
+   * MESMA fonte em vez de descartar o envio como reenvio.
+   *
+   * Só entra no PATCH — criar fonte com ela ligada não existe, porque o
+   * segredo que a habilita é da mesma tela e vem depois. Nasce DESLIGADA por
+   * DEFAULT na coluna (migration 0683): quem nunca mexer aqui segue exatamente
+   * como antes do #2316, sem a integração poder reescrever edição manual.
+   */
+  update_existing_lead_on_capture: z.boolean().optional(),
 });
 
 export const createAutomationRuleSchema = z

@@ -16,6 +16,7 @@ import { AttachmentPreviewDialog } from "@/components/inbox/composer/AttachmentP
 import { ContactPickerDialog } from "@/components/inbox/composer/ContactPickerDialog";
 import { AudioRecorder } from "@/components/inbox/composer/AudioRecorder";
 import { ReplyReviewPanel } from "@/components/inbox/composer/ReplyReviewPanel";
+import { DraftReplyButton } from "@/components/inbox/composer/DraftReplyButton";
 import { EmojiButton } from "@/components/inbox/composer/EmojiButton";
 import {
   MentionMenu,
@@ -31,10 +32,11 @@ import { X } from "lucide-react";
 import { toast } from "sonner";
 import { useSendMessage } from "@/hooks/inbox/useSendMessage";
 import { useUploadMedia } from "@/hooks/inbox/useUploadMedia";
+import { useRascunhoAssistido } from "@/hooks/inbox/useRascunhoAssistido";
 import { imagemDoClipboard } from "@/lib/inbox/clipboard-image";
 import {
-  faltouNomeDeContato,
   interpolateTemplate,
+  motivoDoCuringaLiteral,
   type TemplateContact,
 } from "@/lib/inbox/template-vars";
 import { embutirMencoes, podarMencoes, type MencaoEscolhida } from "@/lib/notifications/mentions";
@@ -151,12 +153,47 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   const slash = resolveSlash(text);
   const menuOpen = mode === "reply" && slash.open && !menuDismissed;
 
+  /**
+   * QUAL DAS DUAS FORMAS DA ASSISTÊNCIA APARECE (issue #3027).
+   *
+   * O `ReplyReviewPanel` era montado SEMPRE em modo resposta — com borda, título
+   * "Assistência do agente" e o botão "Sugerir resposta" —, mesmo sem sugestão
+   * nenhuma, e comia 2-3 linhas do histórico da conversa em tela de notebook.
+   *
+   * O sinal de "há sugestão" é o MESMO que o painel já usava para escolher o
+   * texto (`sugestaoParaMostrar`): a consulta é uma só, com uma chave só, lida
+   * pelos dois (ver `hooks/inbox/useRascunhoAssistido.ts`). Não há um segundo
+   * estado para divergir do primeiro.
+   *
+   * `mode === "reply"`: em nota o compositor não oferece sugestão de resposta, e
+   * a consulta nem sai.
+   *
+   * `!blockedReason`: compositor bloqueado (suporte somente leitura, papel sem
+   * escrita) devolve só o aviso, lá embaixo — e antes o painel, que fazia esta
+   * consulta, nem chegava a montar. Com a consulta aqui em cima ela sairia mesmo
+   * assim, a cada 4s, e o `GET` exige papel `agent`: 403 em loop para quem só lê.
+   */
+  const { sugestao, invalidar } = useRascunhoAssistido(
+    conversationId,
+    mode === "reply" && !blockedReason,
+  );
+
+  /**
+   * O contato da conversa, do jeito que a interpolação e o gate do curinga
+   * (#2744) precisam: o `name` do CRM e o `display_name` do canal. Um objeto,
+   * um lugar — o `applyTemplate` e a trava leem da MESMA fonte.
+   */
+  const contato: TemplateContact = {
+    name: contactName ?? null,
+    displayName: contactDisplayName ?? null,
+  };
+
   // SÓ em nota: a menção é assunto interno, e uma menção no campo de resposta
   // sairia para o cliente como texto solto. A query roda enquanto a lista está
   // aberta — fechou o `@`, não há porque ir buscar os atendentes.
   const gatilho = mode === "note" && !mencaoDispensada ? resolverMencao(text, caret) : null;
   const membros = useAssignableMembers(gatilho !== null);
-  const opcoes = gatilho ? opcoesDeMencao(membros.data ?? [], gatilho.query, t("Atendente")) : [];
+  const opcoes = gatilho ? opcoesDeMencao(membros.data ?? [], gatilho.query, t) : [];
   const mencaoAberta = gatilho !== null;
   const opcaoAtual = opcoes[mencaoIndice] ?? opcoes[0];
 
@@ -173,11 +210,64 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   const respostaBarrada = isDisabled || (mode === "reply" && !!janelaFechada);
   const notaBarrada = notaBloqueada === undefined ? isDisabled : !!notaBloqueada;
 
+  /**
+   * O curinga literal (#2744, opção A) — um SINAL IRMÃO do `janelaFechada`, e
+   * não um termo a mais no `respostaBarrada`.
+   *
+   * A diferença é o CAMPO: `respostaBarrada` desabilita o `<textarea>` (a janela
+   * fechada não tem o que editar), mas o curinga literal PEDE edição — o motivo
+   * que a faixa mostra é "edite antes de enviar". Travar o campo aqui seria
+   * negar a própria instrução. Então só o ENVIO é barrado; o operador continua
+   * digitando, apaga o `{{nome}}` e manda.
+   *
+   * Só em RESPOSTA: a nota interna nunca chega ao cliente e passa — a mesma
+   * fronteira do `janelaFechada`. Contato com nome não entra (o curinga resolve);
+   * `{{codigo}}` cru também não (chave desconhecida não é problema de nome).
+   */
+  const motivoCuringa = mode === "reply" ? motivoDoCuringaLiteral(text, contato) : null;
+  // O que trava o ENVIO: o de sempre, mais o curinga. O que trava o CAMPO
+  // (`respostaBarrada`) NÃO recebe o curinga — ver acima.
+  const envioBarrado = respostaBarrada || !!motivoCuringa;
+
+
   function autoresize() {
     const ta = taRef.current;
     if (!ta) return;
     ta.style.height = "auto";
     ta.style.height = `${Math.min(ta.scrollHeight, 160)}px`;
+  }
+
+  /**
+   * DEVOLVE O FOCO AO CAMPO DEPOIS DO ENVIO (#4148) — o mesmo
+   * `requestAnimationFrame` + `ta.focus()` dos outros refocos daqui
+   * (`escolherMencao`, `escreverNoCampo`, o emoji).
+   *
+   * O que tirava o foco era o CLIQUE no "Enviar", não o `setText`: o botão
+   * recebe o foco ao ser clicado, e o mesmo commit que limpa o campo troca esse
+   * botão pelo gravador (campo vazio). O nó focado sai da tela e o foco cai no
+   * `body` — o campo continua montado, mas a segunda mensagem só sai depois de
+   * um clique nele.
+   *
+   * Medido no head: enviar por Enter mantém o foco, e a assunção automática
+   * (re-render com `aguardandoAssumir` novo) não o tira — o `textarea` é o
+   * MESMO nó depois do re-render. Por isso o refoco mora aqui, no envio, e não
+   * num efeito preso à troca de dono: ele já vale para a conversa que passou a
+   * ser do atendente.
+   *
+   * As duas guardas são de cortesia com quem já levou o foco para outro lugar
+   * durante o envio (outra conversa, um diálogo): só devolve quando ele ficou
+   * órfão (`body`) ou quando ninguém o tomou.
+   */
+  function devolverFocoAoCampo() {
+    requestAnimationFrame(() => {
+      const ta = taRef.current;
+      // Campo travado (janela fechada, bloqueio até assumir) não recebe foco.
+      if (!ta || ta.disabled) return;
+      const ativo = document.activeElement;
+      if (ativo && ativo !== document.body && ativo !== ta) return;
+      ta.focus();
+      autoresize();
+    });
   }
 
   /**
@@ -207,17 +297,28 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
 
   function handleSubmit() {
     const legivel = text.trim();
-    if (!legivel || (mode === "note" ? notaBarrada : respostaBarrada)) return;
+    if (!legivel || (mode === "note" ? notaBarrada : envioBarrado)) return;
 
     // A menção vira token AQUI, na saída do campo (#2372): o que fica no
     // rascunho, no `onDraftChange` e no `restoreOnError` é o nome legível, e
     // o id só viaja no corpo que sai para o banco. Em modo RESPOSTA não há
     // token nenhum — menção é assunto de nota interna, e uma menção no campo
     // de resposta sairia para o cliente.
-    const corpo = mode === "note" ? embutirMencoes(legivel, mencoes) : legivel;
+    // O curinga DIGITADO interpola como o template aplicado (#2891): quem escreve
+    // `{{primeiro_nome}}` à mão quer o nome do cliente, não o token cru — e até
+    // 14/10/2026 esse texto saía literal para o contato, sem faixa e com o
+    // Enviar habilitado. A fonte é a MESMA do `applyTemplate` e da trava: o
+    // `contato` montado uma linha acima, e a MESMA `interpolateTemplate`. Só a
+    // RESPOSTA passa por aqui: a nota interna não vai ao cliente e continua
+    // levando o texto como escrito (fronteira do `janelaFechada`, #2744).
+    const corpo =
+      mode === "note" ? embutirMencoes(legivel, mencoes) : interpolateTemplate(legivel, contato);
 
     setText("");
-    requestAnimationFrame(() => autoresize());
+    // #4148: o clique no "Enviar" deixa o foco no BOTÃO, e este mesmo commit o
+    // troca pelo gravador (campo vazio) — o foco cai no `body`. Devolvê-lo ao
+    // campo é o que permite a segunda mensagem sem clicar na caixa.
+    devolverFocoAoCampo();
 
     // Se a pessoa já começou a próxima resposta, preserve os dois textos.
     const restaurar = (current: string) => (current ? `${legivel}\n${current}` : legivel);
@@ -257,7 +358,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
     send.mutate(
       {
         conversation_id: conversationId,
-        body: legivel,
+        body: corpo,
         type: "text",
         ...(respondendo ? { reply_to_message_id: respondendo.id } : {}),
       },
@@ -276,16 +377,13 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   }
 
   function applyTemplate(tpl: MessageTemplate) {
-    const contato: TemplateContact = {
-      name: contactName ?? null,
-      displayName: contactDisplayName ?? null,
-    };
     const filled = interpolateTemplate(tpl.body, contato);
     setText(filled);
     // Contato sem `name` NEM `display_name`: o literal sobrevive no texto e iria
-    // pro cliente como `{{nome}}`. O aviso não é cosmético — é a única chance
-    // do operador editar antes de mandar (#2744).
-    if (faltouNomeDeContato(tpl.body, contato)) {
+    // pro cliente como `{{nome}}`. O toast é o primeiro aviso; a faixa
+    // persistente (mais abaixo) é o que fica, porque o operador precisa editar
+    // antes de mandar (#2744).
+    if (motivoDoCuringaLiteral(tpl.body, contato)) {
       toast.warning(
         t("Contato sem nome no CRM: {{nome}}/{{primeiro_nome}} ficaram literais no texto. Edite antes de enviar."),
       );
@@ -355,8 +453,18 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
       }
     }
     if (e.key === "Enter" && !e.shiftKey) {
+      if (menuOpen) {
+        e.preventDefault(); // deixa o Enter pro menu; não envia /query como mensagem
+        return;
+      }
+      // No toque, a tecla de retorno do teclado virtual QUEBRA LINHA, como no
+      // próprio WhatsApp — quem envia é o botão. Ctrl/Cmd+Enter envia sempre
+      // (iPad com teclado físico). Lido aqui, no keydown, e não no render: o
+      // servidor não sabe o ponteiro, e ler no render faria as duas pontas
+      // desenharem coisas diferentes.
+      const forcaEnvio = e.ctrlKey || e.metaKey;
+      if (!forcaEnvio && window.matchMedia?.("(pointer: coarse)").matches) return;
       e.preventDefault();
-      if (menuOpen) return; // deixa o Enter pro menu; não envia /query como mensagem
       handleSubmit();
     }
   }
@@ -379,13 +487,24 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
           mode === "note" && "border-warning/40 bg-warning-bg",
         )}
       >
+        {/* O BLOCO DA ASSISTÊNCIA SÓ COM SUGESTÃO (issue #3027): sem rascunho
+            para mostrar, ele não é montado e não ocupa faixa nenhuma; o botão de
+            ícone (`DraftReplyButton`), que é o mesmo gesto, fica na linha de
+            ações do compositor (ver abaixo). Com sugestão, o bloco aparece
+            inteiro, como sempre — e sai quando ela é enviada ou descartada.
+            Com o teclado virtual aberto, a sugestão sai da frente (F2): sobram
+            ~250px de tela num iPhone, e o fio da conversa vale mais que ela. O
+            marcador é da camada da conversa (`useAlturaVisivel`), e o `max-md:`
+            mantém o computador intacto. */}
         {blockedReason ? (
           <p className="pb-2 text-center text-xs text-muted-foreground" data-testid="composer-motivo-do-bloqueio">
             {blockedReason}
           </p>
         ) : null}
-        {mode === "reply" && (
-          <ReplyReviewPanel conversationId={conversationId} disabled={isDisabled} />
+        {mode === "reply" && sugestao && (
+          <div className="max-md:group-data-[teclado-aberto]/conversa:hidden">
+            <ReplyReviewPanel conversationId={conversationId} disabled={isDisabled} />
+          </div>
         )}
         <TemplateMenu
           open={menuOpen}
@@ -403,12 +522,28 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
           indice={opcaoAtual ? opcoes.indexOf(opcaoAtual) : 0}
           onPick={escolherMencao}
         />
+{/* O AVISO DO CURINGA LITERAL (#2744) — visível e PERSISTENTE, e não só
+            o toast que some. Vale para o texto DIGITADO, não só para o modelo
+            aplicado: quem escreveu `{{primeiro_nome}}` na mão precisa ver por
+            que o botão não manda, junto da borda do compositor. Só em RESPOSTA
+            (modo nota passa), e só com o literal sobrevivente — contato com
+            nome resolve o curinga e não vê aviso nenhum. */}
+        {motivoCuringa && (
+          <div
+            data-testid="aviso-curinga-literal"
+            className="mb-1.5 flex items-start gap-2 rounded-md border-l-2 border-warning bg-warning-bg px-2 py-1.5 text-xs text-warning-fg"
+          >
+            <p className="min-w-0 flex-1">
+              {t("Contato sem nome no CRM: {{nome}}/{{primeiro_nome}} ficaram literais no texto. Edite antes de enviar.")}
+            </p>
+          </div>
+        )}
         <div className="mb-1.5 flex gap-1">
           <button
             type="button"
             onClick={() => setMode("reply")}
             className={cn(
-              "rounded-full px-2.5 py-1 text-xs font-medium transition-colors",
+              "min-h-11 rounded-full px-3 py-1 text-xs font-medium transition-colors lg:min-h-0 lg:px-2.5",
               mode === "reply"
                 ? "bg-accent text-accent-foreground"
                 : "text-muted-foreground hover:bg-muted",
@@ -420,7 +555,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
             type="button"
             onClick={() => setMode("note")}
             className={cn(
-              "rounded-full px-2.5 py-1 text-xs font-medium transition-colors",
+              "min-h-11 rounded-full px-3 py-1 text-xs font-medium transition-colors lg:min-h-0 lg:px-2.5",
               mode === "note"
                 ? "bg-warning text-warning-fg"
                 : "text-muted-foreground hover:bg-muted",
@@ -455,7 +590,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
               type="button"
               onClick={onCancelarResposta}
               aria-label={t("Cancelar resposta")}
-              className="rounded-md p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+              className="inline-flex size-11 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground lg:size-auto lg:p-0.5"
             >
               <X className="size-4" />
             </button>
@@ -488,6 +623,30 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
               });
             }}
           />
+          {/*
+            O BOTÃO DE ÍCONE DA ASSISTÊNCIA (issue #3027) — "Sugerir resposta",
+            o mesmo gesto do bloco, no lugar onde ele NÃO custa faixa nenhuma:
+            junto do "+" e do emoji, na linha do campo.
+
+            Os dois nunca aparecem juntos: com sugestão montada, o bloco traz o
+            próprio botão de texto; sem sugestão, fica só este ícone. Ninguém
+            escolhe entre dois botões iguais.
+
+            O clique gera pelo MESMO `POST /conversations/:id/draft-reply` do
+            bloco; o rascunho criado entra pelo `invalidateQueries` da chave
+            compartilhada, e é isso que monta o bloco com o texto e as ações. O
+            texto NÃO é despejado no campo: quem revisa e decide é o bloco, e ter
+            o mesmo texto nos dois lugares diria duas vezes a mesma coisa.
+          */}
+          {mode === "reply" && !sugestao && (
+            <DraftReplyButton
+              conversationId={conversationId}
+              disabled={isDisabled}
+              onDraft={() => {
+                void invalidar();
+              }}
+            />
+          )}
           <textarea
             ref={taRef}
             value={text}
@@ -538,7 +697,10 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
                 : t("Enter envia · Shift+Enter quebra linha")
             }
             className={cn(
-              "max-h-40 min-h-9 flex-1 resize-none rounded-md border border-input bg-background px-3 py-2 text-sm",
+              // 16px abaixo do `md`: o Safari do iPhone AMPLIA a página ao focar
+              // campo com fonte menor, e a conversa sai do quadro. 44px de alvo
+              // até o `lg`, como o resto dos botões de toque.
+              "max-h-40 min-h-11 flex-1 resize-none rounded-md border border-input bg-background px-3 py-2 text-base md:text-sm lg:min-h-9",
               "placeholder:text-muted-foreground focus:ring-1 focus:ring-ring focus:outline-hidden",
             )}
             disabled={mode === "note" ? notaBarrada : respostaBarrada}
@@ -548,9 +710,9 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
             <Button
               type="button"
               size="icon"
-              className="h-9 w-9 shrink-0"
+              className="shrink-0"
               onClick={handleSubmit}
-              disabled={(mode === "note" ? notaBarrada : respostaBarrada) || !text.trim()}
+              disabled={(mode === "note" ? notaBarrada : envioBarrado) || !text.trim()}
               aria-label={t("Enviar")}
             >
               <PaperPlaneTilt size={16} weight="fill" aria-hidden />

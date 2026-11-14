@@ -11,6 +11,7 @@ import { describeWahaServer, type WahaServerCapabilities } from "@/lib/channels/
 
 import { logger } from "@/lib/logger";
 import { classificarFalhaDeAlcance, explicarFalhaDeAlcance } from "@/lib/net/alcance";
+import { TETO_DE_MIDIA_MS } from "@/lib/waha/teto-de-midia";
 
 /**
  * AS CONVERSAS QUE O CRM NÃO ATENDE, E POR ISSO NÃO PRECISA RECEBER.
@@ -69,19 +70,9 @@ export const CONVERSAS_IGNORADAS = {
  */
 export const TETO_PADRAO_MS = 15_000;
 
-/**
- * Mídia tem teto MAIOR, e por um motivo medível: `lib/waha/media-send.ts:28,31`
- * manda `convert: true` em `sendVideo` e `sendVoice`. O WAHA roda ffmpeg e BAIXA
- * a URL do Storage antes de responder.
- *
- * Um teto único calibrado para `sendText` cortaria envio de áudio legítimo — o
- * conserto do timeout viraria um defeito novo, e mais difícil de ver que o
- * original, porque a mensagem simplesmente não sai.
- *
- * 30s é o mesmo teto que a mídia de ENTRADA já usa
- * (`lib/messaging/media/waha-source.ts:18`).
- */
-export const TETO_DE_MIDIA_MS = 30_000;
+// O teto de mídia mora em `./teto-de-midia`, sem dependência de servidor: o
+// navegador espera o envio de mídia por ele (`hooks/inbox/useSendMessage.ts`).
+export { TETO_DE_MIDIA_MS };
 
 /**
  * O ERRO DIZ O STATUS. NUNCA O CORPO QUE O WAHA DEVOLVEU.
@@ -138,6 +129,38 @@ const sessionSnapshotSchema = z.object({
 
 export type WahaSessionSnapshot = z.infer<typeof sessionSnapshotSchema>;
 type SessionOperation = "create" | "start" | "stop" | "logout" | "delete";
+
+/**
+ * Um contato do aparelho, como o `GET /api/contacts/all` devolve (doc do WAHA,
+ * seção "Get all contacts").
+ *
+ * `name` é o nome salvo na AGENDA do aparelho; `pushname` é o nome de perfil
+ * do WhatsApp. Os marcadores vêm como `null` quando o WAHA não os traz —
+ * mentir com `false` convidaria o chamador a tratar "não sei" como "não é".
+ */
+export interface ContatoDoAparelho {
+  id: string;
+  name: string | null;
+  pushname: string | null;
+  /** `true` = está salvo na agenda do aparelho. */
+  isMyContact: boolean | null;
+  /** `true` = o número tem WhatsApp. `false` = salvo na agenda, mas sem WhatsApp. */
+  isWAContact: boolean | null;
+  /** `true` = é o próprio número do operador. */
+  isMe: boolean | null;
+}
+
+/** Tolerante aos extras que o WAHA acrescenta; só o que usamos é tipado. */
+const contatoDoAparelhoSchema = z.object({
+  id: z.string(),
+  name: z.string().nullish(),
+  pushname: z.string().nullish(),
+  pushName: z.string().nullish(),
+  isMyContact: z.boolean().nullish(),
+  isWAContact: z.boolean().nullish(),
+  isMe: z.boolean().nullish(),
+}).passthrough();
+
 
 /** Mantém o prefixo/status que checkHealth e os callers já classificam. */
 export class WahaSessionError extends Error {
@@ -436,6 +459,42 @@ export class WahaClient {
   }
 
   /**
+   * O nome salvo na agenda do aparelho, e o apelido do perfil.
+   *
+   * `name` é o que a pessoa GRAVOU no celular. `pushname` é o que o contato
+   * escolheu no próprio perfil — o mesmo campo que o webhook já entrega, e que
+   * falta justamente quando a lista mostra só o telefone. `null` quando o
+   * canal não responde: ausência de agenda não é erro, e quem chama carimba
+   * a tentativa para a fila girar.
+   *
+   * NOWEB só responde isto com o store da sessão ligado. Sem store a chamada
+   * volta erro e este método devolve null — o mesmo contrato de
+   * `resolvePhoneForLid`.
+   */
+  async getContact(
+    session: string,
+    contactId: string,
+    tetoMs = 2_500,
+  ): Promise<{ name: string | null; pushname: string | null; shortName: string | null } | null> {
+    try {
+      const url = new URL(`${this.baseUrl}/api/contacts`);
+      url.searchParams.set("session", session);
+      url.searchParams.set("contactId", contactId);
+      const res = await this.fetchComTeto(url, { headers: { "X-Api-Key": this.apiKey } }, tetoMs);
+      if (!res.ok) return null;
+      const body = (await res.json()) as {
+        name?: unknown;
+        pushname?: unknown;
+        shortName?: unknown;
+      };
+      const texto = (v: unknown) => (typeof v === "string" && v.trim() !== "" ? v : null);
+      return { name: texto(body.name), pushname: texto(body.pushname), shortName: texto(body.shortName) };
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * O telefone por trás de um id opaco (`<lid>@lid`), quando o canal souber.
    *
    * ─── Por que isto não é sempre possível ─────────────────────────────────
@@ -449,13 +508,23 @@ export class WahaClient {
    * vazia e enche conforme as conversas acontecem. `null` aqui significa "ainda
    * não sei", não "não existe" — quem chama precisa poder tentar de novo depois
    * sem tratar isto como erro.
+   *
+   * `falhaLanca`: quem decide algo de segurança pela resposta (a trava de
+   * apagamento a pedido da importação do histórico) precisa separar "não sei"
+   * de "não consegui perguntar". Com ele, falha de transporte e 5xx lançam;
+   * 4xx e `pn` vazio seguem `null`.
    */
-  async resolvePhoneForLid(session: string, lid: string): Promise<string | null> {
+  async resolvePhoneForLid(
+    session: string,
+    lid: string,
+    opts: { falhaLanca?: boolean } = {},
+  ): Promise<string | null> {
     try {
       const res = await this.fetchComTeto(
         `${this.baseUrl}/api/${encodeURIComponent(session)}/lids/${encodeURIComponent(lid)}`,
         { headers: { "X-Api-Key": this.apiKey } },
       );
+      if (res.status >= 500 && opts.falhaLanca) throw new Error(`waha_lid_${res.status}`);
       if (!res.ok) return null;
       const body = (await res.json()) as { pn?: string | null };
       // `595981402525@c.us` → `+595981402525`. O sufixo é endereçamento do
@@ -464,7 +533,8 @@ export class WahaClient {
       if (!pn) return null;
       const digitos = String(pn).split("@")[0]?.replace(/\D/g, "") ?? "";
       return digitos.length >= 8 ? `+${digitos}` : null;
-    } catch {
+    } catch (err) {
+      if (opts.falhaLanca) throw err;
       return null;
     }
   }
@@ -515,6 +585,32 @@ export class WahaClient {
     });
     if (!res.ok) throw new Error(`waha_${res.status}`);
     return res.json();
+  }
+
+  /**
+   * O visto azul: marca como lida a conversa (`Send Seen` da API do WAHA).
+   *
+   * `POST /api/sendSeen` — a sessão vai no CORPO, como em `sendText`, e não no
+   * caminho, como a família de presença (`/api/{session}/presence`). Sem
+   * `messageIds`, o pedido é "li esta conversa": o WAHA marca as não lidas dos
+   * últimos 7 dias (até 30 numa conversa individual, 100 num grupo), que é o
+   * que "respondi, então li" quer dizer — e sem precisar navegar pelos ids que
+   * só o webhook conhece.
+   *
+   * LANÇA `waha_<status>`, como os vizinhos, e a decisão de falhar macio é de
+   * QUEM CHAMA: `marcarConversaComoLida` (`./send`) engole e loga, e o põe
+   * DEPOIS do envio para a resposta nunca esperar por enfeite de conversa.
+   */
+  async sendSeen(session: string, chatId: string): Promise<void> {
+    const res = await this.fetchComTeto(`${this.baseUrl}/api/sendSeen`, {
+      method: "POST",
+      headers: {
+        "X-Api-Key": this.apiKey,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ session, chatId }),
+    });
+    if (!res.ok) throw new Error(`waha_${res.status}`);
   }
 
   /** O id completo identifica a mensagem no WAHA; o id curto do sendText não basta. */
@@ -606,6 +702,70 @@ export class WahaClient {
       throw new Error(`waha_${res.status}`);
     }
     return res.json() as Promise<{ numberExists: boolean; chatId?: string | null; pn?: string | null }>;
+  }
+
+  /**
+   * Uma página da AGENDA do aparelho pareado (`GET /api/contacts/all`) — issue #2736.
+   *
+   * ─── O que este endpoint devolve, e por que ele é o caminho certo ──────────
+   *
+   * É a lista de contatos que o PRÓPRIO aparelho conhece: `id` (`<número>@c.us`),
+   * `name` (o nome salvo na AGENDA), `pushname` (o nome de perfil do WhatsApp)
+   * e os marcadores `isMyContact` (está salvo na agenda do aparelho),
+   * `isWAContact` (o número tem WhatsApp) e `isMe` (é o próprio operador).
+   * Ou seja: o filtro "quem está salvo no celular" já vem pronto de lá — o CRM
+   * não precisa adivinhar nada.
+   *
+   * ─── Paginação, e a ordenação que ela exige ────────────────────────────────
+   *
+   * `limit`/`offset` chegam na doc do WAHA como a saída para timeout em lista
+   * grande. Sem uma ordenação FIXA, porém, o offset é uma aposta: a lista pode
+   * voltar numa ordem que não é estável entre chamadas, e o salto pula ou
+   * repete contato sem erro nenhum. Por isso `sortBy=id&sortOrder=asc` vão
+   * junto em TODA chamada — é o que torna "página seguinte" uma pergunta com
+   * resposta.
+   *
+   * ─── O caso NOWEB sem store, que vem vazio e não é erro ────────────────────
+   *
+   * No NOWEB (o engine padrão do kit) este endpoint só enxerga o que o store
+   * da sessão guardou (`noweb.store.enabled` — a opção "Guardar histórico" da
+   * conexão). Sem ele a resposta é `[]`: lista vazia é um desfecho legítimo e
+   * quem chama decide o que comunicar; HTTP errado continua sendo exceção.
+   */
+  async listarAgendaDoAparelho(
+    session: string,
+    pagina: { limit: number; offset: number },
+  ): Promise<ContatoDoAparelho[]> {
+    const url = new URL(`${this.baseUrl}/api/contacts/all`);
+    url.searchParams.set("session", session);
+    url.searchParams.set("limit", String(pagina.limit));
+    url.searchParams.set("offset", String(pagina.offset));
+    url.searchParams.set("sortBy", "id");
+    url.searchParams.set("sortOrder", "asc");
+    const res = await this.fetchComTeto(url, {
+      headers: { "X-Api-Key": this.apiKey, Accept: "application/json" },
+    });
+    if (!res.ok) throw new Error(`waha_contacts_all_${res.status}`);
+    const bruto: unknown = await res.json().catch(() => null);
+    if (!Array.isArray(bruto)) return [];
+    const contatos: ContatoDoAparelho[] = [];
+    for (const item of bruto) {
+      const parsed = contatoDoAparelhoSchema.safeParse(item);
+      if (!parsed.success) continue;
+      const c = parsed.data;
+      contatos.push({
+        id: c.id,
+        name: c.name?.trim() || null,
+        // O doc do WAHA escreve `pushname` minúsculo; builds antigos devolvem
+        // `pushName`. As duas casas no schema custam um campo e evitam perder
+        // o nome inteiro por diferença de caixa.
+        pushname: (c.pushname ?? c.pushName)?.trim() || null,
+        isMyContact: c.isMyContact ?? null,
+        isWAContact: c.isWAContact ?? null,
+        isMe: c.isMe ?? null,
+      });
+    }
+    return contatos;
   }
 
   async sendContactVcard(

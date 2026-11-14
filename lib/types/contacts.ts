@@ -7,10 +7,13 @@ export interface Contact {
   organization_id: string;
   name: string | null;
   display_name: string | null;
+  /** Nome salvo na agenda do celular. SÓ A EQUIPE vê (`rotuloParaAEquipe`); nunca vai em mensagem. */
+  address_book_name?: string | null;
   email: string | null;
   email_normalized: string | null;
   phone_number: string | null;
-  cpf_hash: string | null;
+  /** Se a ficha tem CPF. O valor não sai pela API: é pedido à parte, por quem pode. */
+  cpf_available: boolean;
   birthdate: string | null;
   is_blocked: boolean;
   blocked_reason: string | null;

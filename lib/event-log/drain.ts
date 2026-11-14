@@ -137,9 +137,20 @@ export async function avisarEventoMorto(
 
 export async function drainEventLog(
   admin: SupabaseClient,
-  opts: { limit?: number } = {},
+  opts: {
+    limit?: number;
+    /**
+     * Se `false`, este tick NÃO procura evento preso em `processing` (#3693):
+     * o laço do worker varre a cada 2 s quando há trabalho, e a varredura procura
+     * linhas de MINUTOS atrás (`PROCESSING_STALE_MS`). Default `true` — cron e
+     * qualquer chamador que não pense no assunto seguem recuperando presos, e é
+     * o laço quem não deixa passar mais de um minuto.
+     */
+    varrerPresos?: boolean;
+  } = {},
 ): Promise<DrainSummary> {
   const limit = opts.limit ?? 50;
+  const varrerPresos = opts.varrerPresos ?? true;
   const summary: DrainSummary = {
     scanned: 0,
     done: 0,
@@ -176,11 +187,13 @@ export async function drainEventLog(
   // `trg_event_log_touch` (BEFORE UPDATE) o reescreve em toda atualização, então
   // a linha carrega o instante do CLAIM enquanto o handler não volta.
   const limiteDePresos = new Date(Date.now() - PROCESSING_STALE_MS).toISOString();
-  const { data: presos } = await admin
-    .from("event_log")
-    .select("id, organization_id, event_type, attempts")
-    .eq("status", "processing")
-    .lt("updated_at", limiteDePresos);
+  const { data: presos } = !varrerPresos
+    ? { data: [] }
+    : await admin
+        .from("event_log")
+        .select("id, organization_id, event_type, attempts")
+        .eq("status", "processing")
+        .lt("updated_at", limiteDePresos);
 
   // ─── E A VOLTA CONTA COMO TENTATIVA ────────────────────────────────────────
   //
@@ -250,13 +263,20 @@ export async function drainEventLog(
 
   const { data: rows, error } = await admin
     .from("event_log")
-    // `created_at` viaja porque um consumidor não consegue distinguir "evento de
-    // agora" de "evento de três dias parado em `pending`" sem ele — e o drain
-    // leva 50 por tick sem janela de recência, então um backlog vira enxurrada
-    // de efeitos com data errada no primeiro tick depois de um deploy.
-    .select(
-      "id, organization_id, event_type, entity_kind, entity_id, payload, metadata, consumed_by, attempts, created_at",
-    )
+    // ─── A VARREDURA NÃO LEVA O CORPO DO EVENTO ────────────────────────────────
+    //
+    // `payload` e `metadata` são as colunas gordas desta tabela (JSONB com o
+    // dossiê inteiro do que disparou o evento) e o dreno carrega 50 linhas por
+    // tique para, na maioria delas, só decidir se a linha ainda interessa. Quem
+    // chega ao handler — e é quem precisa do corpo — é UMA linha por vez, e o
+    // claim abaixo (`update ... select`) já devolve a representação da linha
+    // reclamada: o corpo vem de lá, no mesmo round-trip que já existia, sem uma
+    // consulta a mais (#3878, item 3).
+    //
+    // `created_at` também vai no claim: quem monta o `EventRow` do handler
+    // continua recebendo a idade do evento (`dispatcher.ts`, "quando o evento
+    // foi emitido"), só que lida uma vez por linha processada em vez de 50.
+    .select("id, organization_id, event_type, entity_kind, entity_id, consumed_by, attempts")
     .eq("status", "pending")
     .or(`next_attempt_at.is.null,next_attempt_at.lte.${nowIso}`)
     .in("event_type", handledTypes)
@@ -269,23 +289,55 @@ export async function drainEventLog(
     return summary;
   }
 
-  // Barreira do histórico (0561): evento de mensagem importada do histórico
-  // não chega a NENHUM consumidor — uma pergunta ao banco por lote. Se ela
-  // falhar, nenhum evento de mensagem do lote é despachado (fail-closed).
-  const origem = await origemDasMensagensDoLote(admin, (rows ?? []) as unknown as EventRow[]);
-
   for (const raw of rows ?? []) {
     const row = raw as unknown as EventRow;
     summary.scanned += 1;
 
     // Claim otimista — outra instância pode ter pego a mesma linha.
+    //
+    // O `consumed_by` e o `attempts` que valem são os que o CLAIM devolve, não
+    // os da leitura do lote. Entre a leitura e o claim, outro dreno (o escopado
+    // do webhook, ou um segundo global) pode ter reclamado a linha, rodado
+    // handlers e devolvido a `pending` com o `consumed_by` acrescido — e o claim
+    // passa, porque a linha está `pending` de novo. Filtrar pela leitura velha
+    // rodava esses handlers outra vez: o "cliente voltou" mandava a mensagem
+    // proativa em dobro. O claim é exclusivo (pending → processing), então o
+    // que ele devolve não muda até esta instância soltar a linha.
+    // Revalide também o prazo: outro dreno pode ter devolvido a linha a
+    // `pending` com retry/backoff futuro depois da leitura do lote.
+    //
+    // E é AQUI que o corpo do evento entra (#3878, item 3): o `select` do lote
+    // não traz `payload`/`metadata`/`created_at`, e este `update ... select` —
+    // que já existia para revalidar o claim — devolve a representação da linha
+    // reclamada, ou seja, de UMA linha, a que vai ser processada agora. Zero
+    // consulta a mais, e as 49 linhas do lote que não chegam ao handler nunca
+    // pagam o JSONB delas.
     const { data: claimed } = await admin
       .from("event_log")
       .update({ status: "processing", updated_at: new Date().toISOString() })
       .eq("id", row.id)
       .eq("status", "pending")
-      .select("id");
-    if (!claimed?.length) continue;
+      .or(`next_attempt_at.is.null,next_attempt_at.lte.${nowIso}`)
+      .select("id, consumed_by, attempts, payload, metadata, created_at");
+    const reclamada = claimed?.[0] as Partial<
+      Pick<EventRow, "consumed_by" | "attempts" | "payload" | "metadata" | "created_at">
+    > | undefined;
+    if (!reclamada) continue;
+    // ponytail: as colunas são NOT NULL e o `select` as pede, então no banco
+    // sempre voltam; o `??` só cobre dublês de teste que devolvem `{ id }`.
+    row.consumed_by = reclamada.consumed_by ?? row.consumed_by;
+    row.attempts = reclamada.attempts ?? row.attempts;
+    row.payload = (reclamada.payload ?? row.payload) as Record<string, unknown>;
+    row.metadata = (reclamada.metadata ?? row.metadata) as Record<string, unknown>;
+    if (reclamada.created_at) row.created_at = reclamada.created_at;
+
+    // Barreira do histórico (0561, fork): evento de mensagem importada do
+    // histórico não chega a NENHUM consumidor. Desde o #3878 a varredura do
+    // lote não traz o `payload` — e é nele que mora o `message_id` —, então a
+    // pergunta é feita AQUI, por item, com o corpo que o claim acabou de
+    // devolver. Só eventos `message.*` consultam o banco; se a pergunta falhar,
+    // o evento não é despachado (fail-closed, retry).
+    const origem = await origemDasMensagensDoLote(admin, [row]);
 
     const results =
       desfechoDaBarreira(

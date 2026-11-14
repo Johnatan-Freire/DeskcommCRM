@@ -63,6 +63,17 @@ export interface Conversation {
    * por resposta no celular (`comandoDaConversa` escolhe o motivo da tela).
    */
   last_handoff_reason?: string | null;
+  /**
+   * A conversa está marcada como EXEMPLO para o agente aprender (#3006) — o
+   * opt-in de LGPD (L-08) que a rota `POST .../usable-for-rag` liga e que o
+   * cron `kb-conversations-batch` consome.
+   *
+   * Opcional de propósito, como `comando_da_conversa`: uma resposta em cache de
+   * antes deste campo entrar no `SELECT_COLS` da lista não o tem. AUSENTE é
+   * "não afirmo que está marcada", nunca "não está" — e o selo da lista só
+   * aparece com `true`, porque afirmar o contrário seria pior.
+   */
+  usable_for_rag?: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -106,6 +117,24 @@ export interface Message {
   sent_via: SentVia;
   sent_by_user_id: string | null;
   /**
+   * O NOME de quem enviou (#4031) — e por que ele não é coluna.
+   *
+   * `sent_by_user_id` diz QUAL pessoa da equipe digitou, mas o balão só sabia
+   * disso duas coisas: "Você" (para o autor) e "Atendente" (para todos os
+   * outros). Com duas consultoras na mesma conversa, o gestor não tinha como
+   * saber quem prometeu o quê — enquanto a IA já aparecia nomeada ("IA · Clara").
+   *
+   * O nome mora em `auth.users.raw_user_meta_data`, fora do alcance de uma
+   * consulta por PostgREST — e o balão NÃO faz consulta. Por isso este campo é
+   * de PAYLOAD: `GET /api/v1/conversations/[id]/messages` o preenche uma vez por
+   * página (ids distintos, com `nomesDosAtendentes`), exatamente como o export
+   * em PDF já fazia. Opcional porque uma resposta em cache de antes do campo
+   * não o tem — e `null` é a declaração de "não resolvi o nome" (self-host sem
+   * service role, linha antiga, usuário removido). Nunca é o nome de um cliente:
+   * só aparece quando há `sent_by_user_id`.
+   */
+  sent_by_user_name?: string | null;
+  /**
    * Quem DECIDIU o envio quando o que apertou foi um token (#1613, migration
    * 0416) — a pessoa "em nome de" quem a integração mandou. `null` em todo
    * envio direto, e ausente nas linhas anteriores à coluna. O balão lê este
@@ -127,6 +156,13 @@ export interface Message {
   /** A mensagem que esta responde (citação). `null` = envio solto. */
   reply_to_message_id: string | null;
   created_at: string;
+  /**
+   * Última escrita na linha (trigger `trg_messages_updated_at`). É o relógio do
+   * reenvio (`lib/messaging/reenvio.ts`): linha `queued` parada há muito pode
+   * ter perdido o processo que a enviava. Opcional porque linhas montadas fora
+   * do `MSG_COLS` (otimistas antigas, fixtures) não o trazem.
+   */
+  updated_at?: string;
 }
 
 /** Nota interna de conversa (Onda 5.2) — nunca vai ao cliente, tabela separada de messages. */

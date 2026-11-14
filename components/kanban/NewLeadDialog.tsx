@@ -34,6 +34,9 @@ import {
 } from "@/lib/leads/negocio-aberto-duplicado";
 import type { Lead } from "@/lib/types/leads";
 import { createLeadSchema, type CreateLeadInput } from "@/lib/schemas/leads";
+import { camposExigidosNoDestino, validaCamposExigidos } from "@/lib/leads/campos-exigidos";
+import { lerRecorrenciaDoFormulario } from "@/lib/leads/valor-recorrente";
+import { CustomFieldsEditor } from "@/components/contacts/CustomFieldsEditor";
 import { MOEDA_PADRAO, parseReaisToCents, simboloDaMoeda } from "@/lib/money";
 import { rotuloDoContato } from "@/lib/contacts/rotulo-do-contato";
 import type { Contact } from "@/lib/types/contacts";
@@ -45,6 +48,13 @@ interface FormShape {
   description: string;
   stage_id: string;
   valueReais: string;
+  /**
+   * O VALOR RECORRENTE e a duração (fatia 1 da #3602). Em texto, como o valor
+   * único: quem digita "1.500,00" ou "1500" precisa do mesmo parser que respeita
+   * a moeda da organização (`parseReaisToCents`).
+   */
+  valorRecorrenteReais: string;
+  recorrenciaMeses: string;
   tagsRaw: string;
   expected_close_date: string;
 }
@@ -69,6 +79,14 @@ interface Props {
    * mesmo funil + aberto, e depender de quem chama é como a regra se perde.
    */
   leads?: Lead[];
+  /**
+   * `crm_pipelines.settings` do funil — dele saem os campos que a ETAPA exige
+   * (issue #3038). Quem já tem o funil em mãos passa adiante: o quadro da
+   * página do funil (`data.pipeline.settings`) e o `useDefaultPipeline` do
+   * painel do Inbox. Sem ele o bloco de campos exigidos não aparece — o funil
+   * que não exige nada continua com o formulário byte a byte como era.
+   */
+  settings?: Record<string, unknown> | null;
 }
 
 function defaultStageId(stages: Stage[]): string {
@@ -83,6 +101,7 @@ export function NewLeadDialog({
   stages,
   contactId,
   leads,
+  settings,
   onCreated,
 }: Props) {
   const t = useT();
@@ -93,6 +112,18 @@ export function NewLeadDialog({
   const initialStage = useMemo(() => defaultStageId(stages), [stages]);
   // Quem abre o diálogo já sabendo o contato (Inbox) não escolhe de novo.
   const [contato, setContato] = useState<Contact | null>(null);
+  /**
+   * OS CAMPOS PERSONALIZADOS QUE A ETAPA EXIGE (issue #3038) — o valor que o
+   * funil cobra para o negócio ENTRAR na etapa escolhida, digitado AQUI.
+   *
+   * Antes desta mudança o `createLeadHandler` recusava a criação direta na
+   * etapa exigente (a régua da #1710) e o diálogo não tinha onde digitar o
+   * campo: a pessoa lia "Preencha os campos obrigatórios antes de continuar:
+   * Tipo de cliente" sem nenhum input de "Tipo de cliente" na tela, e o lead
+   * não nascia. O valor começa vazio e é limpo junto com o diálogo — o mesmo
+   * cuidado do contato, porque o funil mantém este componente montado.
+   */
+  const [camposDoNegocio, setCamposDoNegocio] = useState<Record<string, unknown>>({});
   // ─── O AVISO DE NEGÓCIO ABERTO DUPLICADO (issue #1751) ─────────────────────
   //
   // Guarda TAMBÉM os valores do formulário: quem chega aqui já preencheu tudo,
@@ -122,6 +153,7 @@ export function NewLeadDialog({
     if (!open) {
       setContato(null);
       setAviso(null);
+      setCamposDoNegocio({});
     }
   }
 
@@ -131,6 +163,8 @@ export function NewLeadDialog({
       description: "",
       stage_id: initialStage,
       valueReais: "",
+      valorRecorrenteReais: "",
+      recorrenciaMeses: "",
       tagsRaw: "",
       expected_close_date: "",
     },
@@ -142,6 +176,40 @@ export function NewLeadDialog({
       form.setValue("stage_id", initialStage);
     }
   }, [initialStage, form]);
+
+  const stageId = form.watch("stage_id");
+
+  /**
+   * OS CAMPOS QUE A ETAPA ESCOLHIDA EXIGE — a MESMA pergunta do servidor, feita
+   * com a MESMA função (`camposExigidosNoDestino` é o recorte que
+   * `validaCamposExigidos` percorre, não uma segunda régua escrita aqui).
+   *
+   * É recalculada quando a etapa muda no seletor: trocar para uma etapa que não
+   * exige nada esvazia o bloco, e trocar para outra exigente o refaz com os
+   * campos DELA. `desfecho: null` porque criar não fecha o negócio — os mesmos
+   * argumentos do `createLeadHandler` para esta escrita.
+   */
+  const camposExigidos = useMemo(
+    () => camposExigidosNoDestino(settings, { stageId, desfecho: null }),
+    [settings, stageId],
+  );
+
+  /**
+   * O QUE AINDA FALTA para esta criação — para o formulário não chamar a API
+   * que já sabe que vai ser recusada (era a ida e volta que deixava o botão em
+   * "Criando…") e para dizer o que falta AO LADO do campo, em vez de só num
+   * toast sobre um campo que a tela não mostrava.
+   */
+  const faltandoNaEtapa = useMemo(
+    () =>
+      validaCamposExigidos({
+        lead: { custom_fields: camposDoNegocio },
+        settingsDoFunil: settings,
+        destino: { stageId, desfecho: null },
+        motivoDeGanho: null,
+      }).faltando,
+    [settings, stageId, camposDoNegocio],
+  );
 
   /**
    * O submit normal. ANTES de qualquer chamada de rede vem a pergunta de
@@ -175,6 +243,14 @@ export function NewLeadDialog({
    * duplicidade — é a única forma de não dizer a mesma coisa duas vezes.
    */
   async function gravar(values: FormShape, avisoJaMostrado: boolean) {
+    // A régua da ETAPA (#1710) agora está visível no próprio formulário: se
+    // ainda falta campo, a recusa sai daqui — sem ida e volta, e com a pessoa
+    // no diálogo, o input na frente dela. O servidor segue perguntando a MESMA
+    // coisa (defesa em profundidade, e é ele quem decide); o que muda é que o
+    // caminho do operador não depende mais de um 422 para explicar o que a tela
+    // não mostrava.
+    if (faltandoNaEtapa.length > 0) return;
+
     const tags = values.tagsRaw
       .split(",")
       .map((s) => s.trim())
@@ -183,11 +259,36 @@ export function NewLeadDialog({
     const reais = values.valueReais.trim();
     let valueCents: number | null = null;
     if (reais.length > 0) {
-      valueCents = parseReaisToCents(reais);
+      // Negócio NOVO nasce na moeda da organização (é ela que o servidor grava
+      // e é ela que o rótulo do campo mostra) — e é ela que diz se a vírgula é
+      // decimal ou separador de milhar (#3331).
+      valueCents = parseReaisToCents(reais, moedaDoValor);
       if (valueCents === null) {
         form.setError("valueReais", { message: t("Valor inválido") });
         return;
       }
+    }
+
+    // A MENSALIDADE (fatia 1 da #3602). Ela NÃO entra no `value_cents`: o valor
+    // único continua sendo o setup, e a soma dos dois é o número que ninguém
+    // consegue separar depois. A leitura dos dois campos é a régua COMPARTILHADA
+    // com os outros dois formulários (`lerRecorrenciaDoFormulario`): a moeda da
+    // organização decide a vírgula, e duração sem mensalidade é recusa.
+    const leitura = lerRecorrenciaDoFormulario(
+      values.valorRecorrenteReais,
+      values.recorrenciaMeses,
+      moedaDoValor,
+    );
+    if (!leitura.ok) {
+      form.setError(leitura.campo === "valor" ? "valorRecorrenteReais" : "recorrenciaMeses", {
+        message:
+          leitura.motivo === "valor_invalido"
+            ? t("Valor inválido")
+            : leitura.motivo === "duracao_invalida"
+              ? t("Duração inválida")
+              : t("Informe a mensalidade para usar a duração"),
+      });
+      return;
     }
 
     const payload: Record<string, unknown> = {
@@ -205,7 +306,18 @@ export function NewLeadDialog({
     if (idDoContato) payload.contact_id = idDoContato;
     if (values.description.trim()) payload.description = values.description.trim();
     if (valueCents !== null) payload.value_cents = valueCents;
+    if (leitura.trio.recurring_value_cents !== null) {
+      payload.recurring_value_cents = leitura.trio.recurring_value_cents;
+      payload.recurring_period = leitura.trio.recurring_period;
+      if (leitura.trio.recurring_months !== null) {
+        payload.recurring_months = leitura.trio.recurring_months;
+      }
+    }
     if (values.expected_close_date) payload.expected_close_date = values.expected_close_date;
+    // Os campos que a etapa exige viajam NESTA criação (issue #3038): o
+    // `createLeadSchema` os aceita e o `createLeadHandler` valida/grava o
+    // mesmo objeto que a régua da etapa acabou de ler.
+    if (Object.keys(camposDoNegocio).length > 0) payload.custom_fields = camposDoNegocio;
 
     const parsed = createLeadSchema.safeParse(payload);
     if (!parsed.success) {
@@ -249,18 +361,20 @@ export function NewLeadDialog({
         description: "",
         stage_id: initialStage,
         valueReais: "",
+        valorRecorrenteReais: "",
+        recorrenciaMeses: "",
         tagsRaw: "",
         expected_close_date: "",
       });
       setContato(null);
       setAviso(null);
+      setCamposDoNegocio({});
       onOpenChange(false);
     } catch {
       // toast already shown
     }
   }
 
-  const stageId = form.watch("stage_id");
   // Negócio sem pessoa não tem para quem o WhatsApp falar nem com quem a
   // automação casar. Dizer isso na hora vale mais que travar: quem abre o card
   // no meio da ligação e completa depois continua conseguindo, e a importação e
@@ -363,6 +477,52 @@ export function NewLeadDialog({
             </div>
           </div>
 
+          {/* A MENSALIDADE (fatia 1 da #3602) — ao lado do valor único, num
+              bloco próprio. Setup + mensalidade é o formato da maior parte do
+              que se vende aqui (agência, clínica, escola, software), e era
+              isso que ia para a descrição ou para uma etiqueta, onde nenhum
+              relatório enxerga. Opcional: quem vende uma vez só não preenche
+              nada e a tela fica como era. */}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-2">
+              <Label htmlFor="valorRecorrenteReais">
+                {t("Valor recorrente (mensal)")} ({simboloDaMoeda(moedaDoValor)})
+              </Label>
+              <Input
+                id="valorRecorrenteReais"
+                inputMode="decimal"
+                placeholder="0,00"
+                {...form.register("valorRecorrenteReais")}
+              />
+              {/* O eco é a MESMA promessa do valor único: dinheiro não é
+                  interpretado em silêncio. */}
+              <EcoDoValor
+                control={form.control}
+                moeda={moedaDoValor}
+                campo="valorRecorrenteReais"
+              />
+              {form.formState.errors.valorRecorrenteReais && (
+                <p className="text-xs text-error-fg">
+                  {form.formState.errors.valorRecorrenteReais.message}
+                </p>
+              )}
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="recorrenciaMeses">{t("Duração (meses)")}</Label>
+              <Input
+                id="recorrenciaMeses"
+                inputMode="numeric"
+                placeholder={t("sem prazo")}
+                {...form.register("recorrenciaMeses")}
+              />
+              {form.formState.errors.recorrenciaMeses && (
+                <p className="text-xs text-error-fg">
+                  {form.formState.errors.recorrenciaMeses.message}
+                </p>
+              )}
+            </div>
+          </div>
+
           <div className="space-y-2">
             <Label htmlFor="tagsRaw">{t("Tags (separadas por vírgula)")}</Label>
             <Input
@@ -371,6 +531,37 @@ export function NewLeadDialog({
               {...form.register("tagsRaw")}
             />
           </div>
+
+          {/* OS CAMPOS QUE A ETAPA EXIGE (issue #3038) — pelo renderizador ÚNICO
+              dos campos personalizados (`CustomFieldsEditor`, o mesmo do dossiê
+              e do painel do inbox): o input certo por tipo, o campo condicional
+              (#2728) e o padrão do campo (#2730) vêm de graça, e nada aqui é um
+              formulário paralelo que divergiria no mês seguinte. O bloco só
+              existe quando a etapa ESCOLHIDA exige algo: funil sem
+              `obrigatorio_em` fica byte a byte como era. A frase do que falta é
+              a MESMA do servidor (`recusaDeCamposObrigatorios`), agora ao lado
+              do campo — o aviso antigo aparecia sem nada para preencher. */}
+          {camposExigidos.length > 0 && (
+            <div className="space-y-3 rounded-md border border-border p-3">
+              <p className="text-sm font-medium">
+                {t("A etapa escolhida exige alguns dados. Preencha para continuar.")}
+              </p>
+              <CustomFieldsEditor
+                fields={camposExigidos}
+                value={camposDoNegocio}
+                onChange={setCamposDoNegocio}
+                mode="lead"
+              />
+              {faltandoNaEtapa.length > 0 && (
+                <p role="alert" className="text-xs text-error-fg">
+                  {t("Preencha os campos obrigatórios antes de continuar: {campos}.").replace(
+                    "{campos}",
+                    faltandoNaEtapa.map((campo) => campo.rotulo).join(", "),
+                  )}
+                </p>
+              )}
+            </div>
+          )}
 
           {/* O AVISO SEM BLOQUEIO (#1751): aparece quando já existe negócio
               aberto deste contato NESTE funil. Ele não recusa nada — só para o

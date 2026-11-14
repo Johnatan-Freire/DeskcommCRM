@@ -26,7 +26,7 @@
     "cercas": "vitest run --project cercas",
     "test:db": "bash scripts/test-db.sh",
     "test:db:update": "bash scripts/test-update-com-dados.sh",
-    "test:shell": "bash tests/shell/update-guard.test.sh && bash hostgator-setup-kit/test-validators.sh && bash tests/shell/baseline-reaplica-apos-disputa.test.sh && bash tests/shell/dono-do-projeto.test.sh && bash tests/shell/scheduler-entrypoint.test.sh && bash tests/shell/cron-sem-crontab-previo.test.sh && bash tests/shell/senha-do-cron-vazada.test.sh && bash tests/shell/owner-id-por-email.test.sh && bash tests/shell/deskcomm-contribuir.test.sh && bash tests/shell/colisao-de-migration.test.sh && bash tests/shell/test-db-recusa-sem-vitest.test.sh && bash tests/shell/guard-hooks-atualizados.test.sh && bash tests/shell/hooks-nao-acusam-a-main.test.sh && bash tests/shell/env-e2e-porta-do-stack.test.sh && bash tests/shell/instalar-guias.test.sh && bash tests/shell/arquitetura-kit.test.sh && bash tests/shell/extensao-nao-instala.test.sh && bash tests/shell/atualizacao-para-quem-fala-com-o-banco.test.sh && bash tests/shell/desinstalar-docker.test.sh && bash tests/shell/stack-local.test.sh && bash tests/shell/e2e-build-recusa-sem-next.test.sh && bash tests/shell/smoke-llm-recusa-sem-tsx.test.sh && bash tests/shell/waha-backup-volume.test.sh && bash tests/shell/single-server-installer.test.sh && bash tests/shell/single-server-operacao.test.sh && bash tests/shell/ubuntu-production-installer.test.sh && bash tests/shell/atualizacao-de-fora-nao-pula-o-backup.test.sh && bash tests/shell/deploy-vps.test.sh && bash tests/shell/backup-env-entre-aspas.test.sh",
+    "test:shell": "bash tests/shell/update-guard.test.sh && bash hostgator-setup-kit/test-validators.sh && bash tests/shell/baseline-reaplica-apos-disputa.test.sh && bash tests/shell/dono-do-projeto.test.sh && bash tests/shell/scheduler-entrypoint.test.sh && bash tests/shell/cron-sem-crontab-previo.test.sh && bash tests/shell/senha-do-cron-vazada.test.sh && bash tests/shell/owner-id-por-email.test.sh && bash tests/shell/deskcomm-contribuir.test.sh && bash tests/shell/colisao-de-migration.test.sh && bash tests/shell/test-db-recusa-sem-vitest.test.sh && bash tests/shell/guard-hooks-atualizados.test.sh && bash tests/shell/hooks-nao-acusam-a-main.test.sh && bash tests/shell/env-e2e-porta-do-stack.test.sh && bash tests/shell/instalar-guias.test.sh && bash tests/shell/arquitetura-kit.test.sh && bash tests/shell/extensao-nao-instala.test.sh && bash tests/shell/atualizacao-para-quem-fala-com-o-banco.test.sh && bash tests/shell/desinstalar-docker.test.sh && bash tests/shell/stack-local.test.sh && bash tests/shell/e2e-build-recusa-sem-next.test.sh && bash tests/shell/smoke-llm-recusa-sem-tsx.test.sh && bash tests/shell/waha-backup-volume.test.sh && bash tests/shell/single-server-installer.test.sh && bash tests/shell/single-server-operacao.test.sh && bash tests/shell/ubuntu-production-installer.test.sh && bash tests/shell/atualizacao-de-fora-nao-pula-o-backup.test.sh && bash tests/shell/deploy-vps.test.sh && bash tests/shell/backup-env-entre-aspas.test.sh && bash tests/shell/backup-concorrente-nao-corrompe.test.sh",
     "test:invariants": "bash scripts/test-db.sh",
     "lint:channels": "tsx scripts/lint-channels.ts",
     "lint:role-rank": "tsx scripts/lint-role-rank.ts",
@@ -42,17 +42,18 @@
     "local:status": "bash scripts/local-stack.sh status",
     "local:logs": "bash scripts/local-stack.sh logs",
     "dev:crons": "tsx --env-file-if-exists=.env --env-file-if-exists=.env.local scripts/dev-crons.ts",
-    "flywheel:judge": "tsx --env-file-if-exists=.env --env-file-if-exists=.env.local scripts/flywheel-judge-live.ts"
+    "flywheel:judge": "tsx --env-file-if-exists=.env --env-file-if-exists=.env.local scripts/flywheel-judge-live.ts",
+    "medir:acervo-waha": "tsx scripts/medir-acervo-waha.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.16",
     "@ai-sdk/google": "^4.0.18",
-    "@ai-sdk/openai": "^4.0.68",
+    "@ai-sdk/openai": "^4.0.87",
     "@emoji-mart/data": "^1.2.1",
     "@emoji-mart/react": "^1.1.1",
     "@hello-pangea/dnd": "^18.0.1",
     "@hookform/resolvers": "^5.9.1",
-    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@modelcontextprotocol/sdk": "^1.32.2",
     "@phosphor-icons/react": "^2.1.10",
     "@radix-ui/react-alert-dialog": "^1.1.23",
     "@radix-ui/react-avatar": "^1.2.6",
@@ -68,7 +69,7 @@
     "@radix-ui/react-tabs": "^1.1.21",
     "@radix-ui/react-tooltip": "^1.2.16",
     "@react-pdf/renderer": "^4.9.0",
-    "@sentry/nextjs": "^10",
+    "@sentry/nextjs": "^10.75.2",
     "@supabase/ssr": "^0.12.7",
     "@supabase/supabase-js": "^2.116.0",
     "@tanstack/react-query": "^5.103.1",
@@ -76,7 +77,7 @@
     "@tanstack/react-virtual": "^3.14.13",
     "@upstash/redis": "^1.38.4",
     "@xyflow/react": "^12.11.6",
-    "ai": "^7.0.103",
+    "ai": "^7.0.131",
     "class-variance-authority": "^0.7.0",
     "clsx": "^2.1.1",
     "date-fns": "^4.4.0",
@@ -86,7 +87,7 @@
     "ipaddr.js": "^2.5.0",
     "jsonc-parser": "^3.3.1",
     "lucide-react": "^1.46.0",
-    "next": "^16.3.8",
+    "next": "^16.4.1",
     "next-themes": "^0.4.6",
     "nodemailer": "10.0.10",
     "pdfjs-dist": "^6.3.289",
@@ -103,7 +104,7 @@
     "tailwind-merge": "^3.7.0",
     "web-push": "^3.6.7",
     "ws": "^8.21.3",
-    "zod": "^4.6.5"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.13.0",
@@ -139,7 +140,8 @@
   "pnpm": {
     "//overrides": "Pisos de versão para dependência TRANSITIVA com advisory. Não é atalho: `pnpm update <pkg>` só casa o padrão contra o package.json (hono/js-yaml/nanoid não estão lá, e não se movem), e `pnpm update` sem alvo reescreve 29 ranges diretas e arrasta 139 pacotes. Override é a única ferramenta que move transitiva sem arrastar o mundo. Os seletores com `@<major>` são LOAD-BEARING: o lock tem duas árvores de brace-expansion (1.x e 5.x) e duas de path-to-regexp (6.x e 8.x); sem o escopo, o override rebaixa a árvore nova para a antiga — em silêncio, com `pnpm audit` ainda verde.",
     "overrides": {
-      "postcss": "^8.5.28",
+      "body-parser@2": "^2.4.0",
+      "postcss": "^8.5.31",
       "sharp": "^0.35.5",
       "hono": "^4.13.5",
       "js-yaml": "^4.3.2",
@@ -152,7 +154,9 @@
       "qs": "^6.16.0",
       "browserslist": "^4.28.8",
       "seroval": "^1.6.3",
-      "source-map-js": "^1.2.2"
+      "source-map-js": "^1.2.2",
+      "undici@7": "^7.30.1",
+      "proxy-addr": "^2.0.8"
     },
     "patchedDependencies": {
       "@react-pdf/hyphenate": "patches/@react-pdf__hyphenate.patch"

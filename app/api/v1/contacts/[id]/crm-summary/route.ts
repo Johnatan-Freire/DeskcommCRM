@@ -27,12 +27,14 @@
  * doença que esta rota cura é exatamente estados distintos colapsados num só.
  */
 import { createAdminClient } from "@/lib/supabase/admin";
+import { lerAnuncioDaMensagem, lerAnuncioDoContato, mesmoAnuncio } from "@/lib/leads/atribuicao-de-anuncio";
 import { prospectEnrichmentSchema } from "@/lib/prospecting/schema";
 import { randomUUID } from "node:crypto";
 import { type NextRequest } from "next/server";
 
 import { ok, fail } from "@/lib/api/wrappers";
-import { camposDoFunil, settingsDoEmbed } from "@/lib/leads/campos-do-funil";
+import { camposDoFunil, camposPorEscopo, settingsDoEmbed } from "@/lib/leads/campos-do-funil";
+import { motivosDoFunil } from "@/lib/leads/motivos-de-perda-do-funil";
 import { createClient } from "@/lib/supabase/server";
 import { nomesDosAtendentes } from "@/lib/users/nome-do-atendente";
 
@@ -46,8 +48,9 @@ export const dynamic = "force-dynamic";
  */
 // `stage_id` e as `etapas` do funil alimentam o seletor de etapa do painel: mover
 // o negócio (ex.: "Pedido confirmado") direto da conversa, sem ir ao quadro.
+// `tags` = as do NEGÓCIO, só para ler no painel (as do contato e da conversa já vinham).
 const LEAD_COLS =
-  "id, title, status, value_cents, currency, updated_at, pipeline_id, stage_id, custom_fields, crm_pipelines!inner(name, settings, is_archived, etapas:crm_stages!crm_stages_pipeline_id_fkey(id, name, position, is_won, is_lost, is_archived)), crm_stages!crm_leads_stage_id_fkey(name)";
+  "id, title, status, value_cents, recurring_value_cents, recurring_period, recurring_months, currency, updated_at, pipeline_id, stage_id, custom_fields, tags, crm_pipelines!inner(name, settings, is_archived, etapas:crm_stages!crm_stages_pipeline_id_fkey(id, name, position, is_won, is_lost, is_archived)), crm_stages!crm_leads_stage_id_fkey(name)";
 const ORDER_COLS = "id, external_id, status, total_cents, currency, created_at";
 /** Acompanha o que a timeline mostra — `reason` e `actor_kind` inclusive. */
 /**
@@ -91,7 +94,7 @@ export async function GET(
   }
 
   const { data: contactScope, error: scopeError } = await supabase.from("contacts")
-    .select("organization_id, is_anonymized").eq("id", contactId).maybeSingle();
+    .select("organization_id, is_anonymized, source_metadata").eq("id", contactId).maybeSingle();
   if (scopeError) return fail("internal_error", scopeError.message, 500, { requestId });
   if (!contactScope) return fail("not_found", "Contato não encontrado.", 404, { requestId });
   // Candidates are worker-only. Authorize the contact through RLS first, then
@@ -113,6 +116,7 @@ export async function GET(
       return { enrichment: null, enrichment_error: true };
     }
   })();
+  const anuncios = await anunciosDoContato(supabase, contactId, contactScope);
   const [leads, orders, activities, demandas, fatos, historico] = await Promise.all([
     supabase
       .from("crm_leads")
@@ -183,19 +187,60 @@ export async function GET(
       })),
       demandas: demandas.data ?? [],
       fatos: fatos.data ?? [], historico: historico.data ?? [],
+      ...anuncios,
     },
     { requestId },
   );
+}
+
+/**
+ * De qual anúncio a pessoa veio, para o painel ao lado da conversa.
+ *
+ * Dois anúncios, porque são duas perguntas: o de ORIGEM (primeiro toque, o que
+ * o contato guarda e nunca reescreve) e o MAIS RECENTE que ela clicou, quando é
+ * outro — numa loja com vários produtos, quem chegou pelo anúncio de um e
+ * voltou pelo de outro está falando do segundo.
+ *
+ * Auxiliar e por isso fora do `Promise.all` de cima: a leitura da mensagem que
+ * falha vira "sem anúncio mais recente", nunca um painel inteiro em erro. E
+ * contato anonimizado não mostra anúncio nenhum.
+ */
+async function anunciosDoContato(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  contactId: string,
+  contato: { organization_id: string; is_anonymized: boolean | null; source_metadata: unknown },
+) {
+  if (contato.is_anonymized) return { anuncio_de_origem: null, anuncio_mais_recente: null };
+  const origem = lerAnuncioDoContato(contato.source_metadata);
+  const { data, error } = await supabase
+    .from("messages")
+    .select("anuncio:metadata->anuncio, created_at")
+    .eq("contact_id", contactId)
+    .eq("organization_id", contato.organization_id)
+    .eq("direction", "inbound")
+    .not("metadata->anuncio", "is", null)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const linha = error ? null : (data as { anuncio: unknown; created_at: string } | null);
+  const recente = linha ? lerAnuncioDaMensagem(linha.anuncio) : null;
+  const outro = recente && !(origem && mesmoAnuncio(origem, recente));
+  return {
+    anuncio_de_origem: origem,
+    anuncio_mais_recente: outro ? { ...recente, recebido_em: linha!.created_at } : null,
+  };
 }
 
 function comCamposDoFunil(row: Record<string, unknown>) {
   const { crm_pipelines, crm_stages, ...lead } = row;
   return {
     ...lead,
-    field_defs: camposDoFunil(settingsDoEmbed(crm_pipelines)),
+    field_defs: camposPorEscopo(camposDoFunil(settingsDoEmbed(crm_pipelines)), "negocio"),
     funil_nome: nomeDoEmbed(crm_pipelines),
     etapa_nome: nomeDoEmbed(crm_stages),
     etapas_do_funil: etapasDoEmbed(crm_pipelines),
+    // O painel da conversa não tem o quadro em cache; sem isto a janela de perda cairia no padrão do produto.
+    motivos_de_perda: motivosDoFunil(settingsDoEmbed(crm_pipelines)),
   };
 }
 

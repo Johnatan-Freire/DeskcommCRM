@@ -194,6 +194,9 @@ export function tetoDeSaida(daOrganizacao: number | undefined, daChamada: number
   return daChamada === undefined ? base : Math.min(base, daChamada);
 }
 
+/** Provedores em que `reasoning: 'none'` foi conferido contra a API real (#2904). */
+const PROVEDORES_COM_RACIOCINIO_NENHUM_MEDIDO: ReadonlySet<string> = new Set(['anthropic', 'openai']);
+
 export interface RunModelCallInput {
   tenantId: string;
   leadId?: string | null;
@@ -238,6 +241,17 @@ export interface RunModelCallInput {
   pararQuando?: () => boolean;
   /** Teto por chamada auxiliar; nunca aumenta o limite configurado pela organização. */
   maxOutputTokens?: number;
+  /**
+   * Raciocínio pedido NESTA chamada, na opção portátil do AI SDK (`reasoning`).
+   * Cada provedor traduz para o seu campo — a Anthropic desliga o `thinking` (ou
+   * baixa o esforço no modelo que não deixa desligar), a OpenAI manda
+   * `reasoning.effort` — então quem chama não nomeia provedor.
+   *
+   * `'none'` é de quem devolve uma palavra (as classificações): o modelo que
+   * pensa antes dela cobra a espera do cliente e os tokens sem ganho. Ausente =
+   * o padrão do modelo, como sempre foi.
+   */
+  reasoning?: 'none';
   /** Cancelamento propagado pelo chamador; a falha continua registrada em llm_calls. */
   abortSignal?: AbortSignal;
   /**
@@ -257,6 +271,23 @@ export interface RunModelCallDeps {
    */
   agora?: Date;
 }
+
+/**
+ * O subconjunto do `GenerateTextResult` que o motor deste seam CONSUME — e a
+ * régua que o ramo da assinatura tem de satisfazer campo a campo.
+ *
+ * Existe por causa do defeito da #2657: o ramo da assinatura monta à mão um
+ * objeto com cara de resultado de generateText (o SIWC exige streamText), e o
+ * cast duplo do SDK escondia do compilador o campo responseMessages que
+ * faltava — o motor lê esse campo em `inbound-turn.ts` e o turno quebrava com
+ * `TypeError: e is not iterable` logo depois de a resposta já ter saído. Com o
+ * `satisfies` aqui, tirar (ou jamais adicionar) qualquer campo que o motor lê
+ * vira erro de tipo NA HORA, não um turno mudo em produção.
+ */
+export type ResultadoDoModeloDoSeam = Pick<
+  Awaited<ReturnType<typeof generateText>>,
+  'text' | 'usage' | 'response' | 'responseMessages' | 'steps' | 'toolCalls' | 'finishReason'
+>;
 
 /**
  * Texto do aviso de limiar. É PONTEIRO, não retrato: manda ver os números na
@@ -729,6 +760,14 @@ export async function runModelCall(db: pg.Pool, cfg: LlmEdgeConfig, input: RunMo
       topK,
       maxOutputTokens: tetoDeSaida(maxOutputTokens, input.maxOutputTokens),
       ...cacheDaCauda(config.provider, input.maxSteps),
+      // Só onde o `'none'` foi aceito pela API real (#2904). Nos de Chat Completions
+      // (OpenRouter, Requesty, personalizado) o SDK manda `reasoning_effort` para
+      // qualquer modelo; no Gemini 2.5 Pro vira `thinkingBudget: 0`, que o Google
+      // documenta como recusado, e no 3.x Pro, `thinkingLevel: "minimal"`. Uma recusa
+      // derrubaria a classificação em todo turno. Entram com a medição deles.
+      ...(input.reasoning !== undefined && PROVEDORES_COM_RACIOCINIO_NENHUM_MEDIDO.has(config.provider)
+        ? { reasoning: input.reasoning }
+        : {}),
     });
   } catch (err) {
     err = identificarConteudoBloqueado(err) ?? err;

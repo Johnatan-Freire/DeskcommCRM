@@ -99,6 +99,11 @@ function subirParaOHistorico() {
   fireEvent.scroll(sc);
 }
 
+// Integração v1.108: o fio passou a usar o `useThreadAutoScroll` do upstream
+// (#3209), que corrige o mesmo bug do nosso #22. Ficam aqui os casos do bug
+// (fio com 50+ mensagens, mensagem alta, envio próprio, item apagado); o aviso
+// "novas mensagens" e a volta ao fim são cobertos por
+// `chat-thread-follow-latest.test.tsx`, do upstream.
 describe("ChatThread: mensagem nova no fim do fio", () => {
   beforeEach(() => {
     qc = new QueryClient();
@@ -149,19 +154,6 @@ describe("ChatThread: mensagem nova no fim do fio", () => {
     expect(rolar).toHaveBeenCalledTimes(1);
   });
 
-  it("quem está lendo o histórico NÃO é arrancado, e vê o aviso 'Nova mensagem'", () => {
-    const { rerender } = abrir(janela(50));
-    subirParaOHistorico();
-    estado.mensagens = janela(51);
-    rerender(<ChatThread conversationId="c-1" />);
-    expect(rolar).not.toHaveBeenCalled();
-
-    const aviso = screen.getByTestId("thread-nova-mensagem");
-    act(() => aviso.click());
-    expect(rolar).toHaveBeenCalledWith({ behavior: "smooth", block: "end" });
-    expect(screen.queryByTestId("thread-nova-mensagem")).toBeNull();
-  });
-
   it("a mensagem que EU envio leva ao fim mesmo lendo o histórico", () => {
     const { rerender } = abrir(janela(50));
     subirParaOHistorico();
@@ -182,14 +174,4 @@ describe("ChatThread: mensagem nova no fim do fio", () => {
     expect(screen.queryByTestId("thread-nova-mensagem")).toBeNull();
   });
 
-  it("voltar ao fim rolando apaga o aviso", () => {
-    const { rerender } = abrir(janela(50));
-    subirParaOHistorico();
-    estado.mensagens = janela(51);
-    rerender(<ChatThread conversationId="c-1" />);
-    expect(screen.getByTestId("thread-nova-mensagem")).toBeTruthy();
-    geo.scrollTop = 1280;
-    fireEvent.scroll(scroller());
-    expect(screen.queryByTestId("thread-nova-mensagem")).toBeNull();
-  });
 });

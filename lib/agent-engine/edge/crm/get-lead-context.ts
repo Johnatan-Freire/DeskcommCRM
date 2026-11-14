@@ -16,6 +16,7 @@ import type { CrmEdgeConfig } from './mcp-client';
 import { deriveLgpdFromContact, type LgpdInput } from '../../guardrails/lgpd/legal-basis';
 import { isoLocalComOffset } from '@/lib/tempo/agora';
 import { nomeDoContato } from '@/lib/contacts/rotulo-do-contato';
+import { frameMediaBody } from './moldura-de-midia';
 
 /**
  * Heurística conservadora de contagem: ~3,5 chars/token para pt-br (BPE real fica
@@ -406,33 +407,10 @@ function fitToBudget(
   return build(messages);
 }
 
-/** Substantivo pt-br por tipo de mídia (p/ o enquadramento do derivado). */
-const MEDIA_NOUN: Record<string, string> = {
-  image: 'uma imagem',
-  video: 'um vídeo',
-  audio: 'um áudio',
-  document: 'um documento (PDF)',
-  sticker: 'uma figurinha',
-};
-
-/**
- * Enquadra o derivado de mídia como PERCEPÇÃO do agente (Onda 3, ajuste pós-prova).
- * Sem isto, o modelo via a transcrição/descrição mas respondia "não consigo ver
- * mídia" por reflexo. O enquadramento diz explicitamente: o conteúdo já foi
- * processado; trate como se tivesse visto/ouvido; nunca negue a mídia. Legenda do
- * cliente (se houver) e conteúdo derivado coexistem. @internal exposto p/ teste.
- */
-export function frameMediaBody(type: string, caption: string | null, derived: string): string {
-  const noun = MEDIA_NOUN[type] ?? 'uma mídia';
-  const parts = [
-    `[Mídia do cliente: ele enviou ${noun} e o sistema já processou o conteúdo pra você. ` +
-      `Trate o texto abaixo como se você mesma tivesse visto/ouvido — NUNCA responda que não ` +
-      `consegue ver/ouvir mídia. Comente ou use o conteúdo naturalmente.]`,
-  ];
-  if (caption && caption.trim() !== '') parts.push(`Legenda do cliente: ${caption.trim()}`);
-  parts.push(`Conteúdo: ${derived}`);
-  return parts.join('\n');
-}
+// A moldura e o seu desembrulho moram juntos em `moldura-de-midia.ts` (o cartão
+// da passagem precisa ler a mesma moldura de volta). Reexportado aqui porque é
+// por este módulo que o motor e os testes sempre a importaram.
+export { frameMediaBody };
 
 /** @internal exposto p/ teste — não usar fora de testes. */
 export const __test_fitToBudget = fitToBudget;

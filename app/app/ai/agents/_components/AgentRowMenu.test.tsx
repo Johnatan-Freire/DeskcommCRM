@@ -27,7 +27,7 @@ import { toast } from "sonner";
 import { archiveAgentAction } from "../_actions";
 import { AgentRowMenu } from "./AgentRowMenu";
 
-const FRASE = "O agent padrão da organização não pode ser arquivado.";
+const FRASE = "O agente padrão da organização não pode ser arquivado.";
 
 function agente(isDefault: boolean): AgentRow {
   return {
@@ -92,5 +92,24 @@ describe("AgentRowMenu — o agente padrão não se arquiva", () => {
 
     await vi.waitFor(() => expect(toast.error).toHaveBeenCalledTimes(1));
     expect(toast.error).toHaveBeenCalledWith(FRASE);
+  });
+});
+
+describe("AgentRowMenu — o ⋯ cabe o dedo no celular", () => {
+  // `size-8` sem prefixo derrubava o `h-11 w-11` do size `icon` em toda largura:
+  // no celular o gatilho tinha 32px. Com `md:` o computador segue igual.
+  it("o gatilho não encolhe abaixo de md", () => {
+    // Fork: o menu usa o QueryClient (invalida a lista ao arquivar).
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <AgentRowMenu agent={agente(false)} />
+      </QueryClientProvider>,
+    );
+    const classes = screen.getByRole("button", { name: "Menu de ações" }).className.split(/\s+/);
+
+    expect(classes).not.toContain("size-8");
+    expect(classes).toContain("h-11");
+    expect(classes).toContain("md:size-8");
   });
 });

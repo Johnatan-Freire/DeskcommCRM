@@ -126,6 +126,10 @@ const CURATED_FIELDS: Record<TriggerEvent, CuratedField[]> = {
   "message.received": MESSAGE_FIELDS,
   "lead.tag_added": [...LEAD_FIELDS, TAG_ADDED_FIELD],
   "contact.tag_added": [TAG_ADDED_FIELD],
+  // #2812 — quem filtra "o contato ganhou telefone" filtra por QUEM é o contato
+  // (tags), como o irmão `contact.birthday`: o telefone em si é o gatilho, e
+  // virar condição seria uma regra sempre-verdadeira disfarçada de filtro.
+  "contact.phone_added": CONTACT_FIELDS,
   "appointment.created": AGENDAMENTO_FIELDS,
   "appointment.confirmed": AGENDAMENTO_FIELDS,
   "appointment.rescheduled": AGENDAMENTO_FIELDS,

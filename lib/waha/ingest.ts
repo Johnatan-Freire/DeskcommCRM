@@ -22,13 +22,14 @@ import {
   MOTIVO_COMANDO_OFF,
   pausarIaDuravelmente,
   pausarIaPorAtendimentoManual,
+  type FalhaDaPausa,
 } from "@/lib/escalacao/atendimento-manual";
 import { agenteAceitaComandoDeCelular, lerComandoDeControle } from "@/lib/escalacao/comando-de-canal";
 import { devolverAtendimentoAoAgente } from "@/lib/escalacao/retomada";
 import { getWahaClient } from "@/lib/waha/client";
 import { acelerarPipelineDeEventos } from "@/lib/dev/kick-local-pipeline";
 import { canonicalPhoneBR } from "@/lib/channels/phone-variants";
-import { estamparAtribuicaoDoContato } from "@/lib/leads/atribuicao-de-anuncio";
+import { estamparAtribuicaoDoContato, metadataDoAnuncio } from "@/lib/leads/atribuicao-de-anuncio";
 import { extrairEEstamparAtribuicaoGoogle } from "@/lib/plataformas-de-anuncio/google/atribuicao";
 import { extrairAtribuicaoWaha } from "@/lib/waha/atribuicao-de-anuncio";
 import { previaDaMensagem } from "@/lib/messaging/previa-da-mensagem";
@@ -49,6 +50,7 @@ import {
 } from "@/lib/waha/payload";
 import { bareWaMessageId, chatIdFromWaMessageId, wahaEchoExternalIds } from "@/lib/waha/message-id";
 import { logger } from "@/lib/logger";
+import { numeroJaAquecido } from "@/lib/ai/pacing-knobs";
 import { nomeDeArquivoLimpo } from "@/lib/messaging/media/nome-de-arquivo";
 import {
   ehNumeroInternoDeAviso,
@@ -56,6 +58,27 @@ import {
 } from "@/lib/escalacao/numero-interno-de-aviso";
 
 export type Admin = ReturnType<typeof createAdminClient>;
+
+/**
+ * Aviso durável de que a pausa da IA NÃO foi garantida (#534) — o `#off` e a
+ * resposta manual pelo celular passam por `pausarIaPorAtendimentoManual` com
+ * `avisar`, e é aqui que a
+ * falha fica registrada com motivo nomeado. A ingestão segue (perder mensagem é
+ * pior que duplicar); o que não segue é a mentira de que a IA está pausada.
+ */
+function avisarPausaNaoGravada(falha: FalhaDaPausa): Promise<void> {
+  return audit({
+    action: "ai.pausa_nao_gravada",
+    organizationId: falha.organizationId,
+    resourceType: "conversation",
+    resourceId: falha.conversationId,
+    metadata: {
+      canal: falha.canal ?? "waha",
+      motivo: falha.motivo,
+      detalhe: falha.detalhe ?? null,
+    },
+  });
+}
 
 /**
  * A pausa da IA quando uma pessoa responde pelo celular vive em
@@ -84,17 +107,67 @@ export type Admin = ReturnType<typeof createAdminClient>;
 const JANELA_DO_ECO_MS = 60_000;
 
 /**
+ * Os estados em que uma linha NOSSA já SAIU para o canal — e portanto o eco
+ * dela pode estar voltando.
+ *
+ * `sent` faz parte desta lista, e a falta dele era o defeito do #3138: `sent`
+ * SEM `external_id` não é acidente nem estado impossível, é DESFECHO escrito de
+ * propósito nos dois caminhos que enviam por nós, exatamente quando o eco vence
+ * o `unique (organization_id, external_id)`:
+ *
+ *   - `app/api/v1/messages/_handler.ts:1254-1257` — "a mensagem SAIU e fica
+ *     `sent` sem o id — nunca `queued`, que é pedir para ser reenviada";
+ *   - `lib/agent-engine/edge/crm/session-reconciler.ts:471-479` — o watchdog
+ *     reenvia, `markRedriveSent` devolve true (o eco já ocupava o id),
+ *     `removeRedriveEcho` APAGA a linha do eco e `stampExternalIdAfterEcho` é
+ *     BLINDADO: falhando ele, a linha NOSSA fica `sent` sem id e a linha do eco
+ *     já não existe.
+ *
+ * Com essas duas condições, uma REENTREGA do mesmo eco não tinha com o que
+ * casar: o dedup por `external_id` não acha id nenhum (a linha do eco foi
+ * apagada pela nossa própria limpeza), a re-checagem pós-insert exige uma linha
+ * NOSSA COM o id, e esta régua da janela recusava a linha porque o status já
+ * dizia `sent`. O eco do nosso próprio envio era lido como "uma pessoa
+ * respondeu pelo canal": IA pausada por 1 h, linha duplicada e lead nascido
+ * pela conversa do celular (issue #3138).
+ *
+ * `failed` fica FORA de propósito: ali nada foi ao canal, então não existe eco
+ * que explique a mensagem. A comparação de corpo abaixo limita o resto — frase
+ * diferente continua sendo digitação de verdade (os controles de #519/#2066).
+ */
+const STATUS_DE_ENVIO_NOSSO = ["queued", "sending", "sent", "delivered", "read"];
+
+/**
  * A mensagem `fromMe` que chegou é o eco de um envio que ESTE CRM acabou de
  * fazer — e não alguém digitando no celular?
  *
- * A prova exigida é forte: uma linha nossa na MESMA conversa, ainda sem
- * `external_id` (portanto ainda em voo), com o MESMO corpo, dentro da janela.
+ * A prova exigida é forte: uma linha nossa na MESMA conversa, com o MESMO corpo,
+ * dentro da janela, e UMA destas duas marcas:
+ *
+ *   - ainda SEM `external_id`, num dos estados em que a linha saiu
+ *     (`STATUS_DE_ENVIO_NOSSO` — `sent` inclusive, #3138), ou
+ *   - já com `external_id` igual a um dos ids que o CANAL entregou nesta mensagem
+ *     — o carimbo do envio (#3165).
+ *
  * Qualquer uma dessas faltando, a resposta é "não sei" — e "não sei" silencia,
  * porque é o desfecho seguro do lado do atendente humano (#371).
  *
  * Mídia não tem corpo comparável (o eco traz `media_url`, não texto): ali a
  * prova cai para "existe envio nosso em voo do mesmo tipo na janela", que é mais
  * permissivo e assumidamente mais fraco.
+ *
+ * ⚠️ A SEGUNDA marca existe porque a janela não é só "antes de o envio confirmar":
+ * o carimbo pode cair DURANTE a ingestão — depois da re-checagem pós-insert e
+ * antes desta decisão (#3165). Sem ela, a linha já `sent` não é vista, o eco volta
+ * a ser lido como resposta pelo celular e a IA pausa por 1 h (o relato do #3138,
+ * com o estado final de uma linha só, a nossa, já com o id).
+ *
+ * E o que fecha essa janela é a LEITURA ÚNICA: o id e o texto saem da MESMA linha
+ * do MESMO instante, então nenhuma escrita pode cair "entre" as duas perguntas.
+ * Duas consultas em sequência — o id numa, o texto na outra — ENCOLHEM a janela e
+ * não a fecham: o carimbo que cai entre elas faz a IA pausar de novo.
+ * `lib/waha/ingest-eco-carimbado-no-meio.test.ts` é a catraca, e ele carimba o id
+ * depois de CADA leitura da janela, não num ponto só.
  */
 async function ehEcoDeEnvioNosso(
   admin: Admin,
@@ -105,7 +178,7 @@ async function ehEcoDeEnvioNosso(
   const desde = new Date(Date.now() - JANELA_DO_ECO_MS).toISOString();
   const { data, error } = await admin
     .from("messages")
-    .select("id, body, type")
+    .select("id, body, type, external_id, status")
     .eq("organization_id", organizationId)
     .eq("conversation_id", conversationId)
     .eq("direction", "outbound")
@@ -124,11 +197,23 @@ async function ehEcoDeEnvioNosso(
     // integração deixa de ser reconhecida como envio NOSSO, o eco do próprio
     // envio vira "resposta pelo celular" e cala a IA por três horas.
     .in("sent_via", ["ai", "user", "automation", "system"])
-    // Sem `external_id` = ainda não confirmada pelo canal = ainda em voo. É esta
-    // a janela exata em que o eco é indistinguível de digitação humana.
-    .is("external_id", null)
-    .in("status", ["queued", "sending"])
-    .gte("created_at", desde)
+    // ⚠️ O `external_id` NÃO é filtro aqui, de propósito (#3165): as duas marcas
+    // da prova — id nulo (em voo) e id igual ao que o canal entregou (carimbado
+    // durante a ingestão) — são decididas sobre a MESMA linha desta leitura, no
+    // corpo do laço. Filtrar por id no SQL exigiria OU duas consultas (a janela
+    // que este conserto fecha: o carimbo cai entre elas) OU um `.or()` de DSL que
+    // a consulta não precisa para ser correta.
+    //
+    // O `status` estreita o conjunto: `sent` entra porque é o status que o envio
+    // grava JUNTO do id (`marcarEnviada`); `queued`/`sending` são o "em voo" de
+    // sempre. Qual status vale para qual das duas marcas é o laço abaixo — aqui é
+    // só o recorte de linhas que a decisão pode usar.
+    .in("status", STATUS_DE_ENVIO_NOSSO)
+    // `updated_at`, e não `created_at`: o reenvio (`POST /messages/{id}/retry`)
+    // põe na fila uma linha criada há muito tempo, e o eco dele tem de casar do
+    // mesmo jeito. Para o envio novo dá no mesmo (`updated_at` nasce igual a
+    // `created_at` e só cresce), então a janela só fica mais larga, nunca mais estreita.
+    .gte("updated_at", desde)
     .limit(20);
 
   if (error) {
@@ -139,8 +224,42 @@ async function ehEcoDeEnvioNosso(
   }
 
   const corpo = (p.body ?? "").trim();
+  // As formas que o id desta mensagem pode ter no banco: o composto que o webhook
+  // entregou e a cauda que o envio grava (`marcarEnviada` → `canonicalExternalId`).
+  // Mesmo par que a re-checagem pós-insert usa, algumas linhas acima.
+  //
+  // Payload sem id (não é o caso deste caminho — `fromMe` traz o composto, e a
+  // re-checagem acima já depende disso) não casa ninguém: a lista fica vazia e a
+  // MARCA 2 não dispara.
+  const idDoEco = p.id ?? null;
+  const caudaDoEco = idDoEco === null ? null : bareWaMessageId(idDoEco);
+  const idsDaMensagem = idDoEco === null ? [] : caudaDoEco === idDoEco ? [idDoEco] : [idDoEco, caudaDoEco];
+
   for (const linha of data ?? []) {
-    const l = linha as { body: string | null; type?: string | null };
+    const l = linha as {
+      body: string | null;
+      type?: string | null;
+      external_id?: string | null;
+      status?: string | null;
+    };
+
+    // ── MARCA 2 (#3165): o CARIMBO do envio já está NESTA linha, com o id do
+    // canal que acabou de chegar. É a MESMA mensagem — e é prova mais forte que a
+    // de baixo, porque o id do canal não se repete entre mensagens: o corpo nem
+    // precisa ser comparado.
+    //
+    // A leitura é UMA só (o `.in("status", …)` e o `.select` acima), então esta
+    // pergunta e a comparação de corpo abaixo leem o MESMO retrato: o carimbo que
+    // cair no meio da ingestão aparece aqui, e não escapa para o lado de fora da
+    // janela como escapava quando o filtro era `.is("external_id", null)` no SQL.
+    if (l.external_id != null && idsDaMensagem.includes(l.external_id)) return true;
+
+    // ── MARCA 1: linha ainda SEM id, num status de `STATUS_DE_ENVIO_NOSSO` (o
+    // filtro do SQL acima; `sent` sem id é o #3138). Linha com id que NÃO é desta mensagem (outro envio
+    // nosso, na mesma janela) não entra: ela nunca foi a janela do eco DESTA
+    // mensagem, e era exatamente o que o `is null` do SQL garantia.
+    if (l.external_id != null) continue;
+
     if (p.type && p.type !== "chat") {
       // Mídia: sem corpo para comparar, a existência do envio em voo é a prova
       // possível. Mais fraco, e escrito para ninguém supor o contrário.
@@ -546,7 +665,10 @@ async function handleInbound(
   // dispara o pedido de rodízio pelo banco. Cortar depois já teria criado
   // contato, conversa e uma "conversa do suporte" na fila de um atendente — e o
   // "cancelar" que alguém da equipe digitasse bloquearia esse contato.
-  if (await ehNumeroInternoDeAviso(admin, session.organization_id, parsed)) {
+  // Com o telefone alternativo do `@lid` (#3716), como no eco abaixo.
+  const identidadeDoRemetente =
+    parsed.kind === "lid" ? { ...parsed, phone: telefoneAlternativoDe(p) } : parsed;
+  if (await ehNumeroInternoDeAviso(admin, session.organization_id, identidadeDoRemetente)) {
     await registrarMensagemIgnorada(admin, session.organization_id, {
       direction: "inbound",
       sessionId: session.id,
@@ -618,6 +740,9 @@ async function handleInbound(
         // resolvida, a citada no banco é a fonte da verdade — uma edição
         // posterior mudaria o que a tela mostra, e a cópia ficaria velha.
         ...(citacao?.texto && !citadaId ? { reply_to_body: citacao.texto } : {}),
+        // O anúncio DESTA mensagem vai junto — o contato guarda só o primeiro, e
+        // quem volta por outro anúncio precisa deixar rastro. Ver `metadataDoAnuncio`.
+        ...metadataDoAnuncio(atribuicao),
         // Nome original do anexo (#2613). Só quando há nome: a chave nunca é
         // gravada vazia, e gravação é de linha NOVA (o INSERT é o único caminho
         // que escreve `metadata` aqui), então nada do que já está é sobrescrito.
@@ -825,7 +950,15 @@ async function handleOutboundFromUserPhone(
   // de eco não o reconhece como nosso — sem este corte, o próprio aviso que
   // acabou de sair voltaria pelo webhook, viraria conversa com o número do
   // plantão e ainda chamaria `pausarIaPorAtendimentoManual` no fim.
-  if (await ehNumeroInternoDeAviso(admin, session.organization_id, parsed)) {
+  // ⚠️ A identidade com o telefone alternativo, e NÃO `parsed` cru (#3716): em
+  // modo privacidade o chat chega como `@lid` e `parseChatId` devolve
+  // `phone: null` — o número cadastrado em `config_aviso_de_caso` só aparece em
+  // `_data.key.remoteJidAlt`. Com `parsed` cru o primeiro aviso de uma
+  // instalação em modo privacidade voltava como contato e conversa com o
+  // número do plantão. (Grupo já saiu acima.)
+  const identidadeDoAviso =
+    parsed.kind === "lid" ? { ...parsed, phone: telefoneAlternativoDe(p) } : parsed;
+  if (await ehNumeroInternoDeAviso(admin, session.organization_id, identidadeDoAviso)) {
     await registrarMensagemIgnorada(admin, session.organization_id, {
       direction: "outbound",
       sessionId: session.id,
@@ -1029,6 +1162,7 @@ async function handleOutboundFromUserPhone(
         conversationId,
         canal: "waha",
         motivo: MOTIVO_COMANDO_OFF,
+        avisar: avisarPausaNaoGravada,
       });
     } else if (comandoAplicado === "on") {
       const devolucao = await devolverAtendimentoAoAgente(
@@ -1052,11 +1186,13 @@ async function handleOutboundFromUserPhone(
         });
       }
     } else {
+      // #534: o aviso é o que impede a falha da pausa de virar um `false` mudo.
       await pausarIaPorAtendimentoManual(admin, {
         organizationId: session.organization_id,
         conversationId,
         canal: "waha",
         duravel: aceita,
+        avisar: avisarPausaNaoGravada,
       });
     }
     // O comando não é fala de atendimento: esconde do cliente depois de aplicar.
@@ -1148,6 +1284,27 @@ async function handleAck(admin: Admin, session: Session, p: WahaPayload): Promis
   }
 }
 
+/**
+ * O controle de ritmo já não põe teto de aquecimento neste número? Lê os knobs
+ * da conexão e aplica `numeroJaAquecido`. Falha de leitura conta como "ainda
+ * aquecendo": a marca errada para o lado seguro é a que diz "não".
+ */
+async function aquecimentoTerminou(admin: Admin, session: Session): Promise<boolean> {
+  const { data, error } = await admin
+    .from("channel_knobs")
+    .select("number_activated_at, warmup_daily_caps")
+    .eq("organization_id", session.organization_id)
+    .eq("channel_session_id", session.id)
+    .maybeSingle();
+  if (error) {
+    logger.warn("waha.ingest: não li os knobs para concluir o aquecimento", {
+      detail: error.message,
+    });
+    return false;
+  }
+  return numeroJaAquecido(data);
+}
+
 interface SessionStatusRow extends Session {
   is_warmup_complete: boolean | null;
   warmup_started_at: string | null;
@@ -1165,13 +1322,30 @@ async function handleSessionStatus(
   const now = new Date().toISOString();
 
   const update: Record<string, unknown> = { status, last_status_change_at: now };
-  if (status === "WORKING" && session.warmup_started_at && !session.is_warmup_complete) {
+  if (status === "WORKING" && !session.is_warmup_complete) {
+    if (!session.warmup_started_at) {
+      // O escritor que a spec 03 descreveu e nunca foi implementado (#2432): a
+      // PRIMEIRA transição para `WORKING` marca o início do aquecimento
+      // (`docs/specs/03-spec-whatsapp-waha.md`, §5.3). Só enquanto o aquecimento
+      // não terminou: gravar isto depois do fim deixaria o início posterior a ele.
+      update.warmup_started_at = now;
+    }
+    // O FIM não é "a próxima WORKING": essa chega na primeira reconexão ou no
+    // primeiro restart do WAHA, às vezes no mesmo minuto, e marcaria aquecido um
+    // número de um dia (#2432). A régua é a do controle de ritmo
+    // (`numeroJaAquecido`): idade declarada do número ou "pular o aquecimento".
+    //
     // Só `warmup_completed_at`: `is_warmup_complete` é `GENERATED ALWAYS AS
     // (warmup_completed_at IS NOT NULL)`, e atribuir a ela abortava o UPDATE
-    // INTEIRO — inclusive o `status`, que nada tem a ver com warm-up. Ou seja: a
-    // sessão que terminava o aquecimento parava de atualizar o próprio estado, e
-    // o espelho do canal congelava sem erro visível.
-    update.warmup_completed_at = now;
+    // INTEIRO — inclusive o `status`, e o espelho do canal congelava sem erro.
+    //
+    // Limites conhecidos: a marca só anda num `session.status` WORKING; um número
+    // que fica conectado sem reconectar a recebe atrasada (erra para o lado
+    // seguro). E, gravada, ela não volta (o ramo só roda com `!is_warmup_complete`):
+    // desligar "pular o aquecimento" depois deixa a marca "sim" com o ritmo de
+    // volta a limitar — erro para o lado INSEGURO. Por isso nada no envio a lê; quem
+    // decide envio calcula na leitura com a mesma função.
+    if (await aquecimentoTerminou(admin, session)) update.warmup_completed_at = now;
   }
   await admin.from("channel_sessions").update(update).eq("id", session.id);
 
@@ -1203,6 +1377,40 @@ async function handleSessionStatus(
 }
 
 /**
+ * As formas em que a linha da mensagem ORIGINAL (a editada ou apagada) pode ter
+ * sido gravada em `messages.external_id`.
+ *
+ * ─── Por que o id do evento, sozinho, não acha a mensagem recebida ──────────
+ *
+ * `editedMessageId`/`revokedMessageId` chegam só com a CAUDA do id do WhatsApp
+ * (o bare, ex.: `3EB0…`), enquanto a mensagem RECEBIDA é gravada COMPLETA —
+ * `false_<chat>_<bare>`, o mesmo `p.id` que o webhook de entrada entregou. Casar
+ * só pelo id do evento acha a mensagem que NÓS mandamos (o envio grava o bare),
+ * mas nunca a que o cliente mandou: a linha recebida fica intocada e o evento
+ * "some" sem erro nenhum — o texto velho permanece na tela.
+ *
+ * O `chat` e o `fromMe` do PRÓPRIO evento reconstroem o composto. O prefixo é o
+ * mesmo do id do WAHA (`false_` para recebida, `true_` para enviada) e o chat
+ * vem de `payload.from`; assim o casamento EXIGE o chat — a mensagem de outra
+ * conversa tem outro composto e NÃO é tocada. A cauda preserva o caminho da
+ * mensagem enviada, que já funcionava (a linha do envio é bare).
+ */
+function formasDaMensagemOriginal(
+  idDoEvento: string,
+  chat: string,
+  fromMe: boolean | null | undefined,
+): string[] {
+  const bare = bareWaMessageId(idDoEvento);
+  const prefixo = fromMe ? "true" : "false";
+  // `idDoEvento` entra como veio (para o engine que já manda o composto), `bare`
+  // cobre o envio nosso, e a composta cobre a mensagem recebida.
+  const composta = chat ? `${prefixo}_${chat}_${bare}` : null;
+  return [
+    ...new Set([idDoEvento, bare, ...(composta ? [composta] : [])].filter((f) => f.length > 0)),
+  ];
+}
+
+/**
  * O autor editou a mensagem no aplicativo.
  *
  * O corpo é SOBRESCRITO, e não versionado: o que o CRM mostra tem que ser o que
@@ -1213,22 +1421,23 @@ async function handleSessionStatus(
  * `editedMessageId` é o id da mensagem ORIGINAL; o `id` do payload é o do
  * evento de edição. Casar pelo `id` não acharia nada — e o silêncio pareceria
  * "funcionou", que é exatamente o modo de falha que este arquivo já pagou caro
- * em outros lugares.
+ * em outros lugares. O alvo é resolvido em `formasDaMensagemOriginal` porque o
+ * id do evento traz só a cauda, não o composto com que a recebida foi gravada.
  */
 async function handleMessageEdited(
   admin: Admin,
   session: Session,
   p: WahaPayload,
 ): Promise<void> {
-  const alvo = bareWaMessageId(p.editedMessageId ?? "");
+  if (!p.editedMessageId) return;
   const corpo = typeof p.body === "string" ? p.body : null;
-  if (!alvo || corpo === null) return;
+  if (corpo === null) return;
 
   await admin
     .from("messages")
     .update({ body: corpo, edited_at: new Date().toISOString() })
     .eq("organization_id", session.organization_id)
-    .eq("external_id", alvo);
+    .in("external_id", formasDaMensagemOriginal(p.editedMessageId, p.from ?? "", p.fromMe));
 }
 
 /**
@@ -1236,23 +1445,85 @@ async function handleMessageEdited(
  *
  * A linha NÃO é removida: sumir com ela apagaria o contexto das vizinhas — uma
  * resposta passaria a responder ao nada — e o histórico de quem atendeu. O
- * corpo também não é limpo aqui: quem decide o que mostrar é a tela, e apagar o
- * texto no banco impediria o próprio atendente de entender, depois, o que tinha
- * sido combinado antes do arrependimento.
+ * corpo também não é limpo aqui: quem decide o que MOSTRAR é a régua da tela
+ * (`lib/messaging/apagada.ts`), e apagar o texto no banco destruiria o registro
+ * do que foi combinado — que é justamente o que o pedido de LGPD precisa
+ * alcançar.
+ *
+ * A revogação que chega por AQUI é a que ninguém mais registra: quem apaga no
+ * aplicativo não passa por tela nenhuma, então sem esta trilha um pedido de
+ * LGPD/RGPD pergunta "quando e como esta mensagem foi apagada" e não há
+ * resposta. Vai para a auditoria o EVENTO (ids, direção e o fato de o conteúdo
+ * estar preservado) — nunca o corpo, que `api_audit_log` guardaria por 5 anos
+ * fora do alcance da cascata de anonimização.
  */
 async function handleMessageRevoked(
   admin: Admin,
   session: Session,
   p: WahaPayload,
+  requestId: string,
 ): Promise<void> {
-  const alvo = bareWaMessageId(p.revokedMessageId ?? "");
-  if (!alvo) return;
+  if (!p.revokedMessageId) return;
 
-  await admin
+  // Forma de WAMessageRevokedBody / session.noweb.core.ts do WAHA; nenhum payload real de revoked medido nesta instalação.
+  // O chat vem em `after` (a protocolMessage de quem apagou), não no topo; o topo fica primeiro para não regredir num engine que mande flat.
+  const depois =
+    (p as { after?: { from?: unknown; fromMe?: unknown; id?: unknown } | null }).after ?? null;
+  const chat =
+    (typeof p.from === "string" && p.from) ||
+    (typeof depois?.from === "string" ? depois.from : "") ||
+    (typeof depois?.id === "string" ? (chatIdFromWaMessageId(depois.id) ?? "") : "");
+  const fromMe =
+    typeof p.fromMe === "boolean"
+      ? p.fromMe
+      : typeof depois?.fromMe === "boolean"
+        ? depois.fromMe
+        : undefined;
+
+  const { data: apagadas, error: erroDoCarimbo } = await admin
     .from("messages")
     .update({ revoked_at: new Date().toISOString() })
     .eq("organization_id", session.organization_id)
-    .eq("external_id", alvo);
+    .in("external_id", formasDaMensagemOriginal(p.revokedMessageId, chat, fromMe))
+    // Só a linha que AINDA não estava apagada. O WAHA ecoa o que o próprio
+    // número faz: apagar pela tela do CRM carimba a linha na rota (e audita
+    // `message.revoked`, com o ator) e, depois, o eco `message.revoked` chega
+    // aqui. Sem este filtro o eco recarimbava a hora e gravava uma segunda
+    // trilha dizendo que alguém apagou pelo celular — numa tabela append-only.
+    // Pelo mesmo filtro, a reentrega do mesmo evento não duplica a trilha.
+    .is("revoked_at", null)
+    .select("id, conversation_id, direction, external_id");
+  if (erroDoCarimbo) {
+    // Sem este ramo o evento "some" em silêncio e a mensagem apagada segue
+    // legível como se ninguém tivesse apagado — o modo de falha que este arquivo
+    // já pagou caro em outros lugares.
+    logger.warn("[waha] message.revoked não carimbou a linha", {
+      request_id: requestId,
+      error: erroDoCarimbo.message,
+    });
+    return;
+  }
+  // Uma trilha por linha carimbada AGORA: `direction` diz quem apagou (recebida
+  // é o contato; enviada é o próprio número, apagando pelo aplicativo do
+  // WhatsApp). O eco de um apagar feito pela tela não chega até aqui, porque a
+  // rota já carimbou a linha. Limite conhecido: se o eco chegar ANTES de a rota
+  // carimbar (a rota carimba logo depois de o WAHA responder), sai uma trilha
+  // aqui além da `message.revoked` da rota — a do ator vem dela.
+  for (const linha of apagadas ?? []) {
+    await audit({
+      action: "message.revoked_in_channel",
+      organizationId: session.organization_id,
+      resourceType: "message",
+      resourceId: linha.id,
+      requestId,
+      metadata: {
+        conversation_id: linha.conversation_id,
+        direction: linha.direction,
+        external_id: linha.external_id,
+        conteudo_preservado: true,
+      },
+    });
+  }
 }
 
 /**
@@ -1279,7 +1550,7 @@ export async function dispatchWahaEvent(
   } else if (eventType === "message.edited") {
     await handleMessageEdited(admin, session, payload);
   } else if (eventType === "message.revoked") {
-    await handleMessageRevoked(admin, session, payload);
+    await handleMessageRevoked(admin, session, payload, requestId);
   } else if (eventType === "session.status" || eventType === "state.change") {
     await handleSessionStatus(admin, session, payload);
   }

@@ -13,9 +13,16 @@ export interface UploadedMedia {
 
 export function useUploadMedia() {
   return useMutation({
-    mutationFn: async (args: { conversationId: string; file: File | Blob; filename?: string }) => {
+    mutationFn: async (args: {
+      conversationId: string;
+      file: File | Blob;
+      filename?: string;
+      /** Gravação do composer: o servidor converte para opus (F2, o AAC do iPhone). */
+      notaDeVoz?: boolean;
+    }) => {
       const form = new FormData();
       form.append("file", args.file, args.filename ?? (args.file instanceof File ? args.file.name : "audio"));
+      if (args.notaDeVoz) form.append("nota_de_voz", "1");
       const res = await fetch(`/api/v1/conversations/${args.conversationId}/media`, {
         method: "POST",
         body: form,

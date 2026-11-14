@@ -10,9 +10,11 @@ import { z } from "zod";
 
 import { ehHexValido } from "@/lib/branding/rampa";
 import { IDIOMAS } from "@/lib/i18n/idiomas";
+import { DIAS_MAXIMO_DO_RECORTE } from "@/lib/kanban/recorte-de-encerrados";
 import { MOEDAS_SERVIDAS } from "@/lib/money";
 
 import { conversationTagSchema } from "./messaging";
+import { mostrarQuandoSchema } from "./mostrar-quando";
 
 /**
  * Os idiomas que a interface REALMENTE serve.
@@ -161,12 +163,29 @@ export const customFieldSchema = z.object({
     "date",
     "select",
     "multiselect",
+    "searchable_select",
     "boolean",
     "email",
     "phone",
     "url",
   ]),
   required: z.boolean().optional(),
+  /**
+   * A QUE PERTENCE O CAMPO (issue #2791): ao NEGÓCIO (`negocio`) ou ao CONTATO
+   * (`contato`).
+   *
+   * A AUSÊNCIA é `negocio` — o comportamento de sempre: toda definição que já
+   * existe aparece no card e no dossiê do negócio e é gravada em
+   * `crm_leads.custom_fields`. `contato` tira o campo do card e o leva para a
+   * ficha do contato, cujo valor mora em `contacts.custom_fields`.
+   *
+   * Sem `.default()` de propósito: gravar `negocio` em cima de um funil que não
+   * tem a chave faria toda definição existente mudar de forma ao salvar (o
+   * `handleSave` regrava `fields` inteiro). A ausência é LIDA como `negocio` em
+   * `lib/leads/campos-do-funil.ts`, e a tela só escreve a chave quando é
+   * `contato`.
+   */
+  escopo: z.enum(["negocio", "contato"]).optional(),
   /**
    * QUANDO este campo passa a OBRIGAR (issue #1536).
    *
@@ -189,10 +208,150 @@ export const customFieldSchema = z.object({
     })
     .optional(),
   options: z
-    .array(z.object({ value: z.string().min(1), label: z.string().min(1) }))
+    .array(
+      z.object({
+        value: z.string().min(1),
+        label: z.string().min(1),
+        /**
+         * APELIDOS da opção (issue #2521): outras grafias que devem casar com
+         * ela. `Nova York` ← `New York`, `NY`, `NYC`. Alimentam a busca e a
+         * normalização do `searchable_select` (iguais a `value`/`label`, sem
+         * caixa, acento nem espaço a mais). Opcional e ausente por padrão — a
+         * lista de quem só digitou valores continua idêntica à de antes.
+         */
+        aliases: z.array(z.string().min(1).max(80)).max(20).optional(),
+      }),
+    )
     .optional(),
+  /**
+   * QUANDO este campo aparece (issue #2728) — "mostrar só quando outro tem
+   * determinado valor".
+   *
+   * A condição é montada no editor de campos do funil (campo + operador +
+   * valor) e lida por `lib/schemas/mostrar-quando.ts`, que os quatro pontos de
+   * renderização consultam. Esconder NÃO apaga valor: quem filtra é a lista
+   * que a tela renderiza, e o `custom_fields` gravado segue intacto.
+   *
+   * Ausente é o caminho de todo funil instalado hoje — a régua continua
+   * opt-in, igual a `obrigatorio_em`.
+   */
+  mostrar_quando: mostrarQuandoSchema.optional(),
+  /**
+   * O FORMATO que o valor tem de ter (issue #2730): regex em string, na grafia
+   * do `pipeline.settings.fields` — `"^\\d{1,2}(,\\d{1,2})*$"` por exemplo.
+   *
+   * Opcional e SEM refinamento aqui de propósito. `camposDoFunil` lê esta
+   * definição com `safeParse` e DESCARTE o campo que não passa: se este schema
+   * passasse a exigir regex compilável, um `padrao` quebrado apagaria o campo
+   * inteiro da tela em vez de bloquear a gravação dele. A régua em si é em
+   * `lib/leads/padrao-do-campo` — fecha a porta com frase legível e nunca
+   * lança — e é lá que a regex inválida vira `padrao_invalido`.
+   *
+   * `mensagem_padrao` é a frase que o DONO escreveu para quem digitar fora do
+   * formato ("Use só números separados por vírgula, ex.: 2,9"). É dado, não
+   * interface: aparece como está, em qualquer idioma, porque traduzi-la seria
+   * trocar a instrução que o próprio operador deu.
+   */
+  padrao: z.string().optional(),
+  mensagem_padrao: z.string().optional(),
+  /**
+   * PERMITIR VALOR NOVO (issue #2521) — só faz sentido no `searchable_select`.
+   *
+   * LIGADO, a pessoa pode cadastrar na ficha um valor que não está na lista e
+   * ele é gravado como digitado. DESLIGADO (o padrão, e a chave ausente em toda
+   * definição que já existe), a escrita só aceita um valor que case com uma
+   * opção (por `value`, `label` ou apelido), gravando o `value` CANÔNICO.
+   * Hoje a régua vale na ficha (CustomFieldsEditor); `validarValorPesquisavel`
+   * existe pronta para as escritas do servidor, ainda não plugada (#2521).
+   */
+  allow_new: z.boolean().optional(),
+  /**
+   * MOSTRAR NO RESUMO DA PASSAGEM (issue #4303).
+   *
+   * LIGADO, o valor que este campo tem no CARD entra no resumo que a pessoa lê
+   * ao assumir a conversa (`montarBriefingDaPassagem`, bloco "Dados coletados
+   * automaticamente"), com o RÓTULO do campo. É o dado que decide a próxima
+   * frase de quem atende — consumo em kWh, valor da conta — e que hoje só
+   * aparece se a pessoa abrir o card.
+   *
+   * DESLIGADO (o padrão) é o que toda definição já instalada é: a chave ausente
+   * não liga nada, e o resumo sai byte a byte como saía antes desta opção. Não
+   * há migration porque a definição é o jsonb `pipelines.settings.fields`; um
+   * funil antigo simplesmente não tem a chave.
+   *
+   * A leitura é `lib/leads/campos-do-resumo-da-passagem.ts`; quem lê só o CARD
+   * da conversa (negócio), nunca campos do contato nem de outra organização.
+   */
+  mostrar_no_resumo_da_passagem: z.boolean().optional(),
 });
 export type CustomFieldDef = z.infer<typeof customFieldSchema>;
+
+/**
+ * A COTA DE CAMPOS DO NEGÓCIO por funil (issue #3111).
+ *
+ * O teto de 50 nasceu quando TODO campo do funil era do NEGÓCIO. Desde a #2791
+ * os campos do CONTATO também são declarados no funil padrão (`escopo:
+ * "contato"`) e passaram a DISPUTAR a mesma cota: a instalação do autor, com 20
+ * campos do negócio + 20 do contato, chegava a 40 de 50 e travava antes de
+ * cobrir o negócio.
+ *
+ * A cota continua 50, e passa a valer SÓ para o NEGÓCIO. O campo do contato não
+ * aparece no card e o valor dele mora em `contacts.custom_fields`, não em
+ * `crm_leads.custom_fields` — não é um campo do funil na conta que importa.
+ * Não há cota própria do contato: nada no produto limita quantos campos uma
+ * ficha de contato pode declarar.
+ *
+ * A régua do NEGÓCIO NÃO afrouxou: a ausência de `escopo` lê como `negocio`
+ * (mesma leitura de `lib/leads/campos-do-funil.ts`), então toda definição que já
+ * existe continua contando e 51 campos do negócio seguem recusados.
+ */
+export const MAX_CAMPOS_DO_NEGOCIO = 50;
+
+/** A recusa do teto, legível: diz o número e o que não entra na conta. */
+export const MENSAGEM_DO_TETO_DE_CAMPOS_DO_NEGOCIO = `O funil aceita no máximo ${MAX_CAMPOS_DO_NEGOCIO} campos do negócio. Os campos do contato não entram nesta conta.`;
+
+/**
+ * A recusa da chave repetida (#4043), legível — e com a chave dentro.
+ *
+ * A ordem do funil É a do array, e `crm_leads.custom_fields` é um objeto lido
+ * POR CHAVE: dois campos com a mesma chave disputam a mesma posição na tela e a
+ * mesma gaveta do negócio. Enquanto só existia adicionar/remover, isso passava
+ * calado; com reordenar, "qual dos dois vem primeiro" deixa de ter resposta.
+ */
+export const MENSAGEM_DE_CHAVE_REPETIDA = (chave: string) =>
+  `A chave "${chave}" aparece mais de uma vez nos campos deste funil. Cada campo precisa de uma chave própria.`;
+
+/**
+ * `fields` do PATCH: a cota conta só os campos do NEGÓCIO.
+ *
+ * O array segue sendo `customFieldSchema[]` (a forma de cada campo não mudou) —
+ * o que mudou é O QUE a cota conta. Quem escreve a mensagem é esta régua, para
+ * a tela do funil e a captação dizerem a mesma frase.
+ *
+ * A CHAVE REPETIDA (#4043) é recusada aqui, e não campo a campo: `customFieldSchema`
+ * julga um item, e o defeito só existe na lista. Repetir a chave não é "ordem
+ * estranha" — é a lista deixando de descrever uma ordem possível.
+ */
+export const camposDoFunilPatchSchema = z
+  .array(customFieldSchema)
+  .superRefine((campos, ctx) => {
+    const doNegocio = campos.filter((campo) => campo.escopo !== "contato").length;
+    if (doNegocio > MAX_CAMPOS_DO_NEGOCIO) {
+      ctx.addIssue({
+        code: "custom",
+        message: `${MENSAGEM_DO_TETO_DE_CAMPOS_DO_NEGOCIO} Recebidos ${doNegocio}.`,
+      });
+    }
+    // Uma issue só: cinco repetições da mesma chave não são cinco consertos.
+    const vistas = new Set<string>();
+    for (const campo of campos) {
+      if (vistas.has(campo.key)) {
+        ctx.addIssue({ code: "custom", message: MENSAGEM_DE_CHAVE_REPETIDA(campo.key) });
+        return;
+      }
+      vistas.add(campo.key);
+    }
+  });
 
 /** Os campos que a retomada de negócio encerrado pode copiar (issue #1538). */
 export const CAMPOS_COPIAVEIS_NA_RETOMADA = [
@@ -215,7 +374,7 @@ export const pipelineConfigPatchSchema = z.object({
       lost: z.string().min(1).max(40).optional(),
     })
     .optional(),
-  fields: z.array(customFieldSchema).max(50).optional(),
+  fields: camposDoFunilPatchSchema.optional(),
   /**
    * Os motivos de perda do funil (issue #1537): texto puro continua valendo —
    * nenhum funil existente precisa migrar dado — e quem quiser agrupar no
@@ -257,6 +416,53 @@ export const pipelineConfigPatchSchema = z.object({
   reabertura: z.enum(["mesmo_registro", "novo_negocio"]).optional(),
   /** O que a retomada copia da origem; ausente é o piso (`custom_fields` e tags). */
   reabertura_campos: z.array(z.enum(CAMPOS_COPIAVEIS_NA_RETOMADA)).max(8).optional(),
+  /**
+   * A ENTRADA DO INBOX — em que ETAPA deste funil a conversa nova vira card
+   * (issue #3011, fatia 1).
+   *
+   * Hoje a etapa de entrada não é escolhida por ninguém: é a de menor
+   * `position` entre as não-arquivadas (`lib/leads/nascimento-do-lead.ts`). Quem
+   * opera com uma etapa "Conversas iniciadas" não tinha como dizer isso ao
+   * produto — a conversa nascia na primeira etapa que já existia, e a separação
+   * entre "chegou" e "está sendo atendido" ficava por conta de arrasto manual.
+   *
+   * ⚠️ O QUE ESTE BLOCO **NÃO** ESCOLHE: o FUNIL. O card continua nascendo no
+   * funil de entrada (`crm_pipelines.is_default`), e só a ETAPA é declarada
+   * aqui. Escolher o funil dentro do `settings` de um funil seria a roda
+   * quadrada — o valor apontaria para outra linha da mesma tabela e nenhum
+   * CHECK poderia cobrar que ela exista, seja do mesmo tenant ou não.
+   *
+   * ⚠️ A CHAVE É `ativa`. Como em `settings.crm.cliente_pela_agenda`, só o
+   * `true` EXPLÍCITO liga; ausente, `false` ou qualquer outro valor é o
+   * comportamento de sempre (a primeira etapa). Quem lê confere o `stage_id`
+   * de novo contra o banco — `z.uuid()` aqui diz que o valor tem forma de
+   * identificador, não que a etapa exista, esteja neste funil ou esteja aberta:
+   * a régua final é a consulta, e é ela que impede um card nascer em etapa de
+   * outro tenant ou em "Perdido".
+   *
+   * `stage_id` é opcional para a tela poder DESLIGAR sem perder a etapa
+   * escolhida — religar não deve obrigar a escolher de novo.
+   */
+  entrada_do_inbox: z
+    .object({
+      ativa: z.boolean(),
+      stage_id: z.uuid().nullable().optional(),
+    })
+    .optional(),
+  /**
+   * O RECORTE DE ENCERRADOS ANTIGOS do quadro (#2995) — a opção POR FUNIL que
+   * deixa fora da tela os negócios encerrados há mais de N dias. Ausente ou `0`
+   * é DESLIGADO: o quadro continua trazendo tudo, como sempre trouxe.
+   *
+   * `0` E NÃO `null` PARA O "DESLIGUEI", e essa é a parte que importa: a action
+   * faz merge com o settings que está no banco gravando só as chaves que vêm no
+   * patch, então um `undefined` deixaria o valor antigo na linha — a pessoa
+   * desligaria a opção, salvaria, e os cards continuariam sumindo. O teto
+   * (`DIAS_MAXIMO_DO_RECORTE`, dez anos) vem do domínio
+   * (`lib/kanban/recorte-de-encerrados`), que é quem decide o que é um recorte
+   * válido: um número escrito aqui e outro lá divergiriam no primeiro ajuste.
+   */
+  ocultar_encerrados_dias: z.number().int().min(0).max(DIAS_MAXIMO_DO_RECORTE).optional(),
 });
 export type PipelineConfigPatch = z.infer<typeof pipelineConfigPatchSchema>;
 
@@ -332,6 +538,29 @@ export const marcaDaOrganizacaoSchema = z.object({
     .trim()
     .refine(ehHexValido, { message: "Use uma cor no formato #rrggbb" })
     .nullable(),
+  /**
+   * O remetente do e-mail de AUTOMAÇÃO da organização (#3287, fatia 1) — o nome
+   * de exibição e o "responder para".
+   *
+   * `email_from_name` é texto livre (limite de 120, o mesmo do nome da empresa:
+   * cabeçalho `From:` longo é o que os clientes de e-mail cortam). Vazio vira
+   * `null` na tela, e `null` é "use o da plataforma".
+   */
+  email_from_name: z.string().trim().max(120).nullable(),
+  /**
+   * `email_reply_to` valida com o MESMO piso de "cara de endereço" do disparo
+   * (`lib/email/remetente-da-organizacao.ts`): recusar aqui é o conserto que a
+   * pessoa vê na tela, em vez de um `Reply-To:` torto que o provedor devolveria
+   * como erro opaco no meio de um envio real.
+   */
+  email_reply_to: z
+    .string()
+    .trim()
+    .max(254)
+    .refine((valor) => valor === "" || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(valor), {
+      message: "Use um endereço de e-mail como contato@suaempresa.com",
+    })
+    .nullable(),
 });
 export type MarcaDaOrganizacaoInput = z.infer<typeof marcaDaOrganizacaoSchema>;
 
@@ -369,8 +598,41 @@ export const agendaSettingsSchema = agendaSettingsWriteSchema.catch({confirmatio
  * mostraria o selo de uma regra que o trigger não aplica.
  */
 export const crmSettingsSchema = z
-  .object({ cliente_pela_agenda: z.boolean().catch(false) })
-  .catch({ cliente_pela_agenda: false });
+  .object({
+    cliente_pela_agenda: z.boolean().catch(false),
+    /**
+     * `telefone_de_ficha_vazia` (issue #2593): o telefone que o cliente diz
+     * numa conversa entra SOZINHO na ficha SEM número — sem passar pela fila de
+     * proposta que a spec 17 §4b exige para o resto do dado ouvido.
+     *
+     * ⚠️ NASCE DESLIGADA em toda organização, e é o oposto do `cliente_pela_agenda`
+     * só na régua de leitura: lá "ausente = desligado", aqui TAMBÉM (só o booleano
+     * `true` liga). Não é assimetria acidental — a spec 17 §4b diz que o dado
+     * ouvido é PROPOSTO, não gravado, e a exceção só existe onde quem instala
+     * decide abrir mão dessa garantia. Um jsonb ausente tem de continuar sendo o
+     * comportamento de sempre.
+     *
+     * Não mora no `settings.agenda` porque aquele objeto é SUBSTITUÍDO inteiro
+     * pelo `fn_agenda_settings` (ver `colegasPodemMexerNaAgendaLigado`); `crm` é
+     * o bloco que as regras de contato já usam.
+     */
+    telefone_de_ficha_vazia: z.boolean().catch(false),
+    nome_informado_no_atendimento: z.boolean().catch(false),
+    /**
+     * `avisar_transferencia_no_whatsapp` (#3784): a transferência para atendimento
+     * humano também manda o aviso ao número do Aviso no WhatsApp.
+     *
+     * ⚠️ NASCE LIGADA: só o booleano `false` desliga — a mesma régua do SQL do
+     * handoff (`is distinct from 'false'::jsonb`), que decide se o evento nem nasce.
+     */
+    avisar_transferencia_no_whatsapp: z.boolean().catch(true),
+  })
+  .catch({
+    cliente_pela_agenda: false,
+    telefone_de_ficha_vazia: false,
+    nome_informado_no_atendimento: false,
+    avisar_transferencia_no_whatsapp: true,
+  });
 
 /** A regra "cliente pela agenda" está ligada nesta organização? Nunca lança. */
 export function clientePelaAgendaLigado(settings: unknown): boolean {
@@ -379,6 +641,25 @@ export function clientePelaAgendaLigado(settings: unknown): boolean {
       ? (settings as Record<string, unknown>).crm
       : undefined;
   return crmSettingsSchema.parse(crm ?? {}).cliente_pela_agenda === true;
+}
+
+/**
+ * O interruptor de #2593 está ligado nesta organização? **Desligado por
+ * padrão**, e nunca lança.
+ *
+ * A régua é "SÓ O BOOLEANO `true` LIGA": ausente, `false`, a string `"true"`,
+ * `1`, array ou qualquer lixo é DESLIGADO. É deliberadamente o mais
+ * conservador dos dois lados — quem atualizar o produto sem abrir a tela
+ * continua com a regra da spec 17 §4b intacta (o dado ouvido é proposto, não
+ * gravado), e um `settings` torto nunca liga uma escrita automática por
+ * acidente.
+ */
+export function telefoneDeFichaVaziaLigado(settings: unknown): boolean {
+  const crm =
+    settings && typeof settings === "object" && !Array.isArray(settings)
+      ? (settings as Record<string, unknown>).crm
+      : undefined;
+  return crmSettingsSchema.parse(crm ?? {}).telefone_de_ficha_vazia === true;
 }
 
 /**
@@ -411,4 +692,17 @@ export function colegasPodemMexerNaAgendaLigado(settings: unknown): boolean {
       ? (settings as Record<string, unknown>)
       : undefined;
   return raiz?.colegas_podem_mexer_na_agenda !== false;
+}
+/** Só true booleano autoriza preencher o nome vazio a partir do texto real do atendimento. */
+export function nomeInformadoLigado(settings: unknown): boolean {
+  const crm = settings && typeof settings === 'object' && !Array.isArray(settings)
+    ? (settings as Record<string, unknown>).crm : undefined;
+  return crmSettingsSchema.parse(crm ?? {}).nome_informado_no_atendimento === true;
+}
+
+/** Ausente liga; só o booleano `false` tira as transferências do Aviso no WhatsApp. */
+export function avisoDeTransferenciaLigado(settings: unknown): boolean {
+  const crm = settings && typeof settings === 'object' && !Array.isArray(settings)
+    ? (settings as Record<string, unknown>).crm : undefined;
+  return crmSettingsSchema.parse(crm ?? {}).avisar_transferencia_no_whatsapp;
 }

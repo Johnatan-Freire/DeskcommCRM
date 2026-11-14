@@ -192,6 +192,19 @@ export const RETENCAO_AVISO_DE_CASO_DIAS_PISO = 30;
 export const RETENCAO_PROSPECCAO_DIAS_PADRAO = 365;
 export const RETENCAO_PROSPECCAO_DIAS_PISO = 90;
 
+/**
+ * 90 dias para o TRAÇO DO TURNO do agente (`agent_turn_traces`, 0721; prazo
+ * na migration 8007). Decisão do dono em 14/11/2026.
+ *
+ * O traço responde "por que o agente respondeu assim": versão do prompt,
+ * ferramentas, fontes, custo. A pergunta útil é de semanas — o antes/depois de
+ * uma versão nova do prompt cabe com folga em três meses. Não guarda o texto
+ * das mensagens. O piso de 30 dias mora no CORPO de
+ * `fn_expurgar_traco_do_turno_vencido`, como nas irmãs.
+ */
+export const RETENCAO_TRACO_DO_TURNO_DIAS_PADRAO = 90;
+export const RETENCAO_TRACO_DO_TURNO_DIAS_PISO = 30;
+
 
 /**
  * Teto de 36500 dias (100 anos) para todo knob que passa por

@@ -17,6 +17,7 @@ import { automationRulesHandler } from "@/lib/automation/engine.handler";
 import { followupReactivityHandler } from "@/lib/followup/reactivity.handler";
 import { campanhaRespostaHandler } from "@/lib/campanhas/resposta.handler";
 import { followupGatilhoEtapaHandler } from "@/lib/followup/gatilho-etapa.handler";
+import { followupSaidaDaEtapaHandler } from "@/lib/followup/saida-da-etapa.handler";
 import { followupGatilhoLeadHandler } from "@/lib/followup/gatilho-lead.handler";
 import { followupGatilhoCasoHandler } from "@/lib/followup/gatilho-caso.handler";
 import { casoNaCentralHandler } from "@/lib/escalacao/caso-na-central.handler";
@@ -26,6 +27,7 @@ import { webPushInboundHandler } from "@/lib/notifications/push.handler";
 import { conversaoDeVendaHandler } from "@/lib/conversoes/envio.handler";
 import { avisoDeEtapaHandler } from "@/lib/leads/aviso-de-etapa.handler";
 import { avisoDeCasoAoSuporteHandler } from "@/lib/escalacao/aviso-ao-suporte.handler";
+import { avisoDeHandoffHandler } from "@/lib/escalacao/aviso-de-handoff.handler";
 import { registerHandler } from "@/lib/event-log/dispatcher";
 
 let _registered = false;
@@ -50,6 +52,14 @@ export function ensureHandlersRegistered(): void {
   registerHandler(lgpdExportHandler);
   registerHandler(lgpdRedactHandler);
   registerHandler(automationRulesHandler);
+  // A outra metade do mesmo evento: saiu da etapa, o toque que ela armou morre
+  // (escrita curta no banco, idempotente pela linha do event_log). A ORDEM IMPORTA:
+  // a saída roda ANTES do gatilho porque o índice `idx_followup_enrollments_one_live`
+  // admite um único toque vivo por contato. Na ordem inversa, o card que vai de uma
+  // etapa com fluxo para outra etapa com fluxo bate no índice ao armar o fluxo novo
+  // (o antigo ainda vivo), e logo depois a saída cancela o antigo: o contato fica
+  // sem follow-up nenhum. Vigiado em `tests/unit/followup-por-etapa.test.ts`.
+  registerHandler(followupSaidaDaEtapaHandler);
   registerHandler(followupGatilhoEtapaHandler);
   // Escrita curta no banco (um item na Central), vizinha do gatilho de etapa
   // que consome o mesmo evento.
@@ -70,6 +80,7 @@ export function ensureHandlersRegistered(): void {
   // e cuja falha custa um follow-up perdido. Ele também é o único handler que
   // adia a si mesmo quando o dreno está rodando dentro de uma requisição.
   registerHandler(avisoDeCasoAoSuporteHandler);
+  registerHandler(avisoDeHandoffHandler);
   // Por último: reportar a venda ao anúncio é o consumidor mais externo do
   // fechamento — depende de rede de terceiro e não pode atrasar quem escreve
   // no banco. Falha dele nunca segura os handlers acima.

@@ -32,6 +32,12 @@ describe("shouldNotifyInbound", () => {
     expect(shouldNotifyInbound({ ...base, tipo: "reassinado" })).toBe(false);
   });
 
+  it("mensagem importada do histórico (origem 'historico', 0561) não avisa; a do canal avisa", () => {
+    expect(shouldNotifyInbound({ ...base, origem: "historico" })).toBe(false);
+    expect(shouldNotifyInbound({ ...base, origem: "canal" })).toBe(true);
+    expect(shouldNotifyInbound({ ...base, origem: null })).toBe(true);
+  });
+
   it("pula sem conversationId", () => {
     expect(shouldNotifyInbound({ ...base, conversationId: null })).toBe(false);
   });

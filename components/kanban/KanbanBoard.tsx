@@ -21,7 +21,7 @@ import type { BoardData, Pipeline, Stage } from "@/lib/kanban/types";
 import { StageColumn } from "./StageColumn";
 import { LeadDossier } from "./LeadDossier";
 import { RetomarComoNovoNegocioDialog } from "./RetomarComoNovoNegocioDialog";
-import { camposDoFunil } from "@/lib/leads/campos-do-funil";
+import { camposDoFunil, camposPorEscopo } from "@/lib/leads/campos-do-funil";
 
 /**
  * As colunas de estágio rolam na horizontal (`overflow-x-auto`) sem nenhum
@@ -110,7 +110,7 @@ function BoardSkeleton() {
       {[0, 1, 2].map((c) => (
         <div
           key={c}
-          className="flex w-80 shrink-0 flex-col gap-2 rounded-lg border border-border bg-surface-muted/40 p-3"
+          className="flex w-80 shrink-0 flex-col gap-2 rounded-lg border border-border bg-surface-elevated/40 p-3"
         >
           <Skeleton className="h-5 w-32" />
           {[0, 1, 2, 3].map((i) => (
@@ -304,6 +304,33 @@ export function KanbanBoard({
     [data, grouped, moveCard, qc, pipelineId],
   );
 
+  /**
+   * Mudar a etapa pelo dossiê (#3272), sem arrastar. Fork: o upstream tem o
+   * "Mover para…" do card com `aoMoverPelaLista`; aqui fica só o que o dossiê
+   * usa. Mesma mutação e mesma posição fracionária do arrasto: o card vai para
+   * o FIM da etapa inteira (lida do cache do quadro, não da lista filtrada).
+   * Etapa de perda segue a régua do arrasto do fork (sem janela de motivo aqui).
+   */
+  const aoMoverPelaLista = useCallback(
+    (lead: BoardData["leads"][number], stageId: string) => {
+      const funil = qc.getQueryData<BoardData>(chaveDoQuadro(pipelineId))?.leads ?? data?.leads ?? [];
+      const posicoes = funil
+        .filter((l) => l.stage_id === stageId && l.id !== lead.id)
+        .map((l) => l.position_in_stage)
+        .filter((p): p is number => typeof p === "number" && Number.isFinite(p));
+      const ultima = posicoes.length === 0 ? null : Math.max(...posicoes);
+      const posicao = midpoint(ultima, null);
+      if (Number.isNaN(posicao)) return;
+      moveCard.mutate({
+        leadId: lead.id,
+        stageId,
+        positionInStage: posicao,
+        expectedUpdatedAt: lead.updated_at,
+      });
+    },
+    [qc, pipelineId, data, moveCard],
+  );
+
   if (isLoading) {
     return <BoardSkeleton />;
   }
@@ -386,24 +413,35 @@ export function KanbanBoard({
           className="flex min-h-0 flex-1 items-start gap-3 overflow-auto px-4 pb-4"
           data-quadro-do-funil
         >
-          {data.stages.map((stage) => (
-            <StageColumn
-              key={stage.id}
-              stage={stage}
-              leads={grouped.get(stage.id) ?? []}
-              pipelineId={pipelineId}
-              ownerNames={ownerNames}
-              coolingIds={coolingIds}
-              reactivations={reactivations}
-              pulses={pulsesProp ?? queryResult.pulses}
-              canonicalTags={canonicalTags}
-              selectedLeadIds={selectedLeadIds}
-              onSelectMany={handleSelectMany}
-              onOpen={setDossieId}
-              podeRenomear={podeRenomearEtapa}
-              onRenomear={(nome) => renameStage.mutate({ stageId: stage.id, name: nome })}
-            />
-          ))}
+          {/* A FAIXA entre o rolo e as colunas (#3030). O contêiner de fora é o
+              único que rola; esta faixa é quem dá altura às colunas: `min-h-full`
+              (nunca menos que a tela) e `items-stretch` (a mais comprida manda),
+              então a coluna vazia acompanha a rolagem e a área de soltar card
+              com ela. `w-max` mantém a largura do quadro. Não é um rolável novo,
+              e o @hello-pangea/dnd segue com a rolagem automática do arraste. */}
+          <div
+            className="flex min-h-full w-max items-stretch gap-3"
+            data-faixa-das-etapas
+          >
+            {data.stages.map((stage) => (
+              <StageColumn
+                key={stage.id}
+                stage={stage}
+                leads={grouped.get(stage.id) ?? []}
+                pipelineId={pipelineId}
+                ownerNames={ownerNames}
+                coolingIds={coolingIds}
+                reactivations={reactivations}
+                pulses={pulsesProp ?? queryResult.pulses}
+                canonicalTags={canonicalTags}
+                selectedLeadIds={selectedLeadIds}
+                onSelectMany={handleSelectMany}
+                onOpen={setDossieId}
+                podeRenomear={podeRenomearEtapa}
+                onRenomear={(nome) => renameStage.mutate({ stageId: stage.id, name: nome })}
+              />
+            ))}
+          </div>
         </div>
       </div>
       {leadDoDossie && (
@@ -412,11 +450,13 @@ export function KanbanBoard({
           onOpenChange={(v: boolean) => !v && setDossieId(null)}
           lead={leadDoDossie}
           pipelineId={pipelineId}
-          fieldDefs={camposDoFunil(data.pipeline.settings ?? null)}
+          fieldDefs={camposPorEscopo(camposDoFunil(data.pipeline.settings ?? null), "negocio")}
           stageName={
             data.stages.find((s) => s.id === leadDoDossie.stage_id)?.name ?? "—"
           }
           ownerNames={ownerNames}
+          etapas={data.stages}
+          onMudarEtapa={(stageId) => aoMoverPelaLista(leadDoDossie, stageId)}
         />
       )}
 

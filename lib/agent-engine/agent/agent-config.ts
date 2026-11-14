@@ -15,8 +15,11 @@
  */
 import type pg from 'pg';
 
+import { lerFraseDoAvisoConfigurada } from '@/lib/escalacao/frase-do-aviso-configurada';
+
 import { lerJanelaDeAtendimento, type JanelaDeAtendimento } from './janela-de-atendimento';
 import { lerTextoDoAvisoForaDoHorario } from './aviso-fora-do-horario';
+import { lerFiltroDePalavraChave } from './palavra-chave-do-gatilho';
 
 export interface PublishedAgentConfig {
   operationMode?: 'automatic' | 'assisted';
@@ -121,12 +124,29 @@ export interface PublishedAgentConfig {
    */
   janelaDeAtendimento: JanelaDeAtendimento | null;
   /**
+   * Filtro "Só responder quando a mensagem falar de algo específico"
+   * (`trigger_config.filters.keyword_regex`, #2679). `null` = sem filtro (o
+   * agente entra em tudo). Quem obedece é o turno inbound, que encerra o job
+   * sem resposta quando a mensagem não casa — ver `palavra-chave-do-gatilho.ts`
+   * para o defeito que isto conserta e a direção da falha aberta.
+   * Opcional porque nasce depois das fixtures que montam esta interface à mão.
+   */
+  filtroDePalavraChave?: RegExp | null;
+  /**
    * Texto do aviso de fora do horário (#1926), lido do mesmo `trigger_config`
    * (`filters.business_hours.notice`). `null` = sem aviso configurado: quem
    * escreve fora da janela só espera a resposta na abertura, como antes.
    * Opcional porque nasce depois das fixtures que montam esta interface à mão.
    */
   avisoForaDoHorario?: string | null;
+  /**
+   * A frase que o cliente lê quando a IA sai de campo (#3725), escrita pelo
+   * tenant em `ai_agents.config.aviso_de_handoff`. `null` = sem frase própria:
+   * sai o padrão do produto (curto e humano) de `textoDoAviso`. Lida por
+   * `lerFraseDoAvisoConfigurada`, que também recusa frase vazia/absurda — um
+   * aviso de passagem inválido não pode virar silêncio.
+   */
+  fraseDoAviso?: string | null;
   /** criadores (p/ mint do token efêmero de audit — padrão do runtime nativo). */
   versionCreatedBy: string | null;
   agentCreatedBy: string | null;
@@ -290,6 +310,12 @@ function mapAgentConfigRow(r: Row): PublishedAgentConfig {
     // `null` (sem janela ⇒ atende sempre), nunca uma mordaça acidental.
     janelaDeAtendimento: lerJanelaDeAtendimento(r.trigger_config),
     avisoForaDoHorario: lerTextoDoAvisoForaDoHorario(r.trigger_config),
+    // #3725: `null` = sem frase própria, sai o padrão do produto. A leitura
+    // valida tamanho e conteúdo (ver `frase-do-aviso-configurada.ts`).
+    fraseDoAviso: lerFraseDoAvisoConfigurada(r.config),
+    // Leitura defensiva: regex torta/valor vazio ⇒ `null` (sem filtro ⇒ entra em tudo),
+    // nunca uma mordaça acidental (#2679).
+    filtroDePalavraChave: lerFiltroDePalavraChave(r.trigger_config),
     versionCreatedBy: r.version_created_by,
     agentCreatedBy: r.agent_created_by,
   };
@@ -311,7 +337,11 @@ export async function loadPublishedAgentConfig(
        -- dispatcher nativo do CRM — pausar = despublicar).
        and v.status = 'published'
        and v.channel_session_id = $2
-     order by a.priority desc, a.created_at asc
+     -- Quem está NO AR vem antes de qualquer pausado: sem isto um pausado de
+     -- prioridade maior calava o número inteiro, com outro agente publicado nele
+     -- (produção, 2026-10-05). O pausado segue vindo quando é o único: null
+     -- aqui vira o agente genérico, e pausar faria o número voltar a responder.
+     order by (a.paused_at is not null) asc, a.priority desc, a.created_at asc
      limit 1`,
     [organizationId, channelSessionId],
   );

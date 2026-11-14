@@ -40,7 +40,7 @@
  * não-cromática que o design system já usa nos estados.
  */
 import { useRouter } from "next/navigation";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 
@@ -80,6 +80,28 @@ const TETO_DA_LISTA = 500;
  * EXATAMENTE as chaves de `PALETA_DE_ETIQUETAS`.
  */
 
+/**
+ * ONDE O NOME DE UMA ETIQUETA ESTÁ EM CACHE no cliente — e por isso precisa ser
+ * relido depois de renomear, juntar ou excluir. Prefixos: invalidar `["contact"]`
+ * alcança `["contact", id]` e as sub-chaves. `invalidarCoresDasEtiquetas` sozinho
+ * repintava o MAPA de cores, mas a lista, o cartão e o editor do Inbox seguiam com
+ * o nome antigo (cinza, já sem verbete de cor) por até 30 s, e o filtro de
+ * etiquetas oferecia o nome morto por até 5 min (`staleTime` dos vocabulários).
+ * Medido na prova de tela do #2784.
+ */
+export const CHAVES_COM_NOME_DE_ETIQUETA = [
+  ["conversations"],
+  ["conversation"],
+  ["conversation-tag-vocabulary"],
+  ["contacts"],
+  ["contact"],
+  ["contact-tag-vocabulary"],
+  ["board"],
+] as const;
+
+const DESTINO_INEXISTENTE =
+  "Essa etiqueta não existe. Juntar só leva para uma etiqueta que já existe; para dar um nome novo, use Renomear.";
+
 /** Cada recusa do servidor vira uma frase que diz O QUE FAZER. */
 const ERRO_EM_PORTUGUES: Record<string, string> = {
   validation_failed: "Confira a etiqueta, o novo nome e a cor.",
@@ -87,9 +109,10 @@ const ERRO_EM_PORTUGUES: Record<string, string> = {
   unauthenticated: "Sua sessão expirou. Entre de novo.",
   mfa_required: "Confirme o segundo fator para mudar as etiquetas.",
   forbidden_tenant: "Você não está em nenhuma organização ativa.",
+  destino_inexistente: DESTINO_INEXISTENTE,
 };
 
-export function PainelDeTags({ tags, idioma }: { tags: LinhaDeVocabulario[]; idioma: Idioma }) {
+export function PainelDeTags({ tags, idioma, paginado = false }: { tags: LinhaDeVocabulario[]; idioma: Idioma; paginado?: boolean }) {
   const t = (texto: string) => traduzir(texto, idioma);
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -103,6 +126,47 @@ export function PainelDeTags({ tags, idioma }: { tags: LinhaDeVocabulario[]; idi
     () => tags.filter((linha) => linha.tag.toLowerCase() !== alvo?.tag.toLowerCase()),
     [tags, alvo],
   );
+
+  /**
+   * O nome digitado já É uma etiqueta desta organização (issue #2801).
+   *
+   * Nesse caso `renomear` não renomeia: ele junta as duas entradas numa só, e
+   * o que sobra de cor/descrição é decidido pelo vocabulário, não por quem
+   * digitou. A tela avisa ANTES do clique — o marcador `juntou` da resposta
+   * só chega depois, quando já não há o que desfazer. Mesma régua visual do
+   * aviso de `excluir`: uma frase que diz o que vai acontecer, não um "tem
+   * certeza?".
+   *
+   * Compara com `destinos`, que já exclui a própria etiqueta: mudar só a caixa
+   * ("cliente" → "Cliente") é renome, não junção.
+   */
+  const nomeDigitado = destino.trim().toLowerCase();
+  // #2855 — com a lista paginada, o nome pode estar em OUTRA página: pergunta ao
+  // servidor pela mesma busca da tela (curado + em uso + regras). Serve ao aviso
+  // de renomear (#2801) e à junção, que só aceita destino que existe.
+  const { data: achadasNoServidor } = useQuery({
+    queryKey: ["tags-vocabulario-busca", nomeDigitado],
+    enabled: paginado && nomeDigitado.length > 0 && (acao === "renomear" || acao === "juntar"),
+    staleTime: 30_000,
+    queryFn: async ({ signal }): Promise<LinhaDeVocabulario[]> => {
+      const resposta = await fetch(
+        "/api/v1/tags/vocabulario?busca=" + encodeURIComponent(destino.trim()),
+        { signal },
+      );
+      if (!resposta.ok) throw new Error(`busca_do_destino_${resposta.status}`);
+      return ((await resposta.json()) as { data?: LinhaDeVocabulario[] }).data ?? [];
+    },
+  });
+  const outraEtiqueta = (linha: LinhaDeVocabulario) =>
+    linha.tag.toLowerCase() === nomeDigitado && linha.tag.toLowerCase() !== alvo?.tag.toLowerCase();
+  const nomeJaExiste =
+    nomeDigitado.length > 0 &&
+    (destinos.some(outraEtiqueta) || (achadasNoServidor ?? []).some(outraEtiqueta));
+  const destinoJaExiste = acao === "renomear" && nomeJaExiste;
+  // Só acusa depois que o servidor respondeu: enquanto a busca corre, não há
+  // como saber, e o servidor recusa de novo no POST (`destino_inexistente`).
+  const destinoDaJuncaoInexistente =
+    paginado && acao === "juntar" && achadasNoServidor !== undefined && nomeDigitado.length > 0 && !nomeJaExiste;
 
   function abrir(linha: LinhaDeVocabulario, qual: AcaoDeVocabulario) {
     setAlvo(linha);
@@ -142,19 +206,46 @@ export function PainelDeTags({ tags, idioma }: { tags: LinhaDeVocabulario[]; idi
         return;
       }
       const dados = corpo?.data ?? {};
+      // TODA ação mexe no verbete de cor, não só `definir_cor`. `renomear` move
+      // o nome na MESMA escrita em que o verbete de cor vai junto (a 0336 faz o
+      // `jsonb_set` só em `{tag}`), `juntar` junta dois verbetes e `excluir`
+      // tira o de baixo — e é o MAPA do provider que pinta a lista de
+      // conversas, o funil, os filtros e os editores do Inbox. Invalidar só na
+      // cor era o que deixava o chip novo CINZO depois de um rename, por até 5
+      // minutos (o `staleTime`), até alguém dar F5: "renomear descolora"
+      // (#2771). O dado já estava certo no banco; quem não acompanhava era a
+      // tela.
+      invalidarCoresDasEtiquetas(queryClient);
       if (acao === "definir_cor") {
-        // Escrever a cor é o ÚNICO caso em que esta tela muda o que outra tela
-        // mostra: o chip da lista de conversas, o funil e os filtros leem o mapa
-        // do provider. Sem esta invalidação o operador trocaria a cor, voltaria
-        // para o Inbox e veria a antiga até o `staleTime` de 5 min vencer.
-        invalidarCoresDasEtiquetas(queryClient);
         toast.success(t("Cor da etiqueta atualizada."));
         setAlvo(null);
         router.refresh();
         return;
       }
+      for (const queryKey of CHAVES_COM_NOME_DE_ETIQUETA) {
+        void queryClient.invalidateQueries({ queryKey: [...queryKey] });
+      }
       const alterados =
         Number(dados.contatos ?? 0) + Number(dados.leads ?? 0) + Number(dados.conversas ?? 0);
+      if (dados.juntou === true) {
+        // ⚠️ O AVISO DE JUNÇÃO (issue #2801). Renomear para um nome que já
+        // existia JUNTAVA as duas etiquetas e respondia como renome simples:
+        // a frase de sucesso abaixo era indistinguível da de um rename que não
+        // juntou nada, e o operador só descobria depois, na lista. O marcador
+        // vem do BANCO — é ali que se sabe se o destino já existia como
+        // entrada do vocabulário; a tela só tem a lista que ela mesma leu, e o
+        // caso interessante é justamente o que já vinha como duas linhas.
+        //
+        // `toast.warning` e não `toast.success`: a operação foi concluída, mas
+        // ela fez ALGO A MAIS do que o botão prometia, e isso não pode sair
+        // com o mesmo tom de um renome normal.
+        toast.warning(
+          `${t("Etiqueta juntada em")} ${destino} — ${t("as duas etiquetas viraram uma só.")}`,
+        );
+        setAlvo(null);
+        router.refresh();
+        return;
+      }
       // ⚠️ O DADO ENTRA FORA DO `t()`. `traduzir()` casa a string EXATA, então
       // uma frase montada em runtime nunca casa chave nenhuma —
       // a frase sai em português para quem escolheu espanhol, e o guarda de i18n
@@ -251,7 +342,7 @@ export function PainelDeTags({ tags, idioma }: { tags: LinhaDeVocabulario[]; idi
             ))}
           </tbody>
         </table>
-        {tags.length >= TETO_DA_LISTA && (
+        {!paginado && tags.length >= TETO_DA_LISTA && (
           <p className="border-t border-border/60 p-3 text-sm text-muted-foreground">
             {t(
               "Mostrando as 500 primeiras etiquetas em ordem alfabética. Se a que você procura não está aqui, arrume primeiro as que aparecem.",
@@ -302,6 +393,17 @@ export function PainelDeTags({ tags, idioma }: { tags: LinhaDeVocabulario[]; idi
           ) : acao === "juntar" ? (
             <div className="flex flex-col gap-2">
               <Label htmlFor="destino-da-juncao">{t("Etiqueta de destino")}</Label>
+              {paginado ? <>
+                <Input id="destino-da-juncao" list="destinos-da-juncao" value={destino}
+                  onChange={e=>setDestino(e.target.value)} maxLength={60}
+                  placeholder={t("Digite o nome exato da etiqueta de destino")}/>
+                <datalist id="destinos-da-juncao">{destinos.map(linha=><option key={linha.tag} value={linha.tag}/>)}</datalist>
+                {destinoDaJuncaoInexistente && (
+                  <p role="alert" className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
+                    {t(DESTINO_INEXISTENTE)}
+                  </p>
+                )}
+              </> :
               <select
                 id="destino-da-juncao"
                 className="h-9 rounded-md border border-input bg-background px-2 text-sm"
@@ -314,7 +416,7 @@ export function PainelDeTags({ tags, idioma }: { tags: LinhaDeVocabulario[]; idi
                     {linha.tag}
                   </option>
                 ))}
-              </select>
+              </select>}
             </div>
           ) : acao === "definir_cor" ? (
             <div className="flex flex-col gap-3">
@@ -367,13 +469,31 @@ export function PainelDeTags({ tags, idioma }: { tags: LinhaDeVocabulario[]; idi
                 maxLength={60}
                 placeholder={alvo.tag}
               />
+              {destinoJaExiste && (
+                // O AVISO ANTES DO CLIQUE (issue #2801). Renomear para um nome
+                // que já existe não renomeia: junta as duas etiquetas numa só,
+                // e a cor/descrição que sobra é decidida pelo vocabulário. O
+                // `juntou` da resposta só chega DEPOIS, quando já não há o que
+                // desfazer — então quem lê este aviso ainda pode escolher
+                // "Juntar" de propósito, ou outro nome. Mesma régua visual do
+                // aviso de `excluir` abaixo: a frase diz o que vai acontecer.
+                <p className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
+                  {t(
+                    "Este nome já existe no vocabulário — confirmar vai juntar as duas etiquetas numa só.",
+                  )}
+                </p>
+              )}
             </div>
           )}
 
           <div className="flex gap-2">
             <Button
               onClick={enviar}
-              disabled={ocupado || (acao !== "excluir" && acao !== "definir_cor" && destino.trim().length === 0)}
+              disabled={
+                ocupado ||
+                destinoDaJuncaoInexistente ||
+                (acao !== "excluir" && acao !== "definir_cor" && destino.trim().length === 0)
+              }
               variant={acao === "excluir" ? "destructive" : "default"}
             >
               {ocupado ? t("Aplicando...") : t("Confirmar")}

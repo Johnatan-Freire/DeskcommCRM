@@ -182,7 +182,38 @@ export function modeloOpenAIRaciocina(modelId: string): boolean {
   return /^(o\d|gpt-5|gpt-6)/.test(id) && !id.includes('chat');
 }
 
-/** Injeta `reasoning.effort` no corpo, preservando o resto de `reasoning` e da chamada. */
+/**
+ * Da linha 6 em diante nenhum modelo lista `minimal`, e só `gpt-6-luna` e `gpt-6-sol`
+ * listam `none` (doc oficial de cada id em 11/10/2026: o gpt-6.1-sol diz "`none` and
+ * `minimal` reasoning efforts are not supported", o gpt-6-astra lista low…max, o
+ * gpt-6-luna lista none, low…max; o @ai-sdk/openai declara as mesmas listas em
+ * `supportedReasoningEfforts`). Mandar o knob como está seria 400 em toda resposta.
+ *
+ * `none`/`minimal` é pedido de velocidade, então vira `none` onde ele existe e `low`
+ * onde não existe. `minimal` NÃO vira `low` no Luna: medido acima, lá `low` é mais
+ * lento até que o padrão, e `none` é o único que entrega o que o operador pediu.
+ */
+function esforcoAceitoPeloModelo(
+  modelId: string,
+  esforco: EsforcoDeRaciocinioOpenAI,
+): EsforcoDeRaciocinioOpenAI {
+  if (esforco !== 'none' && esforco !== 'minimal') return esforco;
+  const id = modelId.toLowerCase();
+  const major = /^gpt-(\d+)/.exec(id)?.[1];
+  if (major === undefined || Number(major) < 6) return esforco;
+  const aceitaNone = id === 'gpt-6-luna' || id === 'gpt-6-sol';
+  return aceitaNone ? 'none' : 'low';
+}
+
+/**
+ * Injeta `reasoning.effort` no corpo, preservando o resto de `reasoning` e da chamada.
+ *
+ * O knob é o padrão da INSTALAÇÃO, não uma ordem por cima de quem pediu: a
+ * chamada que já traz `reasoning.effort` (a opção `reasoning` de `runModelCall`,
+ * que o SDK só escreve quando alguém pede) fica com o seu. Sem isso, um
+ * `OPENAI_REASONING_EFFORT=high` faria as classificações, que pedem `none`,
+ * voltarem a pensar antes de devolver uma palavra.
+ */
 function comEsforcoDeRaciocinio(inner: typeof fetch, esforco: EsforcoDeRaciocinioOpenAI): typeof fetch {
   return (input, init) => {
     const corpo = init?.body;
@@ -191,6 +222,7 @@ function comEsforcoDeRaciocinio(inner: typeof fetch, esforco: EsforcoDeRaciocini
         const json = JSON.parse(corpo) as Record<string, unknown>;
         const bruto = json['reasoning'];
         const reasoning = bruto !== null && typeof bruto === 'object' ? (bruto as Record<string, unknown>) : {};
+        if (typeof reasoning['effort'] === 'string') return inner(input, init);
         return inner(input, { ...init, body: JSON.stringify({ ...json, reasoning: { ...reasoning, effort: esforco } }) });
       } catch {
         // Corpo não-JSON: repassa intacto — um ajuste de tuning nunca derruba a chamada.

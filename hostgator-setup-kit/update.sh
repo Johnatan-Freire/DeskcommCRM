@@ -178,7 +178,11 @@ fi
 # ── 2. Backup de segurança ANTES de tocar no banco ───────────────────────────
 if [ -z "$SKIP_BACKUP" ]; then
   step "Backup de segurança (antes de mexer no banco)"
-  if bash "$KIT_DIR/backup.sh"; then
+  # BACKUP_ESPERA_LOCK: dois caminhos chamam o backup.sh (este e o cron diário),
+  # e no mesmo segundo eles disputam a mesma pasta (#4222). Aqui não vale "o
+  # outro está fazendo": este backup é a rede de segurança DESTA atualização, e
+  # seguir sem ele seria pior que esperar o outro terminar.
+  if BACKUP_ESPERA_LOCK=300 bash "$KIT_DIR/backup.sh"; then
     c_grn "✓ backup feito — se algo der errado, dá pra restaurar (restore.sh)."
   else
     if [ -n "${DESKCOMM_AGENT_REPORT:-}" ] || [ ! -t 0 ]; then

@@ -21,7 +21,8 @@
  *   3. se o terceiro NÃO documenta nada, a lacuna entra com motivo escrito.
  *      Número não medido não vira teto: vira lacuna declarada.
  */
-import { readdirSync, readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -146,10 +147,10 @@ function varrer(dir: string, achados: string[] = []): string[] {
   return achados;
 }
 
-function caminhosCom(padrao: RegExp): string[] {
-  return DIRS_DE_CODIGO.flatMap((d) => varrer(join(RAIZ, d)))
+function caminhosCom(padrao: RegExp, raiz = RAIZ): string[] {
+  return DIRS_DE_CODIGO.flatMap((d) => varrer(join(raiz, d)))
     .filter((c) => padrao.test(readFileSync(c, "utf8")))
-    .map((c) => c.slice(RAIZ.length + 1).replaceAll("\\", "/"));
+    .map((c) => c.slice(raiz.length + 1).replaceAll("\\", "/"));
 }
 
 /**
@@ -170,6 +171,8 @@ const SITES: { arquivo: string; fronteira: string; papel?: "gerador" | "validado
   // package.ts. Nada de texto digitado pelo operador entra na chave.
   { arquivo: "lib/ai/skills/package-files.ts", fronteira: "storage.chave-de-objeto" },
   { arquivo: "app/api/v1/products/[id]/fotos/route.ts", fronteira: "storage.chave-de-objeto" },
+  // Materiais do agente (8006): `<org>/<uuid>.<mp4|jpg|png|pdf>`, por `caminhoDoMaterial`.
+  { arquivo: "app/api/v1/ai/materiais/route.ts", fronteira: "storage.chave-de-objeto" },
   { arquivo: "app/api/v1/cron/contact-avatars/route.ts", fronteira: "storage.chave-de-objeto" },
   { arquivo: "app/api/v1/channels/partner/templates/media/route.ts", fronteira: "storage.chave-de-objeto" },
   { arquivo: "app/api/v1/settings/sons/route.ts", fronteira: "storage.chave-de-objeto" },
@@ -177,11 +180,18 @@ const SITES: { arquivo: string; fronteira: string; papel?: "gerador" | "validado
   { arquivo: "app/api/v1/conversations/[id]/media/route.ts", fronteira: "storage.chave-de-objeto" },
   { arquivo: "app/api/v1/ai/knowledge/sources/upload/route.ts", fronteira: "storage.chave-de-objeto" },
   { arquivo: "app/api/v1/ai/knowledge/sources/route.ts", fronteira: "storage.chave-de-objeto" },
+  // A foto do produto por URL na planilha (#3587, fatia 1): a chave é
+  // `<org>/<produto>/<uuid>.<ext>` — os mesmos pedaços que a tela grava. O uuid
+  // nasce aqui (`randomUUID`), a extensão vem do tipo farejado nos BYTES (não
+  // do nome nem da URL) e o `org`/`produto` são uuids já resolvidos. Nenhum
+  // texto da planilha entra na chave — a URL do cliente só escolhe o conteúdo.
+  { arquivo: "lib/catalogo/fotos-por-url.ts", fronteira: "storage.chave-de-objeto" },
   // Chave de idempotência: os geradores (manda UUID) e os validadores (exige UUID).
   { arquivo: "app/onboarding/connect-whatsapp/_client.tsx", fronteira: "api.idempotency-key", papel: "gerador" },
   { arquivo: "components/extensions/ExtensionsManager.tsx", fronteira: "api.idempotency-key", papel: "gerador" },
   { arquivo: "hooks/ai/useSkills.ts", fronteira: "api.idempotency-key", papel: "gerador" },
   { arquivo: "hooks/contacts/useImportContacts.ts", fronteira: "api.idempotency-key", papel: "gerador" },
+  { arquivo: "hooks/contacts/useSyncPhoneContacts.ts", fronteira: "api.idempotency-key", papel: "gerador" },
   { arquivo: "lib/api/client.ts", fronteira: "api.idempotency-key", papel: "gerador" },
   { arquivo: "lib/api/idempotency.ts", fronteira: "api.idempotency-key", papel: "validador" },
   { arquivo: "lib/extensions/http.ts", fronteira: "api.idempotency-key", papel: "validador" },
@@ -301,6 +311,25 @@ describe("nenhum identificador sem destino declarado", () => {
 });
 
 describe("a varredura é de classe: site novo de fronteira reprova", () => {
+  it.each(["app/api/novo/route.ts", "scripts/operacao.ts", "scripts/provas/nova.ts"])(
+    "encontra upload novo em %s; bancada em tests fica fora do código de produção",
+    (arquivo) => {
+      const raiz = mkdtempSync(join(tmpdir(), "fronteiras-de-producao-"));
+      try {
+        for (const dir of [...DIRS_DE_CODIGO, "tests/provas"]) mkdirSync(join(raiz, dir), { recursive: true });
+        mkdirSync(join(raiz, arquivo, ".."), { recursive: true });
+        writeFileSync(join(raiz, arquivo), "armazenamento.upload('chave', bytes);\n");
+        writeFileSync(join(raiz, "tests/provas/bancada.ts"), "armazenamento.upload('fixture', bytes);\n");
+        // Nem retirar scripts da varredura, nem ignorar scripts/provas passa.
+        // O site novo permanece fora do catálogo e seria recusado pelo gate.
+        expect(caminhosCom(/\.upload\(/, raiz)).toEqual([arquivo]);
+        expect(SITES.some((s) => s.arquivo === arquivo)).toBe(false);
+      } finally {
+        rmSync(raiz, { recursive: true, force: true });
+      }
+    },
+  );
+
   it("todo `.upload(` do código de produção está registrado, e na fronteira certa", () => {
     const achados = caminhosCom(/\.upload\(/);
     const registrados = SITES.filter((s) => s.fronteira === "storage.chave-de-objeto").map((s) => s.arquivo);
