@@ -64,6 +64,8 @@ const PODAS = [
   "fn_expurgar_conversa_do_caso_vencida",
   "fn_expurgar_passagens_vencidas",
   "fn_expurgar_avisos_de_caso_vencidos",
+  // 8007 — o traço do turno do agente, drenado pelo mesmo laço.
+  "fn_expurgar_traco_do_turno_vencido",
 ];
 
 const ALVO = "fn_expurgar_nonces_de_oauth";

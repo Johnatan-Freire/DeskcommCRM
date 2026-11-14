@@ -70,6 +70,8 @@ import {
   RETENCAO_PASSAGEM_DIAS_PISO,
   RETENCAO_PROSPECCAO_DIAS_PADRAO,
   RETENCAO_PROSPECCAO_DIAS_PISO,
+  RETENCAO_TRACO_DO_TURNO_DIAS_PADRAO,
+  RETENCAO_TRACO_DO_TURNO_DIAS_PISO,
   interpretarRetencao,
 } from "@/lib/retencao/politica";
 import {
@@ -132,6 +134,10 @@ export interface ResultadoDaRetencao {
   prospeccao_apagada: number;
   lotes_prospeccao: number;
   prospeccao_tem_resto: boolean;
+  /** O traço do turno do agente vencido (migration 8007). */
+  traco_do_turno_apagado: number;
+  lotes_traco_do_turno: number;
+  traco_do_turno_tem_resto: boolean;
   retencao_fila_dias: number;
   retencao_auditoria_dias: number;
   retencao_espelho_dias: number;
@@ -139,6 +145,7 @@ export interface ResultadoDaRetencao {
   retencao_passagem_dias: number;
   retencao_aviso_de_caso_dias: number;
   retencao_prospeccao_dias: number;
+  retencao_traco_do_turno_dias: number;
   /** Avisos de configuração — nunca ausentes em silêncio quando existem. */
   avisos: string[];
 }
@@ -154,7 +161,8 @@ export interface PodaDb {
       | "fn_expurgar_conversa_do_caso_vencida"
       | "fn_expurgar_passagens_vencidas"
       | "fn_expurgar_avisos_de_caso_vencidos"
-      | "fn_expurgar_prospeccao_vencida",
+      | "fn_expurgar_prospeccao_vencida"
+      | "fn_expurgar_traco_do_turno_vencido",
     args: { p_retencao_dias: number; p_limite: number },
   ): Promise<{ data: number | null; error: { message: string } | null }>;
 }
@@ -184,7 +192,8 @@ async function drenar(
     | "fn_expurgar_conversa_do_caso_vencida"
     | "fn_expurgar_passagens_vencidas"
     | "fn_expurgar_avisos_de_caso_vencidos"
-    | "fn_expurgar_prospeccao_vencida",
+    | "fn_expurgar_prospeccao_vencida"
+    | "fn_expurgar_traco_do_turno_vencido",
   dias: number,
 ): Promise<{ apagadas: number; lotes: number; temResto: boolean }> {
   let apagadas = 0;
@@ -242,6 +251,7 @@ export async function podarHistorico(
     PASSAGEM_RETENTION_DAYS?: string;
     CASE_ALERT_RETENTION_DAYS?: string;
     PROSPECCAO_RETENTION_DAYS?: string;
+    TURN_TRACE_RETENTION_DAYS?: string;
   },
 ): Promise<ResultadoDaRetencao> {
   const fila = interpretarRetencao(ambiente.JOB_QUEUE_RETENTION_DAYS, {
@@ -285,6 +295,12 @@ export async function podarHistorico(
     piso: RETENCAO_PROSPECCAO_DIAS_PISO,
   });
 
+  const tracoDoTurno = interpretarRetencao(ambiente.TURN_TRACE_RETENTION_DAYS, {
+    chave: "TURN_TRACE_RETENTION_DAYS",
+    padrao: RETENCAO_TRACO_DO_TURNO_DIAS_PADRAO,
+    piso: RETENCAO_TRACO_DO_TURNO_DIAS_PISO,
+  });
+
   const falhas: string[] = [];
   const jobs = await executarDreno(falhas, () => drenar(db, "fn_podar_fila_de_jobs", fila.dias));
   const linhas = await executarDreno(falhas, () => drenar(db, "fn_expurgar_auditoria_vencida", auditoria.dias));
@@ -318,6 +334,9 @@ export async function podarHistorico(
   // reimportação. É a primeira poda da casa cujo dado é de uma pessoa que
   // NUNCA falou com a empresa, então as duas guardas são a regra, não enfeite.
   const prospeccaoDrenada = await executarDreno(falhas, () => drenar(db, "fn_expurgar_prospeccao_vencida", prospeccao.dias));
+  // Nona poda: o traço do turno do agente (migration 8007). Padrão 90 / piso
+  // 30, decisão do dono. O piso mora no CORPO da função, como nas irmãs.
+  const tracos = await executarDreno(falhas, () => drenar(db, "fn_expurgar_traco_do_turno_vencido", tracoDoTurno.dias));
 
   return {
     falhas,
@@ -329,6 +348,7 @@ export async function podarHistorico(
     passagens_apagadas: passagens.apagadas,
     avisos_de_caso_apagados: avisosDeCaso.apagadas,
     prospeccao_apagada: prospeccaoDrenada.apagadas,
+    traco_do_turno_apagado: tracos.apagadas,
     lotes_fila: jobs.lotes,
     lotes_auditoria: linhas.lotes,
     lotes_espelho: eventos.lotes,
@@ -336,6 +356,7 @@ export async function podarHistorico(
     lotes_passagens: passagens.lotes,
     lotes_avisos_de_caso: avisosDeCaso.lotes,
     lotes_prospeccao: prospeccaoDrenada.lotes,
+    lotes_traco_do_turno: tracos.lotes,
     fila_tem_resto: jobs.temResto,
     auditoria_tem_resto: linhas.temResto,
     espelho_tem_resto: eventos.temResto,
@@ -343,6 +364,7 @@ export async function podarHistorico(
     passagens_tem_resto: passagens.temResto,
     avisos_de_caso_tem_resto: avisosDeCaso.temResto,
     prospeccao_tem_resto: prospeccaoDrenada.temResto,
+    traco_do_turno_tem_resto: tracos.temResto,
     retencao_fila_dias: fila.dias,
     retencao_auditoria_dias: auditoria.dias,
     retencao_espelho_dias: espelho.dias,
@@ -350,6 +372,7 @@ export async function podarHistorico(
     retencao_passagem_dias: passagem.dias,
     retencao_aviso_de_caso_dias: avisoDeCaso.dias,
     retencao_prospeccao_dias: prospeccao.dias,
+    retencao_traco_do_turno_dias: tracoDoTurno.dias,
     avisos: [
       fila.aviso,
       auditoria.aviso,
@@ -358,6 +381,7 @@ export async function podarHistorico(
       passagem.aviso,
       avisoDeCaso.aviso,
       prospeccao.aviso,
+      tracoDoTurno.aviso,
     ].filter((a): a is string => a !== null),
   };
 }
@@ -395,7 +419,9 @@ export function houveEfeito(resultado: ResultadoDaRetencao): boolean {
     // candidato de prospecção vencido apagaria linhas e não deixaria registro.
     // Esta é a poda de dado de PESSOA que nunca falou com a empresa (0408) —
     // silenciar aqui seria apagar dado sensível sem trilha.
-    resultado.prospeccao_apagada > 0
+    resultado.prospeccao_apagada > 0 ||
+    // A nona (8007), pela mesma razão: poda que apagou deixa rastro.
+    resultado.traco_do_turno_apagado > 0
   );
 }
 
@@ -432,6 +458,7 @@ async function handle(req: NextRequest): Promise<Response> {
       PASSAGEM_RETENTION_DAYS: env.PASSAGEM_RETENTION_DAYS,
       CASE_ALERT_RETENTION_DAYS: env.CASE_ALERT_RETENTION_DAYS,
       PROSPECCAO_RETENTION_DAYS: env.PROSPECCAO_RETENTION_DAYS,
+      TURN_TRACE_RETENTION_DAYS: env.TURN_TRACE_RETENTION_DAYS,
     });
     // ── A cascata de anonimização que ficou pela metade ──────────────────
     //

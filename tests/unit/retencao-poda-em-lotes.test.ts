@@ -22,6 +22,8 @@ import {
   RETENCAO_PROSPECCAO_DIAS_PADRAO,
   RETENCAO_PROSPECCAO_DIAS_PISO,
   RETENCAO_TETO_DIAS,
+  RETENCAO_TRACO_DO_TURNO_DIAS_PADRAO,
+  RETENCAO_TRACO_DO_TURNO_DIAS_PISO,
   interpretarRetencao,
 } from "@/lib/retencao/politica";
 
@@ -219,12 +221,30 @@ describe("podarHistorico — o laço de lotes", () => {
     // do piso é ELEVADO, como todas as irmãs — e o aviso acompanha.
     const { db, chamadas } = bancoQueDevolve({ fila: [0], auditoria: [0] });
     const r = await podarHistorico(db, { PROSPECCAO_RETENTION_DAYS: "5" });
-    const ultima = chamadas[chamadas.length - 1];
+    const ultima = chamadas.find((c) => c.nome === "fn_expurgar_prospeccao_vencida");
     expect(ultima?.nome).toBe("fn_expurgar_prospeccao_vencida");
     expect(ultima?.dias).toBe(RETENCAO_PROSPECCAO_DIAS_PISO);
     expect(r.retencao_prospeccao_dias).toBe(RETENCAO_PROSPECCAO_DIAS_PISO);
     expect(r.avisos).toHaveLength(1);
     expect(r.avisos[0]).toContain("PROSPECCAO_RETENTION_DAYS");
+  });
+
+  it("drena o traço do turno com o padrão 90 e eleva o knob de 5 ao piso 30 (8007)", async () => {
+    const { db, chamadas } = bancoQueDevolve({ fila: [0], auditoria: [0] });
+    const padrao = await podarHistorico(db, {});
+    expect(chamadas[chamadas.length - 1]).toMatchObject({
+      nome: "fn_expurgar_traco_do_turno_vencido",
+      dias: RETENCAO_TRACO_DO_TURNO_DIAS_PADRAO,
+    });
+    expect(padrao.retencao_traco_do_turno_dias).toBe(90);
+
+    const r = await podarHistorico(db, { TURN_TRACE_RETENTION_DAYS: "5" });
+    expect(chamadas[chamadas.length - 1]).toMatchObject({
+      nome: "fn_expurgar_traco_do_turno_vencido",
+      dias: RETENCAO_TRACO_DO_TURNO_DIAS_PISO,
+    });
+    expect(r.avisos).toHaveLength(1);
+    expect(r.avisos[0]).toContain("TURN_TRACE_RETENTION_DAYS");
   });
 
   it("erro do banco não é engolido: a poda que falhou sai NOMEADA em `falhas`", async () => {
@@ -317,6 +337,11 @@ describe("houveEfeito — as duas direções", () => {
     lotes_prospeccao: 0,
     prospeccao_tem_resto: false,
     retencao_prospeccao_dias: RETENCAO_PROSPECCAO_DIAS_PADRAO,
+    // Nona poda (migration 8007): o traço do turno do agente.
+    traco_do_turno_apagado: 0,
+    lotes_traco_do_turno: 0,
+    traco_do_turno_tem_resto: false,
+    retencao_traco_do_turno_dias: RETENCAO_TRACO_DO_TURNO_DIAS_PADRAO,
     avisos: [] as string[],
   };
 
@@ -338,6 +363,10 @@ describe("houveEfeito — as duas direções", () => {
     // que apaga dado de uma pessoa que NUNCA falou com a empresa: silenciar
     // aqui seria apagar dado sensível sem trilha.
     expect(houveEfeito({ ...base, prospeccao_apagada: 1 })).toBe(true);
+  });
+
+  it("...e apagou traço do turno vencido → TAMBÉM audita (8007)", () => {
+    expect(houveEfeito({ ...base, traco_do_turno_apagado: 1 })).toBe(true);
   });
 
   it("apagou job → audita; apagou auditoria → audita", () => {
