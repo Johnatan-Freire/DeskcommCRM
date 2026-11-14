@@ -108,6 +108,7 @@ export {
   MusicNote,
   Note,
   FileText,
+  FilmStrip,
   Lock,
   LockOpen,
   Receipt,

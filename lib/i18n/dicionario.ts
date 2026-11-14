@@ -37,6 +37,36 @@ import type { Idioma } from "./idiomas";
 type Traducoes = Record<string, Partial<Record<Exclude<Idioma, "pt-BR">, string>>>;
 
 export const DICIONARIO: Traducoes = {
+  // ─── MATERIAIS DO AGENTE (8006): vídeo, imagem e PDF enviados pela IA ───
+  "Abrir o PDF": { es: "Abrir el PDF" },
+  "Algum agente escolhido não é desta organização.": { es: "Algún agente elegido no es de esta organización." },
+  "Arquivo": { es: "Archivo" },
+  "Ativo: os agentes podem enviar": { es: "Activo: los agentes pueden enviarlo" },
+  "Descreva a situação, como faria com uma pessoa da equipe. Exemplo: quando o lead demonstrar interesse em Informática Básica ou pedir para saber como é o curso.": { es: "Describe la situación, como lo harías con una persona del equipo. Ejemplo: cuando el lead muestre interés en Informática Básica o pida saber cómo es el curso." },
+  "Erro ao carregar os materiais.": { es: "Error al cargar los materiales." },
+  "Erro ao guardar o arquivo.": { es: "Error al guardar el archivo." },
+  "Erro ao remover o material.": { es: "Error al eliminar el material." },
+  "Erro ao salvar o material.": { es: "Error al guardar el material." },
+  "Escolha o arquivo do material.": { es: "Elige el archivo del material." },
+  "Formato não aceito. Envie um vídeo MP4, uma imagem JPEG ou PNG, ou um PDF.": { es: "Formato no aceptado. Envía un video MP4, una imagen JPEG o PNG, o un PDF." },
+  "Materiais do agente": { es: "Materiales del agente" },
+  "Material ativado.": { es: "Material activado." },
+  "Material desativado.": { es: "Material desactivado." },
+  "Material inválido.": { es: "Material no válido." },
+  "Material removido.": { es: "Material eliminado." },
+  "Material salvo.": { es: "Material guardado." },
+  "Nenhum material ainda. Sem material, os agentes respondem só com texto.": { es: "Todavía no hay materiales. Sin material, los agentes responden solo con texto." },
+  "Novo material": { es: "Nuevo material" },
+  "Não foi possível remover o material.": { es: "No fue posible eliminar el material." },
+  "Não foi possível salvar o material.": { es: "No fue posible guardar el material." },
+  "O arquivo passa de 16 MB, o limite do WhatsApp para vídeo.": { es: "El archivo supera 16 MB, el límite de WhatsApp para video." },
+  "PDF": { es: "PDF" },
+  "Quando enviar": { es: "Cuándo enviar" },
+  "Remover este material? O arquivo sai do CRM; o que já foi enviado nas conversas continua lá.": { es: "¿Eliminar este material? El archivo sale del CRM; lo que ya se envió en las conversaciones sigue allí." },
+  "Todos os agentes": { es: "Todos los agentes" },
+  "Vídeo MP4, imagem JPEG ou PNG, ou PDF, até 16 MB.": { es: "Video MP4, imagen JPEG o PNG, o PDF, hasta 16 MB." },
+  "Vídeos, imagens e PDFs que os agentes de IA enviam na conversa. Para cada um, escreva em que situação ele deve ser enviado: o agente lê essa instrução e decide pelo contexto, e não manda o mesmo material duas vezes na mesma conversa.": { es: "Videos, imágenes y PDF que los agentes de IA envían en la conversación. Para cada uno, escribe en qué situación debe enviarse: el agente lee esa instrucción y decide por el contexto, y no envía el mismo material dos veces en la misma conversación." },
+  "Vídeos, imagens e PDFs que os agentes enviam na conversa, cada um com a situação em que deve ir.": { es: "Videos, imágenes y PDF que los agentes envían en la conversación, cada uno con la situación en que debe enviarse." },
   // O item da trava de número novo na Central (lib/agent-engine/health/circuit.ts, doc 109).
   "Número novo aguardando liberação (go-live)": { es: "Número nuevo en espera de liberación (go-live)" },
   "Os retornos automáticos deste número estão parados até você liberar. Eles esperam na fila, nada é perdido, e voltam espaçados ao longo das horas seguintes. Responder quem te escreveu continua funcionando normalmente. Marque este item como resolvido quando o número estiver pronto para disparar.": {

@@ -360,6 +360,9 @@ export const AUDIT_ACTIONS = [
   // Avisos temporários dos agentes de IA (0658).
   "ai.aviso_temporario_criado",
   "ai.aviso_temporario_alterado",
+  "ai.material_do_agente_criado",
+  "ai.material_do_agente_alterado",
+  "ai.material_do_agente_removido",
   // Pré-matrícula (0659): a equipe dá andamento ao pedido registrado pela IA.
   "pre_matricula.alterada",
   // Feriados do atendimento humano (0660).

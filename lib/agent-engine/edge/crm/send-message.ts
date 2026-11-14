@@ -1,3 +1,4 @@
+import { tipoDeMensagemDoMime } from '@/lib/ai/materiais-do-agente';
 import { assertAgentOperationPg, type AgentOperationContext } from '@/lib/ai/agents/operation';
 import { assertApprovedReplyPg, type ApprovedReplyContext } from '@/lib/ai/replies/delivery';
 import { assertMeetingDeliveryPg, type MeetingDeliveryContext } from '@/lib/agenda/meet-delivery';
@@ -62,8 +63,10 @@ export interface SendMessageInput {
    * colidirem no ledger e o segundo virar `already_sent` sem ter saído.
    */
   template?: { name: string; language: string; values: Record<string, string> };
-  /** Presente = imagem da pasta da conversa em `whatsapp-media`; `body` é a legenda. */
+  /** Presente = mídia da pasta da conversa em `whatsapp-media`; `body` é a legenda. */
   media?: { storagePath: string; mime: string };
+  /** Material do agente que este envio leva (8006) — vai para `metadata.material_id`. */
+  materialId?: string;
 }
 
 /**
@@ -86,14 +89,19 @@ export function corpoDoEnvio(
         }
       : input.media
         ? {
-            type: 'image' as const,
+            // O tipo sai do MIME: a foto do catálogo é imagem, e um material do
+            // agente pode ser vídeo ou PDF (8006). Vídeo marcado como imagem não sai.
+            type: tipoDeMensagemDoMime(input.media.mime),
             media_storage_path: input.media.storagePath,
             media_mime: input.media.mime,
           }
         : { type: 'text' as const }),
     // Foto sem legenda vai sem `body`: o schema do envio pede corpo não vazio.
     ...(input.body !== '' || !input.media ? { body: input.body } : {}),
-    metadata: { idempotency_key: idempotencyKey },
+    metadata: {
+      idempotency_key: idempotencyKey,
+      ...(input.materialId ? { material_id: input.materialId } : {}),
+    },
   };
 }
 

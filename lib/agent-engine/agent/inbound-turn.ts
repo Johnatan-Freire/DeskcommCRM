@@ -163,6 +163,8 @@ import {
 } from './entrega-de-capacidade';
 import { composeSystemPrompt, loadOrgMemory, renderOrgMemory } from './org-memory';
 import { AVISOS_INDISPONIVEIS, carregarAvisosVigentes, renderAvisosVigentes } from '@/lib/ai/avisos-temporarios';
+import { carregarMateriaisDoAgente, MATERIAIS_INDISPONIVEIS, renderMateriaisDoAgente } from '@/lib/ai/materiais-do-agente';
+import { copiarMaterialNoStorage, prepararMaterialDoAgente } from './material-do-agente';
 import { mensagemAposRegistro, registrarPreMatricula, validarPreMatricula } from '@/lib/pre-matricula/registrar';
 import { decidirAntiLoop } from './anti-loop';
 import {
@@ -290,6 +292,13 @@ export const AGENT_TOOL_DEFS = {
         .describe(
           'código de um produto do catálogo (o `codigo` de crm_search_products) que tem `fotos`: ' +
             'as fotos dele vão junto, e o texto vira a legenda da primeira',
+        ),
+      material_id: z
+        .string()
+        .optional()
+        .describe(
+          'id de um material da lista MATERIAIS PARA ENVIAR (vídeo, imagem ou PDF cadastrado pela equipe): ' +
+            'o arquivo vai junto e o texto vira a legenda. Não use junto com produto_codigo.',
         ),
     }),
   },
@@ -2640,6 +2649,22 @@ async function executarTurnoDoAgente(
     });
     blocosResidentes.push(AVISOS_INDISPONIVEIS);
   }
+  // Materiais do agente (8006): vídeos, imagens e PDFs que a equipe cadastrou com
+  // a situação em que cada um vai. Também DEPOIS dos blocos fixos (a lista muda
+  // sem invalidar o prefixo). Sem material, bloco nenhum; leitura que falha fecha.
+  try {
+    const materiais = await carregarMateriaisDoAgente(pool, {
+      organizationId: tenantId,
+      agentId: agentConfig?.agentId ?? null,
+    });
+    const bloco = renderMateriaisDoAgente(materiais);
+    if (bloco !== '') blocosResidentes.push(bloco);
+  } catch (err) {
+    runLog.warn('materiais do agente: leitura falhou — turno segue sem materiais', {
+      error: err instanceof Error ? err.message : String(err),
+    });
+    blocosResidentes.push(MATERIAIS_INDISPONIVEIS);
+  }
   if (preview)
     blocosResidentes.push(
       'MODO PRÉVIA: proponha a resposta com send_message. Operações são propostas separadas; nunca diga que executou uma proposta. Nenhum envio real acontece.',
@@ -3729,7 +3754,7 @@ async function executarTurnoDoAgente(
     }),
     send_message: tool({
       ...AGENT_TOOL_DEFS.send_message,
-      execute: async ({ body: corpoDoModelo, produto_codigo }) => {
+      execute: async ({ body: corpoDoModelo, produto_codigo, material_id }) => {
         tentativasDeEnvio += 1;
         // O texto sai no formato do WhatsApp — sem `\n` literal nem
         // `**negrito**` de Markdown na tela do cliente. Antes de qualquer gate,
@@ -3855,6 +3880,38 @@ async function executarTurnoDoAgente(
           }
           fotosDoProduto = preparadas.fotos;
           fotosQueFaltaram = preparadas.tinha - preparadas.fotos.length;
+        }
+        // Material do agente (8006): conferido e copiado para a conversa ANTES da
+        // cadeia, como a foto. Material inexistente ou já enviado nesta conversa
+        // volta ao modelo sem enviar nada; arquivo que não copiou sai do envio e o
+        // texto segue. Ver `agent/material-do-agente.ts`.
+        let materialEnviado: { id: string; titulo: string; midia: FotoParaEnvio } | null = null;
+        let materialQueFaltou: string | null = null;
+        if (material_id !== undefined && material_id.trim() !== '' && !preview) {
+          if (produto_codigo !== undefined && produto_codigo.trim() !== '') {
+            return {
+              ok: false,
+              error: {
+                code: 'material_com_produto',
+                message: 'envie o material OU as fotos do produto, não os dois na mesma mensagem.',
+              },
+            };
+          }
+          const preparado = await prepararMaterialDoAgente(pool, copiarMaterialNoStorage(runLog), {
+            tenantId,
+            conversationId: input.conversationId,
+            materialId: material_id,
+            agentId: agentConfig?.agentId ?? null,
+          });
+          if (!preparado.ok) {
+            return { ok: false, error: { code: preparado.code, message: preparado.message } };
+          }
+          if (preparado.midia !== null) {
+            materialEnviado = { id: material_id.trim(), titulo: preparado.titulo, midia: preparado.midia };
+            fotosDoProduto = [preparado.midia];
+          } else {
+            materialQueFaltou = preparado.titulo;
+          }
         }
         // F4-04: sinaliza (independente do gate F4-01/F4-08) se ESTA candidata é uma
         // promessa fora de tabela — usado só para correlacionar com o jailbreak no fim do
@@ -4027,6 +4084,9 @@ async function executarTurnoDoAgente(
                   conversationId: input.conversationId,
                   body: corpo,
                   ...(media ? { media } : {}),
+                  ...(media && materialEnviado !== null && media === materialEnviado.midia
+                    ? { materialId: materialEnviado.id }
+                    : {}),
                 });
               };
               // Cada foto é uma mensagem física: só vão as que cabem no que resta do teto
@@ -4203,6 +4263,12 @@ async function executarTurnoDoAgente(
                 ...(fotosQueFaltaram > 0
                   ? {
                       aviso: `${fotosQueFaltaram} foto(s) do produto não puderam ser enviadas; o texto foi. Não diga ao cliente que mandou essas fotos.`,
+                    }
+                  : {}),
+                ...(materialEnviado !== null ? { material_enviado: materialEnviado.titulo } : {}),
+                ...(materialQueFaltou !== null
+                  ? {
+                      aviso: `o material "${materialQueFaltou}" não pôde ser anexado; só o texto foi. Não diga ao cliente que mandou o material.`,
                     }
                   : {}),
               };
@@ -4967,6 +5033,15 @@ async function executarTurnoDoAgente(
                 tenantId,
                 conversationId: PASTA_DE_TESTE_DE_MIDIA,
                 codigo,
+              }),
+            // 8006 — a mesma conferência do envio real, sem cópia: a prévia não
+            // tem conversa onde anexar.
+            (materialId: string) =>
+              prepararMaterialDoAgente(pool, null, {
+                tenantId,
+                conversationId: PASTA_DE_TESTE_DE_MIDIA,
+                materialId,
+                agentId: agentConfig?.agentId ?? null,
               }),
           )
         : rawTools;
